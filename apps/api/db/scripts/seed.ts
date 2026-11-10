@@ -3,6 +3,9 @@ import { fileURLToPath } from 'node:url';
 import { hash } from '@node-rs/argon2';
 import { connect, need } from './common.ts';
 import { ROLE_SEED } from '../../src/roles.ts';
+import { applyClubPreset, ensureLeadSources } from '../../src/presets.ts';
+import { createLead } from '../../src/modules/crm.ts';
+import type { Db } from '../../src/db.ts';
 
 const STAFF: [string, string, string, 'c1' | 'c2' | '*'][] = [
   ['a.bespalyy', 'Андрей Беспалый', 'owner', '*'],
@@ -49,6 +52,12 @@ export async function seed(url = need('OWNER_DATABASE_URL'), quiet = false) {
   }
   const existing = await c.query('select id from tenants limit 1');
   if (existing.rowCount) {
+    // Обновление уже заполненной базы: готовые воронки и источники для клубов, у которых их ещё нет
+    const tid = existing.rows[0].id;
+    await ensureLeadSources(c, tid);
+    for (const cl of (await c.query('select id, sales_model from clubs where not exists (select 1 from pipelines p where p.club_id = clubs.id)')).rows) {
+      await applyClubPreset(c, tid, cl.id, cl.sales_model);
+    }
     await c.query('commit');
     await c.end();
     if (!quiet) console.log('Тестовые данные уже есть, роли обновлены. Для полного пересоздания: npm run db:reset');
@@ -70,7 +79,20 @@ export async function seed(url = need('OWNER_DATABASE_URL'), quiet = false) {
     )).rows[0].id;
     await c.query('insert into user_assignments(tenant_id, user_id, role_code, club_id) values ($1,$2,$3,$4)', [t, u, role, club === '*' ? null : clubs[club]]);
   }
+  await ensureLeadSources(c, t);
+  await applyClubPreset(c, t, clubs.c1, 'term');
+  await applyClubPreset(c, t, clubs.c2, 'subscription');
+  const sources = ['site', 'yandex_direct', 'telegram', 'walk_in'];
+  let si = 0;
   for (const [name, segment, club, phone] of PERSONS) {
+    if (segment === 'лид' || segment === 'гость') {
+      const r = await createLead(c as unknown as Db, { tenantId: t, userId: null }, {
+        clubId: clubs[club], fullName: name, phone, sourceCode: sources[si++ % sources.length],
+        comment: segment === 'гость' ? 'Гостевой визит' : 'Заявка: интересуется стоимостью',
+      });
+      if (segment === 'гость') await c.query(`update persons set segment = 'гость' where id = $1`, [r.personId]);
+      continue;
+    }
     const p = (await c.query('insert into persons(tenant_id, home_club_id, full_name, segment) values ($1,$2,$3,$4) returning id', [t, clubs[club], name, segment])).rows[0].id;
     await c.query(`insert into person_contacts(tenant_id, person_id, type, value, normalized_value, is_primary) values ($1,$2,'phone',$3,$3,true)`, [t, p, phone]);
   }
@@ -81,6 +103,10 @@ export async function seed(url = need('OWNER_DATABASE_URL'), quiet = false) {
   for (const [role, kind, kop, pct] of limits) {
     await c.query('insert into approval_limits(tenant_id, role_code, kind, max_amount_kop, max_percent) values ($1,$2,$3,$4,$5)', [t, role, kind, kop, pct]);
   }
+  // Один лид с просроченным первым ответом, чтобы было видно контроль нормы
+  await c.query(`update leads set created_at = now() - interval '20 minutes', first_response_due_at = now() - interval '15 minutes'
+                 where id = (select id from leads order by created_at limit 1)`);
+  await c.query(`update tasks set due_at = now() - interval '15 minutes' where lead_id = (select id from leads order by created_at limit 1)`);
   await c.query('commit');
   await c.end();
   if (!quiet) {

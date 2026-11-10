@@ -41,7 +41,7 @@ export async function withCtx<T>(
   }
 }
 
-export async function audit(db: Db, ctx: Pick<Ctx, 'tenantId' | 'userId' | 'ip'>, action: string, objectType: string,
+export async function audit(db: Db, ctx: { tenantId: string; userId: string | null; ip?: string }, action: string, objectType: string,
   objectId: string | null, before: unknown, after: unknown) {
   await db.query(
     'insert into audit_log(tenant_id, actor_id, action, object_type, object_id, before, after, ip) values ($1,$2,$3,$4,$5,$6,$7,$8)',

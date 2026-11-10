@@ -4,12 +4,13 @@ import { requirePerm } from '../auth.ts';
 import { audit, withCtx } from '../db.ts';
 import { badRequest, notFound } from '../errors.ts';
 import { PERMISSIONS as P } from '../roles.ts';
+import { applyClubPreset } from '../presets.ts';
 
 const MODELS = ['term', 'subscription'];
 const TZ = ['Europe/Kaliningrad', 'Europe/Moscow', 'Europe/Samara', 'Asia/Yekaterinburg', 'Asia/Omsk', 'Asia/Novosibirsk',
   'Asia/Krasnoyarsk', 'Asia/Irkutsk', 'Asia/Yakutsk', 'Asia/Vladivostok', 'Asia/Magadan', 'Asia/Kamchatka'];
 
-const SELECT = `select c.id, c.name, c.address, c.timezone, c.sales_model as "salesModel", c.status,
+const SELECT = `select c.id, c.name, c.address, c.timezone, c.sales_model as "salesModel", c.status, c.first_response_minutes as "firstResponseMinutes",
   (select count(distinct a.user_id)::int from user_assignments a join users u on u.id = a.user_id
      where a.club_id = c.id and u.status = 'active') as "staffCount",
   (select count(*)::int from persons p where p.home_club_id = c.id) as "personsCount"
@@ -37,6 +38,7 @@ export function clubRoutes(app: FastifyInstance, pool: pg.Pool) {
         [ctx.tenantId, name, b.address?.trim() || null, tz, b.salesModel])).rows[0].id;
       await db.query('insert into club_sales_model_history(tenant_id, club_id, old_model, new_model, apply_from, changed_by) values ($1,$2,null,$3,$4,$5)',
         [ctx.tenantId, id, b.salesModel, 'now', ctx.userId]);
+      await applyClubPreset(db, ctx.tenantId, id, b.salesModel as 'term' | 'subscription');
       const row = (await db.query(`${SELECT} where c.id = $1`, [id])).rows[0];
       await audit(db, ctx, 'club.created', 'club', id, null, row);
       return row;
@@ -48,17 +50,19 @@ export function clubRoutes(app: FastifyInstance, pool: pg.Pool) {
   app.patch('/api/clubs/:id', async (req) => {
     const ctx = requirePerm(req, P.clubsManage);
     const { id } = req.params as { id: string };
-    const b = (req.body ?? {}) as { name?: string; address?: string; timezone?: string; salesModel?: string; applyFrom?: string };
+    const b = (req.body ?? {}) as { name?: string; address?: string; timezone?: string; salesModel?: string; applyFrom?: string; firstResponseMinutes?: number };
     return withCtx(pool, ctx, async (db) => {
       const before = (await db.query(`${SELECT} where c.id = $1`, [id])).rows[0];
       if (!before) throw notFound('Клуб не найден');
       if (b.salesModel !== undefined && !MODELS.includes(b.salesModel)) throw badRequest('Неизвестная модель продаж');
       if (b.timezone !== undefined && !TZ.includes(b.timezone)) throw badRequest('Неизвестный часовой пояс');
       if (b.name !== undefined && !b.name.trim()) throw badRequest('Название не может быть пустым');
+      const frm = b.firstResponseMinutes;
+      if (frm !== undefined && (!Number.isInteger(frm) || frm < 1 || frm > 1440)) throw badRequest('Норма первого ответа: от 1 до 1440 минут');
       await db.query(
         `update clubs set name = coalesce($2, name), address = coalesce($3, address), timezone = coalesce($4, timezone),
-           sales_model = coalesce($5::sales_model, sales_model), updated_at = now() where id = $1`,
-        [id, b.name?.trim() ?? null, b.address?.trim() ?? null, b.timezone ?? null, b.salesModel ?? null]);
+           sales_model = coalesce($5::sales_model, sales_model), first_response_minutes = coalesce($6, first_response_minutes), updated_at = now() where id = $1`,
+        [id, b.name?.trim() ?? null, b.address?.trim() ?? null, b.timezone ?? null, b.salesModel ?? null, frm ?? null]);
       if (b.salesModel && b.salesModel !== before.salesModel) {
         const applyFrom = b.applyFrom === 'now' ? 'now' : 'next_period';
         await db.query('insert into club_sales_model_history(tenant_id, club_id, old_model, new_model, apply_from, changed_by) values ($1,$2,$3,$4,$5,$6)',

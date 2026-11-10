@@ -7,6 +7,8 @@ import { authRoutes, COOKIE, loadCtx } from './auth.ts';
 import { HttpError } from './errors.ts';
 import { clubRoutes } from './modules/clubs.ts';
 import { personRoutes } from './modules/persons.ts';
+import { crmRoutes } from './modules/crm.ts';
+import { pipelineRoutes } from './modules/pipelines.ts';
 import { staffRoutes } from './modules/staff.ts';
 
 export async function buildApp(pool: pg.Pool, opts: { webDist?: string; secureCookie?: boolean; logger?: boolean } = {}) {
@@ -39,6 +41,8 @@ export async function buildApp(pool: pg.Pool, opts: { webDist?: string; secureCo
   clubRoutes(app, pool);
   staffRoutes(app, pool);
   personRoutes(app, pool);
+  crmRoutes(app, pool);
+  pipelineRoutes(app, pool);
 
   if (opts.webDist && existsSync(opts.webDist)) {
     await app.register(fstatic, { root: opts.webDist });

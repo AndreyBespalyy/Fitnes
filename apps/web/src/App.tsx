@@ -1,7 +1,7 @@
 import { useEffect, useState, type FormEvent } from 'react';
-import { api, ApiError, can, MODEL, MODEL_SHORT, type Club, type Me, type Person, type RoleDef, type Staff } from './api.ts';
-
-const errText = (e: unknown) => (e instanceof ApiError ? e.message : 'Нет связи с сервером');
+import { api, can, MODEL, MODEL_SHORT, type Club, type Me, type Person, type RoleDef, type Staff } from './api.ts';
+import { errText, toast as alertOk } from './ui.ts';
+import { BoardPage, LeadsPage, PersonCard, PipelinesAdmin, TasksPage } from './crm.tsx';
 
 export function App() {
   const [me, setMe] = useState<Me | null | undefined>(undefined);
@@ -65,11 +65,14 @@ function ChangePassword({ me, forced, onDone, onLogout }: { me: Me; forced?: boo
   );
 }
 
-type Tab = 'home' | 'clubs' | 'staff' | 'password';
+type Tab = 'leads' | 'board' | 'tasks' | 'home' | 'clubs' | 'pipelines' | 'staff' | 'password';
 
 function Shell({ me, onLogout }: { me: Me; onLogout: () => void }) {
   const isAdmin = can(me, 'clubs.manage') || can(me, 'staff.manage');
-  const [tab, setTab] = useState<Tab>(isAdmin ? 'clubs' : 'home');
+  const firstTab: Tab = can(me, 'crm.work') ? 'tasks' : can(me, 'leads.create') ? 'leads' : isAdmin ? 'clubs' : 'home';
+  const [tab, setTab] = useState<Tab>(firstTab);
+  const [personId, setPersonId] = useState<string | null>(null);
+  const [ver, setVer] = useState(0);
   const [clubs, setClubs] = useState<Club[]>([]);
   const [clubId, setClubId] = useState<string>('all');
   const reloadClubs = () => api<Club[]>('GET', '/api/clubs').then(setClubs).catch(() => setClubs([]));
@@ -78,8 +81,12 @@ function Shell({ me, onLogout }: { me: Me; onLogout: () => void }) {
   const logout = async () => { await api('POST', '/api/auth/logout').catch(() => {}); onLogout(); };
   const roleNames = me.roles.map((r) => r.name).join(', ');
   const tabs: [Tab, string, boolean][] = [
+    ['tasks', 'Задачи', can(me, 'crm.work')],
+    ['leads', 'Лиды', can(me, 'leads.create')],
+    ['board', 'Сделки', can(me, 'crm.work')],
     ['home', 'Клиенты', can(me, 'persons.view')],
     ['clubs', 'Клубы', can(me, 'clubs.manage')],
+    ['pipelines', 'Воронки', can(me, 'pipelines.manage')],
     ['staff', 'Сотрудники', can(me, 'staff.view')],
     ['password', 'Пароль', true],
   ];
@@ -99,39 +106,44 @@ function Shell({ me, onLogout }: { me: Me; onLogout: () => void }) {
         <div className="tabs" role="group" aria-label="Разделы">
           {tabs.filter((t) => t[2]).map(([k, t]) => <button key={k} aria-pressed={tab === k} onClick={() => setTab(k)}>{t}</button>)}
         </div>
-        {tab === 'home' && <Home me={me} clubs={clubs} clubId={clubId} />}
+        {tab === 'tasks' && <TasksPage key={ver} me={me} clubId={clubId} openPerson={setPersonId} />}
+        {tab === 'leads' && <LeadsPage key={ver} me={me} clubs={clubs} clubId={clubId} openPerson={setPersonId} />}
+        {tab === 'board' && <BoardPage key={ver} clubs={clubs} clubId={clubId} openPerson={setPersonId} />}
+        {tab === 'pipelines' && <PipelinesAdmin clubs={clubs} clubId={clubId} />}
+        {tab === 'home' && <Home key={ver} me={me} clubs={clubs} clubId={clubId} openPerson={setPersonId} />}
         {tab === 'clubs' && <Clubs clubs={clubs} reload={reloadClubs} />}
         {tab === 'staff' && <StaffPage me={me} clubs={clubs} />}
-        {tab === 'password' && <ChangePassword me={me} onDone={() => { alertOk('Пароль изменён'); setTab(isAdmin ? 'clubs' : 'home'); }} />}
+        {tab === 'password' && <ChangePassword me={me} onDone={() => { alertOk('Пароль изменён'); setTab(firstTab); }} />}
       </main>
+      {personId && <PersonCard me={me} id={personId} onClose={() => { setPersonId(null); setVer((v) => v + 1); }} />}
     </>
   );
 }
 
-function alertOk(text: string) {
-  const el = document.createElement('div');
-  el.textContent = text;
-  Object.assign(el.style, { position: 'fixed', left: '50%', bottom: '24px', transform: 'translateX(-50%)', background: 'var(--ink)', color: 'var(--bg)',
-    padding: '10px 16px', borderRadius: '10px', fontWeight: '600', zIndex: '20' });
-  document.body.appendChild(el);
-  setTimeout(() => el.remove(), 2600);
-}
 
-function Home({ me, clubs, clubId }: { me: Me; clubs: Club[]; clubId: string }) {
+function Home({ me, clubs, clubId, openPerson }: { me: Me; clubs: Club[]; clubId: string; openPerson: (id: string) => void }) {
   const [persons, setPersons] = useState<Person[]>([]);
+  const [q, setQ] = useState('');
   useEffect(() => {
-    api<Person[]>('GET', `/api/persons${clubId !== 'all' ? `?clubId=${clubId}` : ''}`).then(setPersons).catch(() => setPersons([]));
-  }, [clubId]);
+    const t = setTimeout(() => {
+      const qs = new URLSearchParams();
+      if (clubId !== 'all') qs.set('clubId', clubId);
+      if (q.trim()) qs.set('q', q.trim());
+      api<Person[]>('GET', `/api/persons?${qs}`).then(setPersons).catch(() => setPersons([]));
+    }, 250);
+    return () => clearTimeout(t);
+  }, [clubId, q]);
   const club = clubs.find((c) => c.id === clubId);
   return (
     <>
       <div className="row between">
         <div><div className="lbl">{club ? MODEL[club.salesModel] : 'Все клубы сети'}</div><h1>{club ? club.name : 'Вся сеть'}</h1></div>
       </div>
-      <div className="note">Это каркас системы. Рабочие места ролей (план дня менеджера, дашборд собственника, ресепшн) появятся на следующих шагах. Сейчас видны клиенты, доступные вашей роли: {me.allClubs ? 'всей сети' : 'только вашего клуба'}.</div>
+      <input type="search" value={q} onChange={(e) => setQ(e.target.value)} placeholder="Поиск по имени или телефону" aria-label="Поиск клиента" style={{ maxWidth: 420 }} />
+      <p className="small" style={{ margin: 0 }}>Видны клиенты {me.allClubs ? 'всей сети' : 'вашего клуба'}. Нажмите на имя, чтобы открыть карточку.</p>
       <div className="card"><div className="tbl"><table>
         <thead><tr><th>Клиент</th><th>Категория</th><th>Клуб</th><th>Телефон</th></tr></thead>
-        <tbody>{persons.map((p) => <tr key={p.id}><td>{p.fullName}</td><td><span className="chip acc">{p.segment}</span></td><td>{p.clubName}</td><td className="num">{p.phone}</td></tr>)}</tbody>
+        <tbody>{persons.map((p) => <tr key={p.id}><td><button className="btn sm" onClick={() => openPerson(p.id)}>{p.fullName}</button></td><td><span className="chip acc">{p.segment}</span></td><td>{p.clubName}</td><td className="num">{p.phone}</td></tr>)}</tbody>
       </table></div>{persons.length === 0 && <p className="muted">Клиентов нет.</p>}</div>
     </>
   );
@@ -143,6 +155,10 @@ function Clubs({ clubs, reload }: { clubs: Club[]; reload: () => void }) {
   const changeModel = async (c: Club, model: string) => {
     setErr('');
     try { await api('PATCH', `/api/clubs/${c.id}`, { salesModel: model }); alertOk(`Модель продаж «${c.name}»: ${MODEL[model]}`); reload(); } catch (x) { setErr(errText(x)); }
+  };
+  const saveNorm = async (c: Club, v: number) => {
+    setErr('');
+    try { await api('PATCH', `/api/clubs/${c.id}`, { firstResponseMinutes: v }); alertOk(`Норма первого ответа: ${v} мин`); reload(); } catch (x) { setErr(errText(x)); }
   };
   if (wiz) return <Wizard onClose={(created) => { setWiz(false); if (created) reload(); }} />;
   return (
@@ -163,6 +179,9 @@ function Clubs({ clubs, reload }: { clubs: Club[]; reload: () => void }) {
               </select>
             </label>
             <p className="small">При смене модели действующие договоры сохраняют условия, новый набор плана применяется со следующего периода.</p>
+            <label className="f" style={{ marginTop: 8 }}>Норма первого ответа новому лиду, минут
+              <input type="number" min={1} max={1440} defaultValue={c.firstResponseMinutes} style={{ maxWidth: 140 }}
+                onBlur={(e) => { const v = Number(e.target.value); if (v !== c.firstResponseMinutes) saveNorm(c, v); }} /></label>
           </div>
         ))}
       </div>
@@ -209,7 +228,7 @@ function Wizard({ onClose }: { onClose: (created: boolean) => void }) {
       </>)}
       {step === 2 && model && (<>
         <h2>Готовые настройки</h2>
-        <p className="muted" style={{ margin: 0 }}>Клуб «{name}» будет создан с моделью «{MODEL[model]}». Примеры тарифов, воронок и категорий плана для этой модели подключатся на следующих шагах.</p>
+        <p className="muted" style={{ margin: 0 }}>Клуб «{name}» будет создан с моделью «{MODEL[model]}». Сразу будут созданы воронки для этой модели. Примеры тарифов и категорий плана подключатся на следующих шагах.</p>
         {err && <div className="err">{err}</div>}
         <div className="row"><button className="btn" onClick={() => setStep(1)}>Назад</button><button className="btn pri" onClick={create}>Создать клуб</button></div>
       </>)}

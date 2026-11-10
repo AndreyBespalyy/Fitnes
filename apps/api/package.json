@@ -9,7 +9,7 @@
     "db:migrate": "tsx --env-file-if-exists=../../.env db/scripts/migrate.ts",
     "db:seed": "tsx --env-file-if-exists=../../.env db/scripts/seed.ts",
     "db:reset": "tsx --env-file-if-exists=../../.env db/scripts/reset.ts",
-    "test": "tsx --env-file-if-exists=../../.env --test test/*.test.ts",
+    "test": "tsx --env-file-if-exists=../../.env --test --test-concurrency=1 test/*.test.ts",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
