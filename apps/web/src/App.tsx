@@ -1,3 +1,4 @@
+import { DashPage } from './dash.tsx';
 import { useEffect, useState, type FormEvent } from 'react';
 import { api, can, MODEL, MODEL_SHORT, type Club, type Me, type Person, type RoleDef, type Staff } from './api.ts';
 import { errText, toast as alertOk } from './ui.ts';
@@ -72,11 +73,11 @@ function ChangePassword({ me, forced, onDone, onLogout }: { me: Me; forced?: boo
   );
 }
 
-type Tab = 'leads' | 'board' | 'tasks' | 'home' | 'clubs' | 'tariffs' | 'contracts' | 'site' | 'fiscal' | 'finance' | 'import' | 'chats' | 'access' | 'messaging' | 'pipelines' | 'staff' | 'password';
+type Tab = 'dash' | 'leads' | 'board' | 'tasks' | 'home' | 'clubs' | 'tariffs' | 'contracts' | 'site' | 'fiscal' | 'finance' | 'import' | 'chats' | 'access' | 'messaging' | 'pipelines' | 'staff' | 'password';
 
 function Shell({ me, onLogout }: { me: Me; onLogout: () => void }) {
   const isAdmin = can(me, 'clubs.manage') || can(me, 'staff.manage');
-  const firstTab: Tab = can(me, 'crm.work') ? 'tasks' : can(me, 'leads.create') ? 'leads' : isAdmin ? 'clubs' : 'home';
+  const firstTab: Tab = can(me, 'dash.view') || can(me, 'crm.work') ? 'dash' : can(me, 'crm.work') ? 'tasks' : can(me, 'leads.create') ? 'leads' : isAdmin ? 'clubs' : 'home';
   const [tab, setTab] = useState<Tab>(firstTab);
   const [personId, setPersonId] = useState<string | null>(null);
   const [ver, setVer] = useState(0);
@@ -88,6 +89,7 @@ function Shell({ me, onLogout }: { me: Me; onLogout: () => void }) {
   const logout = async () => { await api('POST', '/api/auth/logout').catch(() => {}); onLogout(); };
   const roleNames = me.roles.map((r) => r.name).join(', ');
   const tabs: [Tab, string, boolean][] = [
+    ['dash', 'Рабочий стол', can(me, 'dash.view') || can(me, 'crm.work')],
     ['tasks', 'Задачи', can(me, 'crm.work')],
     ['leads', 'Лиды', can(me, 'leads.create')],
     ['board', 'Сделки', can(me, 'crm.work')],
@@ -122,6 +124,7 @@ function Shell({ me, onLogout }: { me: Me; onLogout: () => void }) {
         <div className="tabs" role="group" aria-label="Разделы">
           {tabs.filter((t) => t[2]).map(([k, t]) => <button key={k} aria-pressed={tab === k} onClick={() => setTab(k)}>{t}</button>)}
         </div>
+        {tab === 'dash' && <DashPage me={me} clubs={clubs} clubId={clubId} />}
         {tab === 'tasks' && <TasksPage key={ver} me={me} clubId={clubId} openPerson={setPersonId} />}
         {tab === 'leads' && <LeadsPage key={ver} me={me} clubs={clubs} clubId={clubId} openPerson={setPersonId} />}
         {tab === 'board' && <BoardPage key={ver} clubs={clubs} clubId={clubId} openPerson={setPersonId} />}

@@ -25,7 +25,7 @@ export async function setupTestApp() {
   await o.query('drop schema public cascade; create schema public;');
   await o.end();
   await migrate(ownerUrl, true);
-  await seed(ownerUrl, true);
+  await seed(ownerUrl, true, false);
   const pool = createPool(appUrl);
   const app = await buildApp(pool, { storageDir: mkdtempSync(join(tmpdir(), 'fitnes-storage-')) });
   return { app, pool, ownerUrl };

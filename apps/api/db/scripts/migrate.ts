@@ -3,6 +3,9 @@ import { readdirSync, readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { join, dirname } from 'node:path';
 import { connect, need } from './common.ts';
+import { ROLE_SEED } from '../../src/roles.ts';
+import { seedDemoHistory } from './demoHistory.ts';
+import type { Db } from '../../src/db.ts';
 
 export async function migrate(url = need('OWNER_DATABASE_URL'), quiet = false) {
   const dir = join(dirname(fileURLToPath(import.meta.url)), '..', 'migrations');
@@ -21,6 +24,12 @@ export async function migrate(url = need('OWNER_DATABASE_URL'), quiet = false) {
       await c.query('rollback');
       throw e;
     }
+  }
+  // Роли и их разрешения всегда соответствуют коду: новые разрешения появляются на сервере сами при обновлении
+  for (const r of ROLE_SEED) {
+    await c.query(`insert into roles(code, name, permissions, network_wide, sort) values ($1,$2,$3,$4,$5)
+      on conflict (code) do update set name = excluded.name, permissions = excluded.permissions, network_wide = excluded.network_wide, sort = excluded.sort`,
+    [r.code, r.name, r.permissions, r.network_wide, r.sort]);
   }
   await c.query(`
     grant usage on schema public to fitnes_app;
@@ -44,6 +53,13 @@ export async function migrate(url = need('OWNER_DATABASE_URL'), quiet = false) {
     grant usage, select on all sequences in schema public to fitnes_app;
     grant execute on all functions in schema public to fitnes_app;
   `);
+  // Демо-сеть, заполненная до шага 13, один раз получает историю продаж для дашбордов
+  const demo = (await c.query(`select id from tenants where name = 'Демо-сеть клубов' limit 1`)).rows[0];
+  if (demo) {
+    await c.query('begin');
+    try { if (await seedDemoHistory(c as unknown as Db, demo.id) && !quiet) console.log('Добавлена демо-история продаж'); await c.query('commit'); }
+    catch (e) { await c.query('rollback'); console.error('Демо-история не добавлена:', (e as Error).message); }
+  }
   await c.end();
   if (!quiet) console.log('Миграции применены');
 }

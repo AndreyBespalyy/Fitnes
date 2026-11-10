@@ -12,6 +12,7 @@ import { applyState, payLink } from '../../src/modules/billing.ts';
 import { encrypt } from '../../src/modules/fiscal.ts';
 import { createHash } from 'node:crypto';
 import type { Db } from '../../src/db.ts';
+import { seedDemoHistory } from './demoHistory.ts';
 
 const STAFF: [string, string, string, 'c1' | 'c2' | '*'][] = [
   ['a.bespalyy', 'Андрей Беспалый', 'owner', '*'],
@@ -52,7 +53,8 @@ async function seedMemberships(c: Db, t: string) {
   const prod = async (name: string) => (await c.query('select id from products where name = $1 limit 1', [name])).rows[0].id as string;
   // Сдвигает абонемент в прошлое на days дней вместе с графиком платежей
   const shift = async (id: string, days: number) => {
-    await c.query('update memberships set starts_on = starts_on - $2::int, ends_on = ends_on - $2::int, next_charge_on = next_charge_on - $2::int where id = $1', [id, days]);
+    await c.query('update memberships set starts_on = starts_on - $2::int, ends_on = ends_on - $2::int, next_charge_on = next_charge_on - $2::int, created_at = created_at - make_interval(days => $2::int) where id = $1', [id, days]);
+    await c.query('update membership_operations set at = at - make_interval(days => $2::int) where membership_id = $1', [id, days]);
     await c.query('update charges set due_on = due_on - $2::int where membership_id = $1', [id, days]);
     await c.query('update contracts set contract_date = contract_date - $2::int where membership_id = $1', [id, days]);
   };
@@ -97,8 +99,8 @@ async function seedMemberships(c: Db, t: string) {
   const orlov = await sell('Глеб Орлов', 'Подписка «Безлимит»'); await payAll(orlov);
   // План продаж на текущий месяц
   const month = `${today.slice(0, 7)}-01`;
-  for (const [cl, plan] of [[c1, [['new', 50_000_000], ['renewal', 30_000_000], ['return', 10_000_000]]], [c2, [['subscription', 40_000_000], ['new', 5_000_000]]]] as const) {
-    for (const [cat, kop] of plan) await c.query('insert into sales_plans(tenant_id, club_id, month, category, amount_kop) values ($1,$2,$3,$4,$5)', [t, cl.id, month, cat, kop]);
+  for (const [cl, plan] of [[c1, [['new', 20_000_000], ['renewal', 6_000_000], ['return', 2_000_000]]], [c2, [['subscription', 12_000_000], ['new', 3_000_000]]]] as const) {
+    for (const [cat, kop] of plan) await c.query('insert into plan_targets(tenant_id, club_id, month, category, amount_kop) values ($1,$2,$3,$4,$5)', [t, cl.id, month, cat, kop]);
   }
   // Старые договоры подписаны на бумаге, у новой подписки договор ждёт подписи
   await c.query(`update contracts set status = 'signed', sign_method = 'paper_scan', signed_at = now() - interval '1 day'
@@ -108,7 +110,7 @@ async function seedMemberships(c: Db, t: string) {
     ('Роман Фёдоров','активный подписчик'),('Кирилл Демин','действующий'),('Глеб Ушаков','действующий'),('Глеб Орлов','активный подписчик'),('Тимур Ахметов','долг по списанию'),('Ксения Лаптева','отписавшийся')) s(n, seg) where full_name = s.n`);
 }
 
-export async function seed(url = need('OWNER_DATABASE_URL'), quiet = false) {
+export async function seed(url = need('OWNER_DATABASE_URL'), quiet = false, demoHistory = true) {
   const password = process.env.SEED_PASSWORD || 'Fitnes-2026';
   const c = await connect(url);
   await c.query('begin');
@@ -184,6 +186,7 @@ export async function seed(url = need('OWNER_DATABASE_URL'), quiet = false) {
   await c.query(`update leads set created_at = now() - interval '20 minutes', first_response_due_at = now() - interval '15 minutes'
                  where id = (select id from leads order by created_at limit 1)`);
   await c.query(`update tasks set due_at = now() - interval '15 minutes' where lead_id = (select id from leads order by created_at limit 1)`);
+  if (demoHistory) await seedDemoHistory(c as unknown as Db, t);
   await c.query('commit');
   await c.end();
   if (!quiet) {

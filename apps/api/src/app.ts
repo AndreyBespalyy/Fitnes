@@ -20,6 +20,7 @@ import { messagingRoutes, startMessagingWorker } from './modules/messaging.ts';
 import { acsRoutes } from './modules/acs.ts';
 import { billingRoutes, startBillingWorker } from './modules/billing.ts';
 import { bankRoutes } from './modules/bank.ts';
+import { dashRoutes } from './modules/dash.ts';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -67,6 +68,7 @@ export async function buildApp(pool: pg.Pool, opts: { webDist?: string; secureCo
   acsRoutes(app, pool);
   billingRoutes(app, pool, { fetch: opts.fetch });
   bankRoutes(app, pool);
+  dashRoutes(app, pool);
   // Фоновая отправка чеков в облачную кассу (в тестах выключена, там вызывается напрямую)
   if (opts.messagingWorker) { const stop = startMessagingWorker(pool, opts.fetch); app.addHook('onClose', async () => stop()); }
   if (opts.billingWorker) { const stop = startBillingWorker(pool, opts.fetch); app.addHook('onClose', async () => stop()); }

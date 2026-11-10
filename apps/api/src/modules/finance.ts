@@ -352,7 +352,7 @@ export function financeRoutes(app: FastifyInstance, pool: pg.Pool) {
     const { clubId, month } = req.query as { clubId?: string; month?: string };
     const r = monthRange(month);
     return withCtx(pool, ctx, async (db) => {
-      const plan = (await db.query(`select category, sum(amount_kop)::bigint as s from sales_plans where ($1::uuid is null or club_id = $1) and month = $2 group by category`, [clubId || null, r.from])).rows;
+      const plan = (await db.query(`select category, sum(amount_kop)::bigint as s from plan_targets where user_id is null and ($1::uuid is null or club_id = $1) and month = $2 group by category`, [clubId || null, r.from])).rows;
       const fact = (await db.query(`select p.sale_category as category, sum(case when p.direction = 'in' then p.amount_kop else -p.amount_kop end)::bigint as s
         from payments p join clubs c on c.id = p.club_id
         where p.kind in ('charge', 'refund') and ($1::uuid is null or p.club_id = $1) and (p.created_at at time zone c.timezone)::date >= $2 and (p.created_at at time zone c.timezone)::date < $3
@@ -375,8 +375,9 @@ export function financeRoutes(app: FastifyInstance, pool: pg.Pool) {
       if (!(await db.query('select 1 from clubs where id = $1', [b.clubId])).rowCount) throw badRequest('Клуб не найден');
       for (const [k, v] of Object.entries(b.amounts ?? {})) {
         if (!(k in CAT_NAME) || !Number.isInteger(v) || v < 0) throw badRequest('Неверная сумма плана');
-        await db.query(`insert into sales_plans(tenant_id, club_id, month, category, amount_kop, updated_by) values ($1,$2,$3,$4,$5,$6)
-          on conflict (club_id, month, category) do update set amount_kop = excluded.amount_kop, updated_by = excluded.updated_by, updated_at = now()`,
+        await db.query(`insert into plan_targets(tenant_id, club_id, month, user_id, category, amount_kop, updated_by) values ($1,$2,$3,null,$4,$5,$6)
+          on conflict (club_id, month, coalesce(user_id, '00000000-0000-0000-0000-000000000000'::uuid), category)
+          do update set amount_kop = excluded.amount_kop, updated_by = excluded.updated_by, updated_at = now()`,
           [ctx.tenantId, b.clubId, `${b.month}-01`, k, v, ctx.userId]);
       }
       await audit(db, ctx, 'finance.plan_changed', 'club', b.clubId!, null, { month: b.month, amounts: b.amounts });

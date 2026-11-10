@@ -140,3 +140,16 @@ span.bad{color:var(--bad)}
 details summary{cursor:pointer}
 .acs select,.acs input[type=time],.acs input[type=date],.acs input[type=number]{border:1px solid var(--line);background:var(--surface);border-radius:8px;padding:9px 8px;width:auto}
 .alerts{display:grid;gap:6px} .alerts p{margin:0}
+/* Шаг 13: рабочий стол */
+.dash-w{display:grid;gap:12px;margin-top:12px}
+.dash-w .kpis .card{padding:12px}
+.kpi-c b{font-size:20px}
+.hint{display:inline-grid;place-items:center;width:16px;height:16px;border-radius:50%;border:1px solid var(--line);font-size:10px;color:var(--muted);cursor:help;text-transform:none;letter-spacing:0;vertical-align:middle}
+.dash-w .meter{display:block;padding:0;position:relative;height:4px;border-radius:2px;background:var(--line);overflow:hidden;margin-top:4px;min-width:60px}
+.dash-w .meter i{background:var(--accent)}
+td.kpi-red{color:var(--bad);font-weight:600} td.kpi-green{color:var(--ok)}
+tr.total td{border-top:2px solid var(--line);background:var(--surface)}
+.risk-list{display:grid;gap:6px} .risk-on{border-color:var(--bad-soft)}
+.num.ok{color:var(--ok)}
+a.btn{text-decoration:none;color:inherit}
+@media (max-width:640px){.dash-w .kpis{grid-template-columns:repeat(2,minmax(0,1fr))}.dash-w .kpis b{font-size:17px}}
