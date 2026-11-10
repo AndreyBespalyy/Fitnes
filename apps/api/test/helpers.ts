@@ -7,6 +7,8 @@ import { createPool } from '../src/db.ts';
 import { migrate } from '../db/scripts/migrate.ts';
 import { seed } from '../db/scripts/seed.ts';
 
+process.env.FISCAL_SECRET_KEY ||= 'test-fiscal-secret-key-0123456789';
+
 const withDb = (url: string, db: string) => { const u = new URL(url); u.pathname = `/${db}`; return u.toString(); };
 
 /** Поднимает чистую тестовую базу fitnes_test с тестовыми данными и возвращает приложение. */

@@ -18,6 +18,7 @@ export const PERMISSIONS = {
   contractsManage: 'contracts.manage', // юрлицо клуба, PDF договора и правил
   contractsSign: 'contracts.sign',     // печать, скан, подписание на планшете
   siteManage: 'site.manage',           // предложения клуба для сайта
+  fiscalManage: 'fiscal.manage',       // касса клуба и банк эквайринга
 } as const;
 
 const P = PERMISSIONS;

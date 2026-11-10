@@ -89,3 +89,9 @@ fieldset.item{margin:0;min-width:0}
   .print-root .sheet{margin:0;max-width:none;padding:0}
   .no-print{display:none!important}
 }
+
+.modecard{display:grid;gap:4px;text-align:left;cursor:pointer;font:inherit;color:inherit}
+.modecard[aria-pressed=true]{border-color:var(--accent);box-shadow:0 0 0 2px var(--accent-soft)}
+.ok-msg{border-color:var(--ok);color:var(--ok)}
+details.item summary{cursor:pointer}
+.md{font-size:14px;line-height:1.5;margin-top:6px} .md code{background:var(--surface-2);padding:1px 5px;border-radius:4px;font-size:12px}

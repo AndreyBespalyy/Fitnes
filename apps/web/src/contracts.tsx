@@ -122,7 +122,7 @@ export function ContractLine({ me, c, reload }: { me: Me; c: ContractBrief; relo
     setErr('');
     try { await api('POST', `/api/contracts/${c.id}/scan`, await readFile(f)); toast(`Скан договора № ${c.number} загружен, договор подписан`); reload(); } catch (x) { setErr(errText(x)); }
   };
-  const label = c.status === 'signed' ? (c.signMethod === 'tablet' ? 'подписан на планшете' : 'подписан, скан в системе') : c.status === 'cancelled' ? 'расторгнут' : 'ждёт подписи';
+  const label = c.status === 'signed' ? (c.signMethod === 'tablet' ? 'подписан на планшете' : c.scanFileId ? 'подписан, скан в системе' : 'подписан на бумаге') : c.status === 'cancelled' ? 'расторгнут' : 'ждёт подписи';
   return (
     <div className="row between small" style={{ borderTop: '1px dashed var(--line)', paddingTop: 6 }}>
       <span>Договор № {c.number} от {d(c.date)} · <span className={`chip ${c.status === 'signed' ? 'ok' : c.status === 'cancelled' ? '' : 'warn'}`}>{label}</span>

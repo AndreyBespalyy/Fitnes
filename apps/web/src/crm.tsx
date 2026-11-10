@@ -12,7 +12,7 @@ type Opp = { id: string; stageId: string; personId: string; personName: string; 
 type Task = { id: string; kind: string; title: string; dueAt: string; doneAt: string | null; result: string | null; personId: string | null; personName: string | null;
   opportunityId: string | null; assigneeName: string | null; overdue: boolean };
 type Card = {
-  person: { id: string; fullName: string; segment: string; homeClubId: string | null; homeClubName: string | null; createdAt: string };
+  person: { id: string; fullName: string; segment: string; homeClubId: string | null; homeClubName: string | null; createdAt: string; autopayEnabled: boolean; autopayChangedAt: string | null };
   contacts: { type: string; value: string; isPrimary: boolean }[];
   leads: { id: string; createdAt: string; sourceName: string | null; comment: string | null; isRepeat: boolean; clubName: string; dueAt: string; respondedAt: string | null }[];
   opportunities: { id: string; status: string; clubName: string; pipelineName: string; stageId: string; stageName: string; ownerName: string | null; lostReason: string | null; stages: Stage[] }[];
@@ -236,6 +236,13 @@ export function PersonCard({ me, id, onClose }: { me: Me; id: string; onClose: (
             <div className="row" style={{ marginTop: 4 }}><span className="chip acc">{card.person.segment}</span>
               <span className="small">{card.person.homeClubName ?? 'клиент другого клуба сети'} · в базе с {dt(card.person.createdAt)}</span></div></div>
           <div className="card kv">{card.contacts.map((c, i) => <span key={i} style={{ display: 'contents' }}><span>{c.type === 'phone' ? 'Телефон' : c.type === 'email' ? 'E-mail' : c.type}</span><span className="num">{c.value}</span></span>)}</div>
+          {can(me, 'memberships.view') && (
+            <label className="item row" style={{ gap: 10 }}>
+              <input type="checkbox" style={{ width: 20, height: 20 }} checked={card.person.autopayEnabled} disabled={!can(me, 'memberships.manage')}
+                onChange={(e) => act(() => api('POST', `/api/persons/${card.person.id}/autopay`, { enabled: e.target.checked }), e.target.checked ? 'Автосписание включено' : 'Автосписание выключено')} />
+              <span><b>Списывать подписку автоматически с привязанной карты</b><br />
+                <span className="small">Отметьте, только если клиент согласен на автосписание{card.person.autopayChangedAt ? ` (изменено ${dt(card.person.autopayChangedAt)})` : ''}. Списания начнутся после подключения банка.</span></span>
+            </label>)}
           <MembershipsBlock me={me} personId={card.person.id} homeClubId={card.person.homeClubId} />
 
           {card.opportunities.map((o) => (

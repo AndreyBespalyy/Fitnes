@@ -181,7 +181,8 @@ export function crmRoutes(app: FastifyInstance, pool: pg.Pool) {
     const { id } = req.params as { id: string };
     return withCtx(pool, ctx, async (db) => {
       const person = (await db.query(
-        `select p.id, p.full_name as "fullName", p.birth_date as "birthDate", p.segment, p.home_club_id as "homeClubId", c.name as "homeClubName", p.created_at as "createdAt"
+        `select p.id, p.full_name as "fullName", p.birth_date as "birthDate", p.segment, p.home_club_id as "homeClubId", c.name as "homeClubName", p.created_at as "createdAt",
+           p.autopay_enabled as "autopayEnabled", p.autopay_changed_at as "autopayChangedAt"
          from persons p left join clubs c on c.id = p.home_club_id where p.id = $1`, [id])).rows[0];
       if (!person) throw notFound('Клиент не найден');
       const contacts = (await db.query('select type, value, is_primary as "isPrimary" from person_contacts where person_id = $1 order by is_primary desc', [id])).rows

@@ -4,6 +4,7 @@ import { errText, toast as alertOk } from './ui.ts';
 import { BoardPage, LeadsPage, PersonCard, PipelinesAdmin, TasksPage } from './crm.tsx';
 import { TariffsPage } from './memberships.tsx';
 import { ContractsAdminPage, SitePage } from './contracts.tsx';
+import { FiscalPage, LocalKktAgent } from './fiscal.tsx';
 
 export function App() {
   const [me, setMe] = useState<Me | null | undefined>(undefined);
@@ -67,7 +68,7 @@ function ChangePassword({ me, forced, onDone, onLogout }: { me: Me; forced?: boo
   );
 }
 
-type Tab = 'leads' | 'board' | 'tasks' | 'home' | 'clubs' | 'tariffs' | 'contracts' | 'site' | 'pipelines' | 'staff' | 'password';
+type Tab = 'leads' | 'board' | 'tasks' | 'home' | 'clubs' | 'tariffs' | 'contracts' | 'site' | 'fiscal' | 'pipelines' | 'staff' | 'password';
 
 function Shell({ me, onLogout }: { me: Me; onLogout: () => void }) {
   const isAdmin = can(me, 'clubs.manage') || can(me, 'staff.manage');
@@ -91,6 +92,7 @@ function Shell({ me, onLogout }: { me: Me; onLogout: () => void }) {
     ['tariffs', 'Тарифы', can(me, 'tariffs.manage') || can(me, 'memberships.sell')],
     ['contracts', 'Договоры', can(me, 'contracts.manage')],
     ['site', 'Сайт', can(me, 'site.manage')],
+    ['fiscal', 'Касса', can(me, 'fiscal.manage') || can(me, 'memberships.manage')],
     ['pipelines', 'Воронки', can(me, 'pipelines.manage')],
     ['staff', 'Сотрудники', can(me, 'staff.view')],
     ['password', 'Пароль', true],
@@ -105,7 +107,7 @@ function Shell({ me, onLogout }: { me: Me; onLogout: () => void }) {
             {clubs.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
           </select>
         )}
-        <div className="sp"><span>{me.full_name} · {roleNames}</span><button onClick={logout}>Выйти</button></div>
+        <div className="sp"><LocalKktAgent me={me} clubId={clubId} /><span>{me.full_name} · {roleNames}</span><button onClick={logout}>Выйти</button></div>
       </header>
       <main className="wrap">
         <div className="tabs" role="group" aria-label="Разделы">
@@ -116,6 +118,7 @@ function Shell({ me, onLogout }: { me: Me; onLogout: () => void }) {
         {tab === 'board' && <BoardPage key={ver} clubs={clubs} clubId={clubId} openPerson={setPersonId} />}
         {tab === 'tariffs' && <TariffsPage me={me} clubs={clubs} clubId={clubId} />}
         {tab === 'contracts' && <ContractsAdminPage me={me} clubs={clubs} clubId={clubId} />}
+        {tab === 'fiscal' && <FiscalPage me={me} clubs={clubs} clubId={clubId} />}
         {tab === 'site' && <SitePage me={me} clubs={clubs} clubId={clubId} />}
         {tab === 'pipelines' && <PipelinesAdmin clubs={clubs} clubId={clubId} />}
         {tab === 'home' && <Home key={ver} me={me} clubs={clubs} clubId={clubId} openPerson={setPersonId} />}

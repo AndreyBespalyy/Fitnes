@@ -6,6 +6,7 @@ import { audit, withCtx, type Ctx, type Db } from '../db.ts';
 import { badRequest, notFound } from '../errors.ts';
 import { PERMISSIONS as P } from '../roles.ts';
 import { contractsByMembership, createContract } from './contracts.ts';
+import { receiptForCharge } from './fiscal.ts';
 
 /* ---------- даты (строки YYYY-MM-DD, без часовых сдвигов) ---------- */
 const D = (s: string) => new Date(`${s}T00:00:00Z`);
@@ -415,8 +416,9 @@ export function membershipRoutes(app: FastifyInstance, pool: pg.Pool) {
         await db.query(`insert into membership_operations(tenant_id, club_id, membership_id, kind, params, actor_id) values ($1,$2,$3,'charge_paid',$4,$5)`,
           [ctx.tenantId, c.club_id, c.membership_id, JSON.stringify({ chargeId: id, method, amountKop: Number(c.amount_kop) }), ctx.userId]);
       }
-      await audit(db, ctx, 'charge.marked_paid', 'charge', id, { status: 'due' }, { status: 'paid', method });
-      return { ok: true };
+      const receiptId = await receiptForCharge(db, ctx, id, method!);
+      await audit(db, ctx, 'charge.marked_paid', 'charge', id, { status: 'due' }, { status: 'paid', method, receiptId });
+      return { ok: true, receiptId };
     });
   });
 
