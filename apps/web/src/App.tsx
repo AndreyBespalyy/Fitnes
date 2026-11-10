@@ -14,6 +14,7 @@ import { AccessPage } from './access.tsx';
 import { ChatsPage, MessagingAdmin } from './chat.tsx';
 import { StaffTimePage } from './staff.tsx';
 import { ConfigPage } from './config.tsx';
+import { ReviewsPage } from './insights.tsx';
 import { OfflineBar, ProfilePage, registerServiceWorker, StaffSessions } from './mobile.tsx';
 
 export function App() {
@@ -81,7 +82,7 @@ function ChangePassword({ me, forced, onDone, onLogout }: { me: Me; forced?: boo
   );
 }
 
-type Tab = 'dash' | 'hot' | 'calls' | 'leads' | 'board' | 'tasks' | 'home' | 'clubs' | 'tariffs' | 'contracts' | 'site' | 'fiscal' | 'finance' | 'import' | 'chats' | 'access' | 'messaging' | 'pipelines' | 'staff' | 'stafftime' | 'config' | 'profile';
+type Tab = 'dash' | 'hot' | 'calls' | 'leads' | 'board' | 'tasks' | 'home' | 'clubs' | 'tariffs' | 'contracts' | 'site' | 'fiscal' | 'finance' | 'import' | 'chats' | 'access' | 'messaging' | 'pipelines' | 'staff' | 'stafftime' | 'config' | 'reviews' | 'profile';
 
 function Shell({ me, onLogout }: { me: Me; onLogout: () => void }) {
   const isAdmin = can(me, 'clubs.manage') || can(me, 'staff.manage');
@@ -124,6 +125,7 @@ function Shell({ me, onLogout }: { me: Me; onLogout: () => void }) {
     ['import', 'Перенос из 1С', can(me, 'import.manage')],
     ['pipelines', 'Воронки', can(me, 'pipelines.manage')],
     ['staff', 'Сотрудники', can(me, 'staff.view')],
+    ['reviews', 'Обзоры', can(me, 'crm.work') || can(me, 'dash.view') || can(me, 'ai.review')],
     ['stafftime', 'График и зарплата', true],
     ['config', 'Настройки клуба', can(me, 'config.manage')],
     ['profile', 'Профиль', true],
@@ -151,7 +153,7 @@ function Shell({ me, onLogout }: { me: Me; onLogout: () => void }) {
         <div className={`tabs main-tabs ${more ? 'open' : ''}`} role="group" aria-label="Разделы">
           {visible.map(([k, t]) => <button key={k} aria-pressed={tab === k} onClick={() => setTab(k)}>{t}</button>)}
         </div>
-        {tab === 'dash' && <DashPage me={me} clubs={clubs} clubId={clubId} />}
+        {tab === 'dash' && <DashPage me={me} clubs={clubs} clubId={clubId} openPerson={setPersonId} />}
         {tab === 'hot' && <HotPage me={me} clubs={clubs} clubId={clubId} openPerson={setPersonId} />}
         {tab === 'calls' && <CallsPage me={me} clubs={clubs} clubId={clubId} openPerson={setPersonId} />}
         {tab === 'tasks' && <TasksPage key={ver} me={me} clubId={clubId} openPerson={setPersonId} />}
@@ -172,6 +174,7 @@ function Shell({ me, onLogout }: { me: Me; onLogout: () => void }) {
         {tab === 'staff' && <StaffPage me={me} clubs={clubs} />}
         {tab === 'stafftime' && <StaffTimePage me={me} clubs={clubs} clubId={clubId} />}
         {tab === 'config' && <ConfigPage me={me} clubs={clubs} clubId={clubId} />}
+        {tab === 'reviews' && <ReviewsPage me={me} clubs={clubs} clubId={clubId} openPerson={setPersonId} />}
         {tab === 'profile' && <ProfilePage me={me} passwordForm={<ChangePassword me={me} onDone={() => { alertOk('Пароль изменён'); setTab(firstTab); }} />} />}
       </main>
       <nav className="bottom-nav" aria-label="Главные разделы">

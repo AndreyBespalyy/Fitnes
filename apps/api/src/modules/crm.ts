@@ -6,6 +6,7 @@ import { can, requirePerm } from '../auth.ts';
 import { audit, withCtx, type Ctx, type Db } from '../db.ts';
 import { badRequest, HttpError, notFound, unauthorized } from '../errors.ts';
 import { PERMISSIONS as P } from '../roles.ts';
+import { routeByShifts } from './staffTime.ts';
 
 /** Телефон в формат +7XXXXXXXXXX; null, если это не российский мобильный или городской номер. */
 export function normalizePhone(raw: string | undefined | null): string | null {
@@ -98,7 +99,16 @@ export async function createLead(db: Db, actor: Actor, b: LeadInput) {
     assignee ??= opp.owner_id ?? (await pickAssignee(db, b.clubId));
   }
 
-  const dueAt = new Date(Date.now() + club.first_response_minutes * 60_000);
+  let dueAt = new Date(Date.now() + club.first_response_minutes * 60_000);
+  // AT27: ответственного нет на смене — дежурному или на начало ближайшей смены (если в клубе ведётся график)
+  const route = await routeByShifts(db, b.clubId, assignee, !!b.assignedTo, club.first_response_minutes);
+  if (route) {
+    if (route.assignee && route.assignee !== assignee) {
+      assignee = route.assignee;
+      await db.query(`update opportunities set owner_id = $2 where id = $1 and (owner_id is null or owner_id <> $2) and created_at > now() - interval '1 minute'`, [opp.id, assignee]);
+    }
+    if (route.dueAt) dueAt = route.dueAt;
+  }
   const leadId = (await db.query(
     `insert into leads(tenant_id, club_id, person_id, source_id, opportunity_id, campaign, utm, comment, external_event_id, is_repeat, assigned_to, first_response_due_at, created_by)
      values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) returning id`,
@@ -107,7 +117,7 @@ export async function createLead(db: Db, actor: Actor, b: LeadInput) {
   await db.query(
     `insert into tasks(tenant_id, club_id, assignee_id, person_id, opportunity_id, lead_id, kind, title, due_at, created_by)
      values ($1,$2,$3,$4,$5,$6,'first_response',$7,$8,$9)`,
-    [actor.tenantId, b.clubId, assignee, personId, opp.id, leadId, found ? 'Повторное обращение: связаться' : 'Первый ответ новому лиду', dueAt, actor.userId]);
+    [actor.tenantId, b.clubId, assignee, personId, opp.id, leadId, `${found ? 'Повторное обращение: связаться' : 'Первый ответ новому лиду'}${route?.note === 'на начало смены' ? ' (заявка пришла в нерабочее время)' : ''}`, dueAt, actor.userId]);
   await audit(db, { tenantId: actor.tenantId, userId: actor.userId, ip: actor.ip }, 'lead.created', 'lead', leadId, null,
     { personId, opportunityId: opp.id, duplicate: !!found, sourceId, assignee });
   return { leadId, personId, opportunityId: opp.id, duplicate: !!found, idempotent: false, otherClub: !!found && found.home_club_id !== b.clubId };

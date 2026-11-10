@@ -1,4 +1,5 @@
 // Шаг 14. Звонки: записи разговоров, черновик итога от ИИ, подтверждение менеджером, оценка РОПа и качество ИИ.
+import { CallEvaluation } from './insights.tsx';
 import { useEffect, useState, type FormEvent } from 'react';
 import { api, can, type Club, type Me, type Staff } from './api.ts';
 import { dt, errText, toast } from './ui.ts';
@@ -148,6 +149,7 @@ export function CallDialog({ id, onClose, openPerson }: { id: string; onClose: (
           {s?.draft && !editable && s.editRatio !== null && s.editRatio > 0 && (
             <details className="item"><summary>Черновик ИИ до правок</summary><SummaryView s={s.draft} /></details>)}
           {c.canRate && s?.draft && s.status !== 'draft' && <Rating callId={c.id} s={s} onDone={reload} />}
+          <CallEvaluation callId={c.id} />
 
           {c.transcript && (
             <div className="card" style={{ display: 'grid', gap: 6 }}><h2>Расшифровка</h2>

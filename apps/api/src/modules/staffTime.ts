@@ -467,3 +467,32 @@ export function staffTimeRoutes(app: FastifyInstance, pool: pg.Pool) {
        where l.user_id = $1 and p.month = $2`, [ctx.userId, `${q.month}-01`])).rows.map((r) => ({ ...r, totalKop: Number(r.totalKop) })));
   });
 }
+
+/** AT27: заявка пришла, когда ответственного нет на смене.
+ *  Если в клубе ведётся график: передаём тому продавцу, кто сейчас на смене («дежурному»),
+ *  иначе срок первого ответа переносится на начало ближайшей смены. Без графика ничего не меняется. */
+export async function routeByShifts(db: Db, clubId: string, assignee: string | null, explicit: boolean, firstResponseMin: number) {
+  const shifts = (await db.query(`
+    select s.user_id, (s.day + s.starts) at time zone c.timezone as st,
+      (s.day + s.ends + case when s.ends <= s.starts then interval '1 day' else interval '0' end) at time zone c.timezone as en
+    from staff_shifts s join clubs c on c.id = s.club_id
+    where s.club_id = $1 and s.day between (now() at time zone c.timezone)::date - 1 and (now() at time zone c.timezone)::date + 7
+      and exists (select 1 from user_assignments a join users u on u.id = a.user_id where a.user_id = s.user_id and a.club_id = $1 and a.role_code in ('manager', 'rop') and u.status = 'active')
+      and not exists (select 1 from staff_absences b where b.user_id = s.user_id and b.club_id = $1 and s.day between b.date_from and b.date_to)
+    order by st`, [clubId])).rows as { user_id: string; st: Date; en: Date }[];
+  if (!shifts.length) return null;
+  const now = Date.now();
+  const onNow = shifts.filter((s) => s.st.getTime() <= now && s.en.getTime() > now);
+  if (assignee && onNow.some((s) => s.user_id === assignee)) return null;
+  if (!explicit && onNow.length) {
+    // Дежурный: из тех, кто на смене, — у кого меньше открытых сделок
+    const ids = [...new Set(onNow.map((s) => s.user_id))];
+    const duty = (await db.query(`select u, (select count(*) from opportunities o where o.owner_id = u and o.status = 'open') as n from unnest($1::uuid[]) u order by 2, 1 limit 1`, [ids])).rows[0].u as string;
+    return { assignee: duty, dueAt: null as Date | null, note: 'дежурному' };
+  }
+  const future = shifts.filter((s) => s.st.getTime() > now);
+  const mineNext = future.find((s) => s.user_id === assignee);
+  const next = explicit ? mineNext : mineNext && future[0] && mineNext.st.getTime() === future[0].st.getTime() ? mineNext : future[0];
+  if (!next) return null;
+  return { assignee: explicit ? assignee : next.user_id, dueAt: new Date(next.st.getTime() + firstResponseMin * 60_000), note: 'на начало смены' };
+}

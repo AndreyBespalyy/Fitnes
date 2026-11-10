@@ -12,7 +12,7 @@ import { daysBetween } from './memberships.ts';
 
 export const CATS = ['new', 'renewal', 'return', 'subscription'] as const;
 export const CAT_NAME: Record<string, string> = { new: 'Новые клиенты', renewal: 'Продления', return: 'Возобновление бывших', subscription: 'Подписки' };
-const SALES_ROLES = ['manager', 'rop'];
+export const SALES_ROLES = ['manager', 'rop'];
 
 /* ---------- словарь метрик (FR-DASH-08) ---------- */
 export const METRICS: { id: string; name: string; definition: string; formula: string; source: string; delay: string }[] = [
@@ -129,7 +129,7 @@ export async function salesFact(db: Db, clubIds: string[], from: string, to: str
     group by 1, 2, 3, 4, 5`, [clubIds, from, to, to])).rows.map((r) => ({ ...r, kop: Number(r.kop) })) as
     { clubId: string; userId: string | null; category: string; recurring: boolean; isToday: boolean; kop: number }[];
 }
-async function clientsFact(db: Db, clubIds: string[], from: string, to: string) {
+export async function clientsFact(db: Db, clubIds: string[], from: string, to: string) {
   return (await db.query(`select m.club_id as "clubId", m.created_by as "userId", coalesce(m.sale_category, 'new') as category, count(*)::int as n
     from memberships m join clubs c on c.id = m.club_id
     where m.club_id = any($1) and m.kind <> 'guest' and m.status <> 'cancelled' and (m.created_at at time zone c.timezone)::date between $2 and $3
@@ -151,7 +151,7 @@ function light(fact: number, plan: number | null, mi: ReturnType<typeof monthInf
   return r >= mi.green ? 'green' : r >= mi.yellow ? 'yellow' : 'red';
 }
 /** План-факт по категориям для выбранного среза (клубы и, если задан, продавец) */
-function planFact(mi: ReturnType<typeof monthInfo>, tg: Awaited<ReturnType<typeof targets>>, sf: Awaited<ReturnType<typeof salesFact>>, cf: Awaited<ReturnType<typeof clientsFact>>,
+export function planFact(mi: ReturnType<typeof monthInfo>, tg: Awaited<ReturnType<typeof targets>>, sf: Awaited<ReturnType<typeof salesFact>>, cf: Awaited<ReturnType<typeof clientsFact>>,
   filter: { userId?: string | null }) {
   const personal = filter.userId !== undefined;
   const rows: PlanRow[] = CATS.map((cat) => {
@@ -213,7 +213,7 @@ export async function funnel(db: Db, clubIds: string[], from: string, to: string
 }
 
 /** KPI сотрудников за период; нормы — на рабочий день, умножаются на число дней периода */
-async function kpi(db: Db, clubIds: string[], from: string, to: string, userIds: string[]) {
+export async function kpi(db: Db, clubIds: string[], from: string, to: string, userIds: string[]) {
   if (!userIds.length) return [];
   const q = async (sql: string) => new Map((await db.query(sql, [clubIds, from, to, userIds])).rows.map((r) => [r.u as string, Number(r.v)]));
   const local = (col: string) => `(${col} at time zone c.timezone)::date between $2 and $3`;
@@ -232,7 +232,7 @@ async function kpi(db: Db, clubIds: string[], from: string, to: string, userIds:
   const src: Record<string, Map<string, number>> = { calls, messages, meetings_set: mSet, meetings_done: mDone, sales, refusals, tasks_done: tDone, tasks_overdue: tOver, first_response: fr };
   return userIds.map((u) => ({ userId: u, values: Object.fromEntries(KPI.map((k) => [k.id, k.id === 'first_response' ? (src[k.id].get(u) ?? null) : (src[k.id].get(u) ?? 0)])) as Record<string, number | null> }));
 }
-async function norms(db: Db, clubIds: string[]) {
+export async function norms(db: Db, clubIds: string[]) {
   const rows = (await db.query('select club_id as "clubId", metric, per_day::float as v from kpi_norms where club_id = any($1)', [clubIds])).rows as { clubId: string; metric: string; v: number }[];
   const out: Record<string, Record<string, number | null>> = {};
   for (const c of clubIds) out[c] = Object.fromEntries(KPI.map((k) => [k.id, rows.find((r) => r.clubId === c && r.metric === k.id)?.v ?? DEFAULT_NORMS[k.id] ?? null]));
@@ -247,8 +247,8 @@ export async function lightOf(db: Db, clubIds: string[]) {
   return { green: v('light_green', LIGHT_DEFAULT.green), yellow: v('light_yellow', LIGHT_DEFAULT.yellow) };
 }
 /** Норма за период: суммарные показатели × дни; «просрочено» и «первый ответ» — не накапливаются */
-const normFor = (metric: string, perDay: number | null, days: number) => (perDay === null ? null : ['tasks_overdue', 'first_response'].includes(metric) ? perDay : Math.round(perDay * days * 10) / 10);
-function kpiStatus(metric: string, value: number | null, norm: number | null) {
+export const normFor = (metric: string, perDay: number | null, days: number) => (perDay === null ? null : ['tasks_overdue', 'first_response'].includes(metric) ? perDay : Math.round(perDay * days * 10) / 10);
+export function kpiStatus(metric: string, value: number | null, norm: number | null) {
   if (value === null || norm === null) return 'none';
   const k = KPI.find((x) => x.id === metric)!;
   if (k.higherIsBetter) return norm === 0 ? 'green' : value >= norm ? 'green' : value >= norm * 0.7 ? 'yellow' : 'red';

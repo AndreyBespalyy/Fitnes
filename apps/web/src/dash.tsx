@@ -1,5 +1,6 @@
 // Шаг 13. Рабочий стол из виджетов: дашборды собственника, управляющего, РОПа и менеджера,
 // план продаж по клубу и менеджерам, нормы KPI, отчёт по продажам, словарь метрик, выгрузки.
+import { PlanDrill } from './insights.tsx';
 import { Fragment, useEffect, useState } from 'react';
 import { api, can, type Club, type Me } from './api.ts';
 import { errText, toast } from './ui.ts';
@@ -20,7 +21,8 @@ const monthName = (m: string) => new Date(`${m}-01T12:00:00`).toLocaleDateString
 const todayIso = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; };
 const addD = (s: string, n: number) => { const d = new Date(`${s}T12:00:00`); d.setDate(d.getDate() + n); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; };
 
-export function DashPage({ me, clubs, clubId }: { me: Me; clubs: Club[]; clubId: string }) {
+export function DashPage({ me, clubs, clubId, openPerson }: { me: Me; clubs: Club[]; clubId: string; openPerson: (id: string) => void }) {
+  const [drill, setDrill] = useState<{ category: string | null; userId: string | null; month: string; clubId: string } | null>(null);
   const [layout, setLayout] = useState<Layout | null>(null);
   const [view, setView] = useState<'desk' | 'edit' | 'plan' | 'norms' | 'sales' | 'metrics'>('desk');
   const [month, setMonth] = useState(todayIso().slice(0, 7));
@@ -58,7 +60,9 @@ export function DashPage({ me, clubs, clubId }: { me: Me; clubs: Club[]; clubId:
           <input type="date" aria-label="По" value={range.to} onChange={(e) => e.target.value && setRange({ ...range, to: e.target.value })} style={{ width: 'auto' }} />
         </div>}
       </div>
+      {drill && <PlanDrill clubId={drill.clubId} month={drill.month} category={drill.category} userId={drill.userId} onClose={() => setDrill(null)} openPerson={openPerson} />}
       {view === 'desk' && (layout.widgets.length ? layout.widgets.map((w) => <Widget key={`${w}-${clubId}`} id={w} q={q} tick={tick} metrics={metrics}
+        onDrill={(x) => { const c = club?.id ?? (clubs.length === 1 ? clubs[0].id : null); if (!c) { toast('Выберите клуб вверху страницы, чтобы раскрыть цифру до клиентов'); return; } setDrill({ ...x, month, clubId: c }); }}
         title={layout.available.find((a) => a.id === w)?.title ?? w} />)
         : <div className="card"><p>На рабочем столе пока нет виджетов. Нажмите «Настроить» и выберите нужные.</p></div>)}
       {view === 'edit' && <LayoutEditor layout={layout} onSaved={() => { load(); setView('desk'); }} />}
@@ -72,7 +76,8 @@ export function DashPage({ me, clubs, clubId }: { me: Me; clubs: Club[]; clubId:
 const SelectClub = () => <div className="card"><p>Выберите клуб в списке вверху страницы.</p></div>;
 
 /* ---------- обёртка виджета ---------- */
-function Widget({ id, q, tick, title, metrics }: { id: string; q: string; tick: number; title: string; metrics: Metric[] }) {
+type DrillFn = (x: { category: string | null; userId: string | null }) => void;
+function Widget({ id, q, tick, title, metrics, onDrill }: { id: string; q: string; tick: number; title: string; metrics: Metric[]; onDrill: DrillFn }) {
   const [d, setD] = useState<Any>(null);
   const [err, setErr] = useState('');
   useEffect(() => { api<Any>('GET', `/api/dash/widget/${id}?${q}`).then((x) => { setD(x); setErr(''); }).catch((e) => setErr(errText(e))); }, [id, q, tick]);
@@ -88,7 +93,7 @@ function Widget({ id, q, tick, title, metrics }: { id: string; q: string; tick: 
       </div>
       {err && <p className="err">{err}</p>}
       {!d && !err && <p className="muted">Загрузка…</p>}
-      {d && <WidgetBody d={d} metrics={metrics} />}
+      {d && <WidgetBody d={d} metrics={metrics} onDrill={onDrill} />}
     </section>
   );
 }
@@ -102,7 +107,7 @@ const Kpi = ({ label, value, sub, metric, metrics, tone }: { label: string; valu
 const Bar = ({ v }: { v: number | null }) => <div className="meter" aria-hidden><i style={{ width: `${Math.min(100, Math.max(0, v ?? 0))}%` }} /></div>;
 const Light = ({ l }: { l: string }) => <span className={`chip ${LIGHT[l]?.[1] ?? ''}`}>{LIGHT[l]?.[0] ?? l}</span>;
 
-function WidgetBody({ d, metrics }: { d: Any; metrics: Metric[] }) {
+function WidgetBody({ d, metrics, onDrill }: { d: Any; metrics: Metric[]; onDrill: DrillFn }) {
   if (d.widget === 'day') {
     const m = d.monthPlan;
     return <>
@@ -141,7 +146,7 @@ function WidgetBody({ d, metrics }: { d: Any; metrics: Metric[] }) {
         <Kpi label="План на сегодня" value={t.dayPlanKop === null ? '—' : rub(t.dayPlanKop)} sub={`сегодня продано ${rub(t.todayKop)}`} metric="day_plan" metrics={metrics} />
       </div>
       <div className="tbl"><table><thead><tr><th>Категория</th><th>План</th><th>Факт</th><th>Выполнение</th><th className="hide-narrow">Клиенты, план / факт</th><th>Прогноз</th><th>Дефицит</th><th className="hide-narrow">На сегодня</th><th>Темп</th></tr></thead>
-        <tbody>{d.rows.map((r: Any) => <tr key={r.category}><td>{r.name}</td><td className="num">{r.planKop === null ? 'не задан' : rub(r.planKop)}</td><td className="num">{rub(r.factKop)}</td>
+        <tbody>{d.rows.map((r: Any) => <tr key={r.category}><td><button className="btn sm" title="Раскрыть до клиентов" onClick={() => onDrill({ category: r.category, userId: null })}>{r.name}</button></td><td className="num">{r.planKop === null ? 'не задан' : rub(r.planKop)}</td><td className="num">{rub(r.factKop)}</td>
           <td className="num">{pctText(r.percent)}<Bar v={r.percent} /></td><td className="num hide-narrow">{r.planClients ?? '—'} / {r.factClients}</td><td className="num">{rub(r.forecastKop)}</td>
           <td className={`num ${r.deficitKop ? 'bad' : ''}`}>{r.deficitKop === null ? '—' : rub(r.deficitKop)}</td><td className="num hide-narrow">{r.dayPlanKop === null ? '—' : rub(r.dayPlanKop)}</td><td><Light l={r.light} /></td></tr>)}
           {d.rows.length === 0 && <tr><td colSpan={9} className="muted">План на этот месяц не задан и продаж ещё нет</td></tr>}</tbody></table></div>
@@ -149,7 +154,7 @@ function WidgetBody({ d, metrics }: { d: Any; metrics: Metric[] }) {
   }
   if (d.widget === 'team') return (
     <div className="tbl"><table><thead><tr><th>Менеджер</th><th>План</th><th>Факт</th><th>Выполнение</th><th>Прогноз</th><th className="hide-narrow">Дефицит</th><th className="hide-narrow">Нужно сегодня</th><th className="hide-narrow">Клиентов</th><th>Светофор <Hint id="light" metrics={metrics} /></th></tr></thead>
-      <tbody>{d.rows.map((r: Any) => <tr key={r.userId}><td><b>{r.name}</b><div className="small muted">{r.role}{d.clubs.length > 1 ? ` · ${r.club}` : ''}</div></td>
+      <tbody>{d.rows.map((r: Any) => <tr key={r.userId}><td><button className="btn sm" title="Раскрыть до клиентов" onClick={() => onDrill({ category: null, userId: r.userId })}><b>{r.name}</b></button><div className="small muted">{r.role}{d.clubs.length > 1 ? ` · ${r.club}` : ''}</div></td>
         <td className="num">{r.planKop === null ? 'не задан' : rub(r.planKop)}</td><td className="num">{rub(r.factKop)}</td><td className="num">{pctText(r.percent)}<Bar v={r.percent} /></td>
         <td className="num">{rub(r.forecastKop)}</td><td className={`num hide-narrow ${r.deficitKop ? 'bad' : ''}`}>{r.deficitKop === null ? '—' : rub(r.deficitKop)}</td>
         <td className="num hide-narrow">{r.dayPlanKop === null ? '—' : rub(r.dayPlanKop)}</td><td className="num hide-narrow">{r.factClients}{r.planClients ? ` из ${r.planClients}` : ''}</td><td><Light l={r.light} /></td></tr>)}

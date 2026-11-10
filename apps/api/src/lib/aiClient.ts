@@ -109,3 +109,12 @@ export async function aiConfigSuggest(cfg: AiConfig, text: string, fields: Confi
     method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ text, fields }),
   }, 60_000);
 }
+
+/* ---------- оценка разговора по чек-листу стандарта ---------- */
+export type CallEvalResult = { items: { id: string; ok: boolean | null; quote?: string }[]; engine?: string };
+/** Оценка расшифровки по пунктам чек-листа. Расшифровка уходит только на свой ИИ-сервер клуба. */
+export async function aiEvaluateCall(cfg: AiConfig, transcript: unknown, checklist: { id: string; text: string }[]) {
+  return call<CallEvalResult>(cfg, '/v1/evaluate', {
+    method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ transcript, checklist }),
+  }, 5 * 60_000);
+}
