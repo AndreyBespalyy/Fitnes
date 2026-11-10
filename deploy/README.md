@@ -18,3 +18,11 @@
 
 Полезное: `docker compose ps`, `docker compose logs -f app`, `docker compose restart app`.
 Не удаляйте `deploy/.env`: в нём ключ, которым зашифрованы пароли касс, ключи банка и сохранённые карты.
+
+## Обновление с рабочего компьютера (Windows, PowerShell)
+
+    cd C:\Users\Admin\Desktop\Fitnes; git pull; git archive --format=tar.gz -o $env:TEMP\fitnes.tar.gz HEAD
+    scp -i C:\Users\Admin\.ssh\project2_vps -o IdentitiesOnly=yes $env:TEMP\fitnes.tar.gz root@144.31.107.204:/root/
+    ssh -i C:\Users\Admin\.ssh\project2_vps -o IdentitiesOnly=yes root@144.31.107.204 "tar -xzf /root/fitnes.tar.gz -C /opt/fitnes && rm /root/fitnes.tar.gz && cd /opt/fitnes/deploy && docker compose up -d --build"
+
+На сервере не запускайте db:reset и повторный db:seed: это сотрёт или задвоит данные.
