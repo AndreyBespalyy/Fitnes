@@ -1,4 +1,7 @@
+export type DeferredAudit = { ctx: { tenantId: string; userId: string | null; ip?: string; allClubs: boolean; clubIds: string[] }; action: string; objectType: string; objectId: string; after: unknown };
 export class HttpError extends Error {
+  /** Запись в журнал, которую нужно сделать даже после отката транзакции запроса (например, отказ в доступе) */
+  audit?: DeferredAudit;
   constructor(public status: number, message: string, public code = 'error') {
     super(message);
   }

@@ -4,7 +4,7 @@ import type { FastifyInstance, FastifyRequest } from 'fastify';
 import type pg from 'pg';
 import { can, requirePerm } from '../auth.ts';
 import { audit, withCtx, type Ctx, type Db } from '../db.ts';
-import { badRequest, notFound, unauthorized } from '../errors.ts';
+import { badRequest, HttpError, notFound, unauthorized } from '../errors.ts';
 import { PERMISSIONS as P } from '../roles.ts';
 
 /** Телефон в формат +7XXXXXXXXXX; null, если это не российский мобильный или городской номер. */
@@ -115,12 +115,41 @@ export async function createLead(db: Db, actor: Actor, b: LeadInput) {
 
 const onlyMine = (ctx: Ctx) => !can(ctx, P.crmViewAll);
 
+/** AT01: запись есть в сети, но в чужом клубе — отказ с записью в журнал аудита. Иначе «не найдено». */
+export async function denyOrNotFound(db: Db, ctx: Ctx, kind: 'person' | 'opportunity', id: string, msg: string): Promise<never> {
+  if (/^[0-9a-f-]{36}$/i.test(id) && (await db.query('select access_probe($1, $2) as x', [kind, id])).rows[0].x) {
+    // Запись в журнал делает обработчик ошибок отдельной транзакцией: эта откатится вместе с отказом
+    const e = new HttpError(403, kind === 'person' ? 'Клиент другого клуба: доступа нет' : 'Сделка другого клуба: доступа нет', 'other_club');
+    e.audit = { ctx, action: 'access.denied', objectType: kind, objectId: id, after: { reason: 'other_club' } };
+    throw e;
+  }
+  throw notFound(msg);
+}
+
 async function loadOpp(db: Db, ctx: Ctx, id: string) {
   const o = (await db.query(
     `select o.*, s.kind as stage_kind from opportunities o join pipeline_stages s on s.id = o.stage_id where o.id = $1`, [id])).rows[0];
-  if (!o) throw notFound('Сделка не найдена');
+  if (!o) return denyOrNotFound(db, ctx, 'opportunity', id, 'Сделка не найдена');
   if (onlyMine(ctx) && o.owner_id !== ctx.userId) throw notFound('Сделка не найдена');
   return o;
+}
+
+/** AT23: «продано» без поступления денег от клиента за 30 дней — пометка сделки и задача РОПу (или управляющему). */
+async function checkWonPaid(db: Db, ctx: Ctx, o: { id: string; club_id: string; person_id: string }) {
+  const paid = (await db.query(`select 1 from payments where person_id = $1 and club_id = $2 and direction = 'in' and created_at > now() - interval '30 days' limit 1`, [o.person_id, o.club_id])).rowCount;
+  if (paid) return null;
+  await db.query('update opportunities set won_unpaid = true where id = $1', [o.id]);
+  const heads = (await db.query(
+    `select a.user_id, a.role_code from user_assignments a join users u on u.id = a.user_id
+     where a.club_id = $1 and a.role_code in ('rop', 'gm') and u.status = 'active' and a.active_from <= current_date and (a.active_to is null or a.active_to >= current_date)`, [o.club_id])).rows;
+  const to = heads.filter((h) => h.role_code === 'rop').length ? heads.filter((h) => h.role_code === 'rop') : heads;
+  const name = (await db.query('select full_name from persons where id = $1', [o.person_id])).rows[0]?.full_name ?? 'клиент';
+  for (const h of to) {
+    await db.query(`insert into tasks(tenant_id, club_id, assignee_id, person_id, opportunity_id, kind, title, due_at, created_by) values ($1,$2,$3,$4,$5,'other',$6, now() + interval '1 hour', $7)`,
+      [ctx.tenantId, o.club_id, h.user_id, o.person_id, o.id, `Проверить: сделка «${name}» закрыта как продажа, а оплаты нет`, ctx.userId]);
+  }
+  await audit(db, ctx, 'opportunity.won_unpaid', 'opportunity', o.id, null, { notified: to.length });
+  return 'Оплаты от клиента не найдено. Сделка помечена, руководитель отдела продаж получил задачу проверить. Если клиент оплатит, оформите продажу абонемента.';
 }
 
 type NextTask = { title?: string; dueAt?: string; kind?: string };
@@ -171,7 +200,17 @@ export function crmRoutes(app: FastifyInstance, pool: pg.Pool) {
     if (!token) throw unauthorized('Нужен ключ источника');
     const src = (await pool.query('select * from auth_lead_source($1)', [createHash('sha256').update(token).digest('hex')])).rows[0];
     if (!src) throw unauthorized('Ключ источника не найден или отключён');
-    const b = (req.body ?? {}) as LeadInput;
+    const b = (req.body ?? {}) as LeadInput & { test?: boolean };
+    // AT24: проверочная заявка — данные проверяются, но клиент, сделка, задача и сообщения не создаются, в отчёты ничего не попадает
+    if (b.test === true) {
+      return withCtx(pool, { tenantId: src.tenant_id, allClubs: true, clubIds: [] }, async (db) => {
+        if (!b.clubId || !(await db.query('select 1 from clubs where id = $1', [b.clubId])).rowCount) throw badRequest('Клуб не найден');
+        if (b.phone && !normalizePhone(b.phone)) throw badRequest('Телефон указан неверно. Нужен номер вида +7 900 000-00-00');
+        if (!b.phone && !b.email && !b.contact) throw badRequest('Укажите телефон или e-mail');
+        await db.query('update lead_sources set last_test_at = now() where id = $1', [src.source_id]);
+        return { test: true, ok: true, message: 'Проверочная заявка принята. Клиент и сделка не созданы' };
+      });
+    }
     const res = await withCtx(pool, { tenantId: src.tenant_id, allClubs: true, clubIds: [] }, (db) =>
       createLead(db, { tenantId: src.tenant_id, userId: null, ip: req.ip }, { ...b, sourceId: src.source_id, assignedTo: undefined }));
     reply.code(res.idempotent ? 200 : 201);
@@ -188,7 +227,7 @@ export function crmRoutes(app: FastifyInstance, pool: pg.Pool) {
            p.autopay_enabled as "autopayEnabled", p.autopay_changed_at as "autopayChangedAt",
            p.marketing_consent as "marketingConsent", p.messaging_opt_out as "messagingOptOut"
          from persons p left join clubs c on c.id = p.home_club_id where p.id = $1`, [id])).rows[0];
-      if (!person) throw notFound('Клиент не найден');
+      if (!person) return denyOrNotFound(db, ctx, 'person', id, 'Клиент не найден');
       const contacts = (await db.query('select type, value, is_primary as "isPrimary" from person_contacts where person_id = $1 order by is_primary desc', [id])).rows
         .map((c) => ({ ...c, value: c.type === 'phone' ? maskPhone(c.value) : c.value }));
       const leads = (await db.query(
@@ -236,6 +275,7 @@ export function crmRoutes(app: FastifyInstance, pool: pg.Pool) {
     return withCtx(pool, ctx, async (db) => {
       const o = await loadOpp(db, ctx, id);
       if (o.status !== 'open') throw badRequest('Сделка уже закрыта');
+      let warning: string | null = null;
       const stage = (await db.query('select id, name, kind from pipeline_stages where id = $1 and pipeline_id = $2', [b.stageId, o.pipeline_id])).rows[0];
       if (!stage) throw badRequest('Этап не из этой воронки');
       if (stage.id === o.stage_id) throw badRequest('Сделка уже на этом этапе');
@@ -250,11 +290,12 @@ export function crmRoutes(app: FastifyInstance, pool: pg.Pool) {
           [id, stage.id, stage.kind, stage.kind === 'lost' ? b.lostReason!.trim() : null]);
         await db.query(`update tasks set done_at = now(), result = $2 where opportunity_id = $1 and done_at is null`, [id, `Сделка закрыта: ${stage.name}`]);
         if (stage.kind === 'won') await db.query(`update persons set segment = 'новый', updated_at = now() where id = $1 and segment = 'лид'`, [o.person_id]);
+        if (stage.kind === 'won') warning = await checkWonPaid(db, ctx, o);
       }
       await db.query('insert into opportunity_stage_history(tenant_id, club_id, opportunity_id, from_stage_id, to_stage_id, actor_id, comment) values ($1,$2,$3,$4,$5,$6,$7)',
         [ctx.tenantId, o.club_id, id, o.stage_id, stage.id, ctx.userId, b.comment?.trim() || b.lostReason?.trim() || null]);
       await audit(db, ctx, 'opportunity.stage_changed', 'opportunity', id, { stageId: o.stage_id }, { stageId: stage.id, status: stage.kind === 'open' ? 'open' : stage.kind });
-      return { ok: true, status: stage.kind === 'open' ? 'open' : stage.kind };
+      return { ok: true, status: stage.kind === 'open' ? 'open' : stage.kind, warning };
     });
   });
 

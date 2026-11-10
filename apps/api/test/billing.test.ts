@@ -154,6 +154,11 @@ test('ЮKassa: создание оплаты, переход на страниц
   const hook = await app.inject({ method: 'POST', url: `/api/hooks/pay/${c1}`, payload: { type: 'notification', event: 'payment.succeeded', object: { id: 'yk-1' } } });
   assert.equal(hook.body, 'OK');
   assert.equal((await sql('select status, paid_method from charges where id = $1', [ch]))[0].paid_method, 'online');
+  // AT05: банк прислал то же уведомление ещё раз — второго поступления нет
+  const paidBefore = (await sql(`select count(*)::int as n from payments where charge_id = $1 and direction = 'in'`, [ch]))[0].n;
+  assert.equal((await app.inject({ method: 'POST', url: `/api/hooks/pay/${c1}`, payload: { type: 'notification', event: 'payment.succeeded', object: { id: 'yk-1' } } })).body, 'OK');
+  assert.equal((await sql(`select count(*)::int as n from payments where charge_id = $1 and direction = 'in'`, [ch]))[0].n, paidBefore);
+  assert.equal(paidBefore, 1);
   // Вернули тестовый банк
   await req('PUT', `/api/clubs/${c1}/acquiring`, 'o.smirnov', { provider: 'test' });
 });
@@ -178,6 +183,8 @@ test('сверка с выпиской: возмещение эквайринг�
   assert.ok(u.matched.acquiring >= 2);
   assert.equal(u.matched.bank_fee, 1);
   assert.equal(u.unmatched, 2);
+  // AT13: без пары — «не сверено» и задача финансисту, фиктивного совпадения нет
+  assert.equal((await sql(`select count(*)::int as n from tasks t join users x on x.id = t.assignee_id where x.login = 'e.orlova' and t.title like 'Сверка с банком: 2 операц.%'`))[0].n, 1);
   const again = (await req('POST', '/api/bank/statements', 'e.orlova', { clubId: c1, fileName: 'kl_to_1c.txt', dataBase64: buf.toString('base64') })).json();
   assert.equal(again.added, 0); assert.equal(again.duplicates, st.docs.length);
   const lines = (await req('GET', `/api/bank/lines?clubId=${c1}`, 'e.orlova')).json();

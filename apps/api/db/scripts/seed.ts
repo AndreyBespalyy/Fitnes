@@ -65,7 +65,7 @@ async function seedMemberships(c: Db, t: string) {
       select ch.tenant_id, ch.club_id, 'in', 'charge', ch.amount_kop, 'card_terminal', ch.person_id, ch.id, m.sale_category, ch.paid_at
       from charges ch join memberships m on m.id = ch.membership_id where ch.membership_id = $1 and ch.status = 'paid'`, [id]);
   };
-  const sell = async (person: string, product: string, installments = 1) => (await sellMembership(c, ctx, { personId: await pid(person), productId: await prod(product), installments })).id;
+  const sell = async (person: string, product: string, installments = 1) => (await sellMembership(c, ctx, { personId: await pid(person), productId: await prod(product), installments, confirmDuplicate: true })).id;
 
   // Реквизиты демо-клубов (вымышленные, для проверки печати договора)
   const clubsRows = (await c.query(`select id, name from clubs order by created_at`)).rows;
@@ -272,7 +272,7 @@ async function seedBilling(c: Db, t: string, clubs: Record<string, string>) {
   const guest = (await c.query(`select id from products where club_id = $1 and kind = 'guest'`, [clubs.c1])).rows[0].id;
   const yudina = (await c.query(`select id from persons where full_name = 'Светлана Юдина'`)).rows[0].id;
   for (const [daysAgo, sbp] of [[1, false], [2, true], [2, false], [3, false]] as const) {
-    const m = await sellMembership(c, { tenantId: t, userId: null as unknown as string }, { personId: yudina, productId: guest });
+    const m = await sellMembership(c, { tenantId: t, userId: null as unknown as string }, { personId: yudina, productId: guest, confirmDuplicate: true });
     const ch = (await c.query(`select id from charges where membership_id = $1`, [m.id])).rows[0].id;
     const link = await payLink(c, noFetch, actor, ch, 'http://localhost:3000');
     const op = (await c.query('select * from online_payments where id = $1', [link.id])).rows[0];

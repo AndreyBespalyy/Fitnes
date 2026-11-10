@@ -5,6 +5,11 @@ set -euo pipefail
 cd /opt/fitnes
 exec 9>/run/fitnes-update.lock
 flock -n 9 || exit 0
+# Резервная копия раз в сутки (AT12): если последней успешной больше 20 часов
+LAST=/opt/fitnes-backups/last-ok
+if [ ! -f "$LAST" ] || [ $(( $(date +%s) - $(stat -c %Y "$LAST") )) -gt 72000 ]; then
+  bash deploy/backup.sh || echo "$(date -Is) ОШИБКА резервной копии"
+fi
 git fetch -q origin main
 cur=$(git rev-parse -q --verify HEAD || echo нет)
 new=$(git rev-parse origin/main)

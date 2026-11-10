@@ -3,7 +3,7 @@ import type { FastifyInstance } from 'fastify';
 import type pg from 'pg';
 import { requirePerm } from '../auth.ts';
 import { audit, withCtx, type Ctx, type Db } from '../db.ts';
-import { badRequest, notFound } from '../errors.ts';
+import { badRequest, HttpError, notFound } from '../errors.ts';
 import { PERMISSIONS as P } from '../roles.ts';
 import { contractsByMembership, createContract } from './contracts.ts';
 import { receiptForCharge } from './fiscal.ts';
@@ -111,7 +111,7 @@ export async function personMemberships(db: Db, personId: string) {
 }
 
 /* ---------- продажа и продление ---------- */
-type SaleInput = { personId?: string; productId?: string; startsOn?: string; installments?: number; renewFromId?: string };
+export type SaleInput = { personId?: string; productId?: string; startsOn?: string; installments?: number; renewFromId?: string; confirmDuplicate?: boolean };
 
 async function currentPrice(db: Db, productId: string) {
   return (await db.query('select id, amount_kop from price_versions where product_id = $1 and valid_from <= now() order by valid_from desc limit 1', [productId])).rows[0];
@@ -122,6 +122,19 @@ export async function sellMembership(db: Db, ctx: Pick<Ctx, 'tenantId' | 'userId
   if (!prod) throw badRequest('Тариф не найден');
   if (!prod.is_active) throw badRequest('Тариф снят с продажи');
   if (!(await db.query('select 1 from persons where id = $1', [b.personId])).rowCount) throw badRequest('Клиент не найден');
+  // AT20: продажи одному клиенту идут по очереди. Двое нажали одновременно — вторая продажа увидит первую и остановится с предупреждением
+  await db.query('select pg_advisory_xact_lock(hashtext($1))', [`sale:${b.personId}`]);
+  const recent = (await db.query(
+    `select m.renewed_from_id, m.created_at, u.full_name from memberships m left join users u on u.id = m.created_by
+     where m.person_id = $1 and m.status <> 'cancelled' and (($2::uuid is not null and m.renewed_from_id = $2) or ($2::uuid is null and m.product_id = $3 and m.created_at > now() - interval '10 minutes'))
+     order by m.created_at desc limit 1`, [b.personId, b.renewFromId ?? null, b.productId])).rows[0];
+  if (recent && (recent.renewed_from_id && recent.renewed_from_id === b.renewFromId || !b.confirmDuplicate)) {
+    const who = recent.full_name ? `${recent.full_name}, ` : '';
+    const tz = (await db.query('select timezone from clubs where id = $1', [prod.club_id])).rows[0]?.timezone ?? 'Europe/Moscow';
+    const at = new Date(recent.created_at).toLocaleString('ru-RU', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit', timeZone: tz });
+    if (recent.renewed_from_id && recent.renewed_from_id === b.renewFromId) throw new HttpError(409, `Этот абонемент уже продлён (${who}${at}). Повторная продажа не нужна`, 'already_renewed');
+    throw new HttpError(409, `Такой же тариф этому клиенту уже продан ${at} (${who.replace(/, $/, '') || 'другим сотрудником'}). Если это правда вторая покупка, подтвердите`, 'duplicate_sale');
+  }
   const price = await currentPrice(db, prod.id);
   if (!price) throw badRequest('У тарифа нет цены');
   const s = await getSettings(db, prod.club_id);

@@ -72,7 +72,7 @@ export async function seedDemoHistory(c: Db, t: string) {
           const prods = products.filter((p) => p.kind !== 'subscription' || (now - sched.getTime()) / 86_400_000 < 27);
           if (status === 'attended' && rnd() < 0.62 && prods.length) {
             const prod = club.sales_model === 'subscription' ? (prods.find((p) => p.kind === 'subscription') ?? pick(prods)) : pick(prods.filter((p) => p.kind !== 'subscription').length ? prods.filter((p) => p.kind !== 'subscription') : prods);
-            const sale = await sellMembership(c, { tenantId: t, userId: mgr }, { personId: lead.personId, productId: prod.id });
+            const sale = await sellMembership(c, { tenantId: t, userId: mgr }, { personId: lead.personId, productId: prod.id, confirmDuplicate: true });
             const saleAt = new Date(sched.getTime() + 40 * 60_000);
             const saleDay = (await c.query(`select to_char(($1::timestamptz at time zone 'Europe/Moscow')::date, 'YYYY-MM-DD') as d`, [saleAt])).rows[0].d as string;
             const shift = Math.round((Date.parse(today) - Date.parse(saleDay)) / 86_400_000);

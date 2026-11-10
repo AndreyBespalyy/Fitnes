@@ -173,6 +173,15 @@ export function bankRoutes(app: FastifyInstance, pool: pg.Pool) {
         if (k) matched[k] = (matched[k] ?? 0) + 1;
       }
       await db.query('update bank_statements set lines = $2 where id = $1', [sid, added]);
+      // AT13: операции без пары не сводятся «как-нибудь» — остаются «не сверено», финансист (или управляющий) получает задачу
+      const unmatched = added - Object.values(matched).reduce((s, n) => s + n, 0);
+      if (unmatched > 0) {
+        const fin = (await db.query(`select distinct a.user_id, a.role_code from user_assignments a join users u on u.id = a.user_id
+          where (a.club_id = $1 or a.club_id is null) and a.role_code in ('fin', 'gm') and u.status = 'active' and a.active_from <= current_date and (a.active_to is null or a.active_to >= current_date)`, [b.clubId])).rows;
+        const to = fin.some((f) => f.role_code === 'fin') ? fin.filter((f) => f.role_code === 'fin') : fin;
+        for (const f of to) await db.query(`insert into tasks(tenant_id, club_id, assignee_id, kind, title, due_at, created_by) values ($1,$2,$3,'other',$4, now() + interval '1 day', $5)`,
+          [ctx.tenantId, b.clubId, f.user_id, `Сверка с банком: ${unmatched} операц. без пары в выписке за ${st.from ?? ''}–${st.to ?? ''} — разберите во вкладке «Финансы»`, ctx.userId]);
+      }
       await audit(db, ctx, 'bank.statement_uploaded', 'club', b.clubId!, null, { statementId: sid, added, dup, matched });
       return { id: sid, added, duplicates: dup, matched, unmatched: added - Object.values(matched).reduce((s, n) => s + n, 0), period: { from: st.from, to: st.to } };
     });

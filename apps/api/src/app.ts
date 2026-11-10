@@ -5,6 +5,7 @@ import { existsSync } from 'node:fs';
 import type pg from 'pg';
 import { authRoutes, COOKIE, loadCtx } from './auth.ts';
 import { HttpError } from './errors.ts';
+import { audit, withCtx } from './db.ts';
 import { clubRoutes } from './modules/clubs.ts';
 import { personRoutes } from './modules/persons.ts';
 import { crmRoutes } from './modules/crm.ts';
@@ -41,8 +42,28 @@ export async function buildApp(pool: pg.Pool, opts: { webDist?: string; secureCo
     }
   });
 
-  app.setErrorHandler((err, req, reply) => {
-    if (err instanceof HttpError) return reply.code(err.status).send({ error: err.code, message: err.message });
+  // Заголовки безопасности (шаг 17): запрет встраивания чужими сайтами, только свои скрипты, без угадывания типов файлов
+  const CSP = ["default-src 'self'", "script-src 'self'", "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com", "font-src 'self' https://fonts.gstatic.com",
+    "img-src 'self' data: blob:", "media-src 'self' blob:", "connect-src 'self' http: https:", "frame-src 'self'", "frame-ancestors 'self'", "object-src 'none'",
+    "base-uri 'self'", "form-action 'self'", "worker-src 'self'", "manifest-src 'self'"].join('; ');
+  app.addHook('onSend', async (req, reply) => {
+    reply.header('X-Content-Type-Options', 'nosniff');
+    reply.header('Referrer-Policy', 'strict-origin-when-cross-origin');
+    reply.header('X-Frame-Options', 'SAMEORIGIN');
+    reply.header('Permissions-Policy', 'camera=(), microphone=(), geolocation=(), payment=()');
+    if (opts.secureCookie) reply.header('Strict-Transport-Security', 'max-age=31536000');
+    if (req.url.startsWith('/api/')) reply.header('Cache-Control', reply.getHeader('Cache-Control') ?? 'no-store');
+    else reply.header('Content-Security-Policy', CSP);
+  });
+
+  app.setErrorHandler(async (err, req, reply) => {
+    if (err instanceof HttpError) {
+      if (err.audit) {
+        const a = err.audit;
+        await withCtx(pool, a.ctx, (db) => audit(db, a.ctx, a.action, a.objectType, a.objectId, null, a.after)).catch((e) => req.log.error(e));
+      }
+      return reply.code(err.status).send({ error: err.code, message: err.message });
+    }
     const e = err as { statusCode?: number; code?: string; message?: string };
     if (e.code === '22P02') return reply.code(400).send({ error: 'bad_request', message: 'Неверный идентификатор' });
     if (e.statusCode && e.statusCode < 500) return reply.code(e.statusCode).send({ error: 'bad_request', message: e.message });

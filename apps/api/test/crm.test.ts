@@ -100,7 +100,8 @@ test('движение по воронке: отказ требует причи
   const won = await req('POST', `/api/opportunities/${opp.id}/stage`, mgr, { stageId: stage('Купил') });
   assert.equal(won.json().status, 'won');
   const after = (await req('GET', `/api/persons/${lead.personId}`, mgr)).json();
-  assert.ok(after.tasks.every((x: { doneAt: string | null }) => x.doneAt), 'открытых задач не осталось');
+  // Остаётся только контрольная задача РОПу «продано без оплаты» (AT23)
+  assert.ok(after.tasks.every((x: { doneAt: string | null; title: string }) => x.doneAt || x.title.startsWith('Проверить: сделка')), 'открытых задач менеджера не осталось');
   assert.ok(after.history.length >= 3, 'история этапов');
 });
 
