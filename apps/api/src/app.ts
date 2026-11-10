@@ -11,8 +11,12 @@ import { crmRoutes } from './modules/crm.ts';
 import { pipelineRoutes } from './modules/pipelines.ts';
 import { staffRoutes } from './modules/staff.ts';
 import { membershipRoutes } from './modules/memberships.ts';
+import { contractRoutes } from './modules/contracts.ts';
+import { siteRoutes } from './modules/site.ts';
+import { join, dirname } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
-export async function buildApp(pool: pg.Pool, opts: { webDist?: string; secureCookie?: boolean; logger?: boolean } = {}) {
+export async function buildApp(pool: pg.Pool, opts: { webDist?: string; secureCookie?: boolean; logger?: boolean; storageDir?: string } = {}) {
   const app = Fastify({ logger: opts.logger ?? false, trustProxy: true });
   await app.register(cookie);
 
@@ -45,6 +49,10 @@ export async function buildApp(pool: pg.Pool, opts: { webDist?: string; secureCo
   crmRoutes(app, pool);
   pipelineRoutes(app, pool);
   membershipRoutes(app, pool);
+  // Файлы (PDF договоров, сканы, подписи) лежат на диске; путь задаётся STORAGE_DIR, по умолчанию папка storage в корне проекта
+  const storage = opts.storageDir ?? process.env.STORAGE_DIR ?? join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..', 'storage');
+  contractRoutes(app, pool, storage);
+  siteRoutes(app, pool, storage);
 
   if (opts.webDist && existsSync(opts.webDist)) {
     await app.register(fstatic, { root: opts.webDist });

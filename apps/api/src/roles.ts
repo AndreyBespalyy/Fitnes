@@ -15,6 +15,9 @@ export const PERMISSIONS = {
   membershipsSell: 'memberships.sell',
   membershipsManage: 'memberships.manage',
   membershipsView: 'memberships.view',
+  contractsManage: 'contracts.manage', // юрлицо клуба, PDF договора и правил
+  contractsSign: 'contracts.sign',     // печать, скан, подписание на планшете
+  siteManage: 'site.manage',           // предложения клуба для сайта
 } as const;
 
 const P = PERMISSIONS;
@@ -26,9 +29,9 @@ export const ROLE_SEED = [
   // Сетевые действия (создание клубов, общие источники лидов, сетевые роли) проверяются отдельно по ctx.allClubs.
   { code: 'gm', name: 'Управляющий', network_wide: false, sort: 3,
     permissions: Object.values(P).filter((p) => p !== P.sourcesManage) },
-  { code: 'rop', name: 'Руководитель ОП', network_wide: false, sort: 4, permissions: [P.clubsView, P.staffView, P.personsView, P.leadsCreate, P.crmWork, P.crmViewAll, P.membershipsSell, P.membershipsView] },
-  { code: 'manager', name: 'Менеджер ОП', network_wide: false, sort: 5, permissions: [P.clubsView, P.personsView, P.leadsCreate, P.crmWork, P.membershipsSell, P.membershipsView] },
-  { code: 'desk', name: 'Администратор ресепшн', network_wide: false, sort: 6, permissions: [P.clubsView, P.personsView, P.leadsCreate, P.membershipsSell, P.membershipsView, P.membershipsManage] },
+  { code: 'rop', name: 'Руководитель ОП', network_wide: false, sort: 4, permissions: [P.clubsView, P.staffView, P.personsView, P.leadsCreate, P.crmWork, P.crmViewAll, P.membershipsSell, P.membershipsView, P.contractsSign] },
+  { code: 'manager', name: 'Менеджер ОП', network_wide: false, sort: 5, permissions: [P.clubsView, P.personsView, P.leadsCreate, P.crmWork, P.membershipsSell, P.membershipsView, P.contractsSign] },
+  { code: 'desk', name: 'Администратор ресепшн', network_wide: false, sort: 6, permissions: [P.clubsView, P.personsView, P.leadsCreate, P.membershipsSell, P.membershipsView, P.membershipsManage, P.contractsSign] },
   { code: 'fin', name: 'Финансист', network_wide: false, sort: 7, permissions: [P.clubsView, P.personsView, P.membershipsView] },
   { code: 'trainer', name: 'Тренер', network_wide: false, sort: 8, permissions: [P.clubsView, P.membershipsView] },
 ];

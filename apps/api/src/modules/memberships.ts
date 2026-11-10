@@ -5,6 +5,7 @@ import { requirePerm } from '../auth.ts';
 import { audit, withCtx, type Ctx, type Db } from '../db.ts';
 import { badRequest, notFound } from '../errors.ts';
 import { PERMISSIONS as P } from '../roles.ts';
+import { contractsByMembership, createContract } from './contracts.ts';
 
 /* ---------- даты (строки YYYY-MM-DD, без часовых сдвигов) ---------- */
 const D = (s: string) => new Date(`${s}T00:00:00Z`);
@@ -17,6 +18,7 @@ export const addMonths = (s: string, n: number) => {
   d.setUTCDate(Math.min(day, last));
   return iso(d);
 };
+const ru = (s: string | null) => (s ? s.split('-').reverse().join('.') : '');
 export const daysBetween = (a: string, b: string) => Math.round((D(b).getTime() - D(a).getTime()) / 86_400_000);
 const isDate = (s: unknown): s is string => typeof s === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(s) && !Number.isNaN(D(s).getTime());
 export async function clubToday(db: Db, clubId: string): Promise<string> {
@@ -26,7 +28,7 @@ export async function clubToday(db: Db, clubId: string): Promise<string> {
 export type Settings = {
   freezeEnabled: boolean; freezeMaxDaysPerYear: number; freezeMaxTimesPerYear: number; freezeMinDays: number; freezePaid: boolean; freezePriceKop: number;
   installmentsEnabled: boolean; installmentsMaxPayments: number; overdueBlockAfterDays: number;
-  subscriptionRetryAttempts: number; subscriptionRetryIntervalDays: number; renewalReminderDays: number;
+  subscriptionRetryAttempts: number; subscriptionRetryIntervalDays: number; renewalReminderDays: number; contractRequiredForAccess: boolean;
 };
 const SETTINGS_COLS: [keyof Settings, string, 'bool' | 'int'][] = [
   ['freezeEnabled', 'freeze_enabled', 'bool'], ['freezeMaxDaysPerYear', 'freeze_max_days_per_year', 'int'], ['freezeMaxTimesPerYear', 'freeze_max_times_per_year', 'int'],
@@ -34,6 +36,7 @@ const SETTINGS_COLS: [keyof Settings, string, 'bool' | 'int'][] = [
   ['installmentsEnabled', 'installments_enabled', 'bool'], ['installmentsMaxPayments', 'installments_max_payments', 'int'],
   ['overdueBlockAfterDays', 'overdue_block_after_days', 'int'], ['subscriptionRetryAttempts', 'subscription_retry_attempts', 'int'],
   ['subscriptionRetryIntervalDays', 'subscription_retry_interval_days', 'int'], ['renewalReminderDays', 'renewal_reminder_days', 'int'],
+  ['contractRequiredForAccess', 'contract_required_for_access', 'bool'],
 ];
 
 export async function getSettings(db: Db, clubId: string): Promise<Settings> {
@@ -48,19 +51,20 @@ type MRow = { id: string; kind: string; status: string; starts_on: string; ends_
 type Freeze = { starts_on: string; ends_on: string; ended_early_on: string | null };
 type Charge = { due_on: string; status: string; amount_kop: string | number };
 
-export function membershipState(m: MRow, freezes: Freeze[], charges: Charge[], s: Settings, today: string) {
+export function membershipState(m: MRow, freezes: Freeze[], charges: Charge[], s: Settings, today: string, contractStatus?: string) {
   if (m.status === 'cancelled') return { state: 'cancelled', access: false, reason: 'Абонемент расторгнут' };
-  if (m.starts_on > today) return { state: 'not_started', access: false, reason: `Начнёт действовать с ${m.starts_on}` };
+  if (m.starts_on > today) return { state: 'not_started', access: false, reason: `Начнёт действовать с ${ru(m.starts_on)}` };
   const fr = freezes.find((f) => f.starts_on <= today && (f.ended_early_on ? f.ended_early_on > today : f.ends_on >= today));
-  if (fr) return { state: 'frozen', access: false, reason: `Заморожен до ${fr.ended_early_on ?? fr.ends_on}` };
-  if (m.ends_on && m.ends_on < today) return { state: 'expired', access: false, reason: `Закончился ${m.ends_on}` };
+  if (fr) return { state: 'frozen', access: false, reason: `Заморожен до ${ru(fr.ended_early_on ?? fr.ends_on)}` };
+  if (m.ends_on && m.ends_on < today) return { state: 'expired', access: false, reason: `Закончился ${ru(m.ends_on)}` };
   if (m.visits_left !== null && m.visits_left <= 0) return { state: 'used_up', access: false, reason: 'Посещения закончились' };
   const overdue = charges.filter((c) => c.status === 'due' && c.due_on < today);
   const worst = overdue.reduce((mx, c) => Math.max(mx, daysBetween(c.due_on, today)), 0);
   const debt = overdue.reduce((sum, c) => sum + Number(c.amount_kop), 0);
   if (overdue.length && worst > s.overdueBlockAfterDays) return { state: 'debt_blocked', access: false, reason: `Долг ${(debt / 100).toLocaleString('ru-RU')} ₽, просрочка ${worst} дн.`, debtKop: debt };
   if (overdue.length) return { state: 'debt_grace', access: true, reason: `Долг ${(debt / 100).toLocaleString('ru-RU')} ₽: проход закроется через ${s.overdueBlockAfterDays - worst + 1} дн.`, debtKop: debt };
-  return { state: 'active', access: true, reason: m.ends_on ? `Действует до ${m.ends_on}` : 'Действует' };
+  if (s.contractRequiredForAccess && contractStatus !== 'signed') return { state: 'unsigned', access: false, reason: 'Договор не подписан' };
+  return { state: 'active', access: true, reason: m.ends_on ? `Действует до ${ru(m.ends_on)}` : 'Действует' };
 }
 
 async function loadMembership(db: Db, id: string) {
@@ -83,7 +87,7 @@ export async function personMemberships(db: Db, personId: string) {
     where m.person_id = $1 order by m.starts_on desc`, [personId])).rows;
   if (!ms.length) return [];
   const ids = ms.map((m) => m.id);
-  const [fr, ch] = [await freezesOf(db, ids), await chargesOf(db, ids)];
+  const [fr, ch, ct] = [await freezesOf(db, ids), await chargesOf(db, ids), await contractsByMembership(db, ids)];
   const out = [];
   for (const m of ms) {
     const s = await getSettings(db, m.club_id);
@@ -93,7 +97,8 @@ export async function personMemberships(db: Db, personId: string) {
     out.push({
       id: m.id, clubId: m.club_id, clubName: m.club_name, kind: m.kind, productName: m.product_name, amountKop: Number(m.amount_kop),
       startsOn: m.starts_on, endsOn: m.ends_on, visitsLeft: m.visits_left, installments: m.installments, nextChargeOn: m.next_charge_on,
-      status: m.status, freezeAllowed: m.freeze_allowed && s.freezeEnabled, ...membershipState(m, f, c, s, today),
+      status: m.status, freezeAllowed: m.freeze_allowed && s.freezeEnabled, ...membershipState(m, f, c, s, today, ct.get(m.id)?.status),
+      contract: ct.get(m.id) ?? null,
       freezes: f.map((x) => ({ id: x.id, startsOn: x.starts_on, endsOn: x.ends_on, endedEarlyOn: x.ended_early_on, days: x.days })),
       charges: c.map((x) => ({ id: x.id, kind: x.kind, title: x.title, dueOn: x.due_on, amountKop: Number(x.amount_kop), status: x.status,
         paidAt: x.paid_at, paidMethod: x.paid_method, overdue: x.status === 'due' && x.due_on < today })),
@@ -165,9 +170,10 @@ export async function sellMembership(db: Db, ctx: Pick<Ctx, 'tenantId' | 'userId
   }
   await db.query('insert into membership_operations(tenant_id, club_id, membership_id, kind, params, actor_id) values ($1,$2,$3,$4,$5,$6)',
     [ctx.tenantId, prod.club_id, id, renewedFrom ? 'renewal' : 'sale', JSON.stringify({ productId: prod.id, priceVersionId: price.id, amountKop: amount, installments: n, startsOn, renewedFrom }), ctx.userId]);
+  const contract = await createContract(db, ctx, id);
   await db.query(`update persons set segment = case when $2 = 'subscription' then 'активный подписчик' else 'действующий' end, updated_at = now() where id = $1`, [b.personId, prod.kind]);
   await audit(db, ctx, renewedFrom ? 'membership.renewed' : 'membership.sold', 'membership', id, null, { productId: prod.id, amountKop: amount, installments: n, startsOn, endsOn });
-  return { id, startsOn, endsOn };
+  return { id, startsOn, endsOn, contractId: contract.id, contractNumber: contract.number };
 }
 
 /* ---------- заморозка ---------- */
@@ -385,6 +391,7 @@ export function membershipRoutes(app: FastifyInstance, pool: pg.Pool) {
       if (m.status === 'cancelled') throw badRequest('Абонемент уже расторгнут');
       await db.query(`update memberships set status = 'cancelled', cancel_reason = $2, next_charge_on = null, updated_at = now() where id = $1`, [id, reason.trim()]);
       await db.query(`update charges set status = 'cancelled' where membership_id = $1 and status = 'due' and due_on > (select (now() at time zone timezone)::date from clubs where id = $2)`, [id, m.club_id]);
+      await db.query(`update contracts set status = 'cancelled' where membership_id = $1 and status <> 'cancelled'`, [id]);
       await db.query(`insert into membership_operations(tenant_id, club_id, membership_id, kind, params, actor_id) values ($1,$2,$3,'cancel',$4,$5)`,
         [ctx.tenantId, m.club_id, id, JSON.stringify({ reason: reason.trim() }), ctx.userId]);
       if (m.kind === 'subscription') await db.query(`update persons set segment = 'отписавшийся' where id = $1`, [m.person_id]);

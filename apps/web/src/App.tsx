@@ -3,6 +3,7 @@ import { api, can, MODEL, MODEL_SHORT, type Club, type Me, type Person, type Rol
 import { errText, toast as alertOk } from './ui.ts';
 import { BoardPage, LeadsPage, PersonCard, PipelinesAdmin, TasksPage } from './crm.tsx';
 import { TariffsPage } from './memberships.tsx';
+import { ContractsAdminPage, SitePage } from './contracts.tsx';
 
 export function App() {
   const [me, setMe] = useState<Me | null | undefined>(undefined);
@@ -66,7 +67,7 @@ function ChangePassword({ me, forced, onDone, onLogout }: { me: Me; forced?: boo
   );
 }
 
-type Tab = 'leads' | 'board' | 'tasks' | 'home' | 'clubs' | 'tariffs' | 'pipelines' | 'staff' | 'password';
+type Tab = 'leads' | 'board' | 'tasks' | 'home' | 'clubs' | 'tariffs' | 'contracts' | 'site' | 'pipelines' | 'staff' | 'password';
 
 function Shell({ me, onLogout }: { me: Me; onLogout: () => void }) {
   const isAdmin = can(me, 'clubs.manage') || can(me, 'staff.manage');
@@ -88,6 +89,8 @@ function Shell({ me, onLogout }: { me: Me; onLogout: () => void }) {
     ['home', 'Клиенты', can(me, 'persons.view')],
     ['clubs', 'Клубы', can(me, 'clubs.manage')],
     ['tariffs', 'Тарифы', can(me, 'tariffs.manage') || can(me, 'memberships.sell')],
+    ['contracts', 'Договоры', can(me, 'contracts.manage')],
+    ['site', 'Сайт', can(me, 'site.manage')],
     ['pipelines', 'Воронки', can(me, 'pipelines.manage')],
     ['staff', 'Сотрудники', can(me, 'staff.view')],
     ['password', 'Пароль', true],
@@ -112,6 +115,8 @@ function Shell({ me, onLogout }: { me: Me; onLogout: () => void }) {
         {tab === 'leads' && <LeadsPage key={ver} me={me} clubs={clubs} clubId={clubId} openPerson={setPersonId} />}
         {tab === 'board' && <BoardPage key={ver} clubs={clubs} clubId={clubId} openPerson={setPersonId} />}
         {tab === 'tariffs' && <TariffsPage me={me} clubs={clubs} clubId={clubId} />}
+        {tab === 'contracts' && <ContractsAdminPage me={me} clubs={clubs} clubId={clubId} />}
+        {tab === 'site' && <SitePage me={me} clubs={clubs} clubId={clubId} />}
         {tab === 'pipelines' && <PipelinesAdmin clubs={clubs} clubId={clubId} />}
         {tab === 'home' && <Home key={ver} me={me} clubs={clubs} clubId={clubId} openPerson={setPersonId} />}
         {tab === 'clubs' && <Clubs me={me} clubs={clubs} reload={reloadClubs} />}

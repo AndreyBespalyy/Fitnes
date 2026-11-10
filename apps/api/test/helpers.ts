@@ -1,4 +1,7 @@
 import pg from 'pg';
+import { mkdtempSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { buildApp } from '../src/app.ts';
 import { createPool } from '../src/db.ts';
 import { migrate } from '../db/scripts/migrate.ts';
@@ -22,7 +25,7 @@ export async function setupTestApp() {
   await migrate(ownerUrl, true);
   await seed(ownerUrl, true);
   const pool = createPool(appUrl);
-  const app = await buildApp(pool);
+  const app = await buildApp(pool, { storageDir: mkdtempSync(join(tmpdir(), 'fitnes-storage-')) });
   return { app, pool, ownerUrl };
 }
 

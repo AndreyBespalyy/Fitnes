@@ -2,23 +2,24 @@
 import { Fragment, useEffect, useState, type FormEvent } from 'react';
 import { api, can, type Club, type Me } from './api.ts';
 import { errText, toast } from './ui.ts';
+import { ContractLine, type ContractBrief } from './contracts.tsx';
 
 export type Settings = {
   freezeEnabled: boolean; freezeMaxDaysPerYear: number; freezeMaxTimesPerYear: number; freezeMinDays: number; freezePaid: boolean; freezePriceKop: number;
   installmentsEnabled: boolean; installmentsMaxPayments: number; overdueBlockAfterDays: number;
-  subscriptionRetryAttempts: number; subscriptionRetryIntervalDays: number; renewalReminderDays: number;
+  subscriptionRetryAttempts: number; subscriptionRetryIntervalDays: number; renewalReminderDays: number; contractRequiredForAccess: boolean;
 };
 export type Product = { id: string; clubId: string; kind: string; name: string; durationDays: number | null; visitsCount: number | null; validityDays: number | null;
   freezeAllowed: boolean; installmentsAllowed: boolean; isActive: boolean; priceKop: number | null; prices: { amountKop: number; validFrom: string }[] };
 type Charge = { id: string; kind: string; title: string; dueOn: string; amountKop: number; status: string; paidMethod: string | null; overdue: boolean };
 type Membership = { id: string; clubId: string; clubName: string; kind: string; productName: string; amountKop: number; startsOn: string; endsOn: string | null;
   visitsLeft: number | null; installments: number; nextChargeOn: string | null; status: string; state: string; access: boolean; reason: string; freezeAllowed: boolean;
-  freezes: { id: string; startsOn: string; endsOn: string; endedEarlyOn: string | null; days: number }[]; charges: Charge[] };
+  freezes: { id: string; startsOn: string; endsOn: string; endedEarlyOn: string | null; days: number }[]; charges: Charge[]; contract: ContractBrief | null };
 
 export const KIND: Record<string, string> = { term: 'Абонемент на срок', subscription: 'Подписка', visits: 'Пакет посещений', personal: 'Персональные', guest: 'Гостевой' };
 const STATE: Record<string, [string, string]> = {
   active: ['действует', 'ok'], debt_grace: ['долг', 'warn'], debt_blocked: ['проход закрыт: долг', 'bad'], frozen: ['заморожен', 'acc'],
-  not_started: ['ещё не начался', ''], expired: ['закончился', ''], used_up: ['посещения закончились', ''], cancelled: ['расторгнут', 'bad'],
+  unsigned: ['проход закрыт: нет подписи', 'bad'], not_started: ['ещё не начался', ''], expired: ['закончился', ''], used_up: ['посещения закончились', ''], cancelled: ['расторгнут', 'bad'],
 };
 const PAY: Record<string, string> = { cash: 'наличные', card_terminal: 'карта (терминал)', sbp: 'СБП' };
 export const rub = (kop: number | null | undefined) => (kop === null || kop === undefined ? '—' : `${(kop / 100).toLocaleString('ru-RU')} ₽`);
@@ -85,6 +86,7 @@ function SettingsForm({ club, manage }: { club: Club; manage: boolean }) {
           <Num label="Платежей в рассрочке, не больше" value={s.installmentsMaxPayments} onChange={set('installmentsMaxPayments')} disabled={ro || !s.installmentsEnabled} hint="Платежи раз в месяц, первый в день покупки" />
           <Num label="Закрыть проход при просрочке больше, дней" value={s.overdueBlockAfterDays} onChange={set('overdueBlockAfterDays')} disabled={ro} hint="0 — закрыть на следующий день после срока платежа" />
           <Num label="Напомнить о продлении за, дней" value={s.renewalReminderDays} onChange={set('renewalReminderDays')} disabled={ro} />
+          <Check label="Не пускать в клуб без подписанного договора" value={s.contractRequiredForAccess} onChange={set('contractRequiredForAccess')} disabled={ro} />
         </fieldset>
         {sub && (
           <fieldset className="item" style={{ display: 'grid', gap: 8 }}><b>Подписка</b>
@@ -235,6 +237,7 @@ export function MembershipsBlock({ me, personId, homeClubId }: { me: Me; personI
                       {canManage && <><button className="btn sm" onClick={() => act(() => api('POST', `/api/charges/${c.id}/mark-paid`, { method: 'card_terminal' }), 'Оплата картой отмечена')}>Картой</button>
                         <button className="btn sm" onClick={() => act(() => api('POST', `/api/charges/${c.id}/mark-paid`, { method: 'cash' }), 'Оплата наличными отмечена')}>Наличными</button></>}</span>}
                 </div>))}</div>)}
+            {m.contract && <ContractLine me={me} c={m.contract} reload={reload} />}
             {m.status === 'active' && (
               <div className="row">
                 {canSell && ['active', 'expired', 'used_up', 'debt_grace'].includes(m.state) && m.kind !== 'subscription' &&
