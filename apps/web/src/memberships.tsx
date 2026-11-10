@@ -3,6 +3,7 @@ import { Fragment, useEffect, useState, type FormEvent } from 'react';
 import { api, can, type Club, type Me } from './api.ts';
 import { errText, toast } from './ui.ts';
 import { ContractLine, type ContractBrief } from './contracts.tsx';
+import { RefundForm } from './finance.tsx';
 
 export type Settings = {
   freezeEnabled: boolean; freezeMaxDaysPerYear: number; freezeMaxTimesPerYear: number; freezeMinDays: number; freezePaid: boolean; freezePriceKop: number;
@@ -179,6 +180,7 @@ export function MembershipsBlock({ me, personId, homeClubId }: { me: Me; personI
   const [maxInst, setMaxInst] = useState(1);
   const [freeze, setFreeze] = useState<{ id: string; days: number; startsOn: string } | null>(null);
   const [cancel, setCancel] = useState<{ id: string; reason: string } | null>(null);
+  const [refund, setRefund] = useState<string | null>(null);
   const reload = () => api<Membership[]>('GET', `/api/persons/${personId}/memberships`).then(setMs).catch((x) => setErr(errText(x)));
   useEffect(() => { reload(); }, [personId]);
   const canSell = can(me, 'memberships.sell');
@@ -245,6 +247,7 @@ export function MembershipsBlock({ me, personId, homeClubId }: { me: Me; personI
                 {canManage && m.freezeAllowed && !activeFreeze && m.state !== 'expired' && <button className="btn sm" onClick={() => setFreeze({ id: m.id, days: 14, startsOn: today })}>Заморозить</button>}
                 {canManage && activeFreeze && <button className="btn sm" onClick={() => act(() => api('POST', `/api/memberships/${m.id}/unfreeze`), 'Заморозка снята, неиспользованные дни возвращены')}>Разморозить</button>}
                 {canManage && <button className="btn sm" onClick={() => setCancel({ id: m.id, reason: '' })}>Расторгнуть</button>}
+                {canManage && m.charges.some((c) => c.status === 'paid') && <button className="btn sm" onClick={() => setRefund(m.id)}>Возврат денег</button>}
               </div>)}
             {freeze?.id === m.id && (
               <div className="row">
@@ -253,6 +256,7 @@ export function MembershipsBlock({ me, personId, homeClubId }: { me: Me; personI
                 <button className="btn pri sm" onClick={() => act(() => api('POST', `/api/memberships/${m.id}/freeze`, { startsOn: freeze.startsOn, days: freeze.days }), `Заморозка на ${freeze.days} дн., окончание сдвинуто`)}>Заморозить</button>
                 <button className="btn sm" onClick={() => setFreeze(null)}>Отмена</button>
               </div>)}
+            {refund === m.id && <RefundForm membershipId={m.id} onCancel={() => setRefund(null)} onDone={(msg) => { setRefund(null); toast(msg); reload(); }} />}
             {cancel?.id === m.id && (
               <div className="row">
                 <input value={cancel.reason} onChange={(e) => setCancel({ ...cancel, reason: e.target.value })} placeholder="Причина расторжения" aria-label="Причина расторжения" />

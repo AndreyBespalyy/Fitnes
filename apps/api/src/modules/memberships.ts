@@ -7,6 +7,7 @@ import { badRequest, notFound } from '../errors.ts';
 import { PERMISSIONS as P } from '../roles.ts';
 import { contractsByMembership, createContract } from './contracts.ts';
 import { receiptForCharge } from './fiscal.ts';
+import { recordPayment } from './finance.ts';
 
 /* ---------- даты (строки YYYY-MM-DD, без часовых сдвигов) ---------- */
 const D = (s: string) => new Date(`${s}T00:00:00Z`);
@@ -155,10 +156,13 @@ export async function sellMembership(db: Db, ctx: Pick<Ctx, 'tenantId' | 'userId
   }
   if (prod.kind === 'subscription') { endsOn = addDays(addMonths(startsOn, 1), -1); nextCharge = addMonths(startsOn, 1); }
 
+  // Категория продажи для плана: подписка, продление, возобновление (уже был клиентом) или новая продажа
+  const before = (await db.query(`select count(*)::int as n from memberships where person_id = $1 and club_id = $2`, [b.personId, prod.club_id])).rows[0].n;
+  const category = prod.kind === 'subscription' ? 'subscription' : renewedFrom ? 'renewal' : before > 0 ? 'return' : 'new';
   const id = (await db.query(
     `insert into memberships(tenant_id, club_id, person_id, product_id, price_version_id, kind, product_name, amount_kop, starts_on, ends_on, visits_left,
-       installments, next_charge_on, renewed_from_id, created_by) values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15) returning id`,
-    [ctx.tenantId, prod.club_id, b.personId, prod.id, price.id, prod.kind, prod.name, amount, startsOn, endsOn, visits, n, nextCharge, renewedFrom, ctx.userId])).rows[0].id;
+       installments, next_charge_on, renewed_from_id, created_by, sale_category) values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16) returning id`,
+    [ctx.tenantId, prod.club_id, b.personId, prod.id, price.id, prod.kind, prod.name, amount, startsOn, endsOn, visits, n, nextCharge, renewedFrom, ctx.userId, category])).rows[0].id;
 
   // График платежей: первый платёж в день продажи, остальные помесячно
   const part = Math.floor(amount / n);
@@ -412,6 +416,8 @@ export function membershipRoutes(app: FastifyInstance, pool: pg.Pool) {
       if (!c) throw notFound('Платёж не найден');
       if (c.status !== 'due') throw badRequest('Платёж уже оплачен или отменён');
       await db.query(`update charges set status = 'paid', paid_at = now(), paid_method = $2, paid_by = $3 where id = $1`, [id, method, ctx.userId]);
+      const cat = c.membership_id ? (await db.query('select sale_category from memberships where id = $1', [c.membership_id])).rows[0]?.sale_category : null;
+      await recordPayment(db, ctx, { clubId: c.club_id, direction: 'in', kind: 'charge', amountKop: Number(c.amount_kop), method: method!, personId: c.person_id, chargeId: id, saleCategory: cat });
       if (c.membership_id) {
         await db.query(`insert into membership_operations(tenant_id, club_id, membership_id, kind, params, actor_id) values ($1,$2,$3,'charge_paid',$4,$5)`,
           [ctx.tenantId, c.club_id, c.membership_id, JSON.stringify({ chargeId: id, method, amountKop: Number(c.amount_kop) }), ctx.userId]);

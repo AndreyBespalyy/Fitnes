@@ -51,7 +51,12 @@ async function seedMemberships(c: Db, t: string) {
     await c.query('update charges set due_on = due_on - $2::int where membership_id = $1', [id, days]);
     await c.query('update contracts set contract_date = contract_date - $2::int where membership_id = $1', [id, days]);
   };
-  const payAll = (id: string) => c.query(`update charges set status = 'paid', paid_at = now(), paid_method = 'card_terminal' where membership_id = $1 and due_on <= $2`, [id, today]);
+  const payAll = async (id: string) => {
+    await c.query(`update charges set status = 'paid', paid_at = due_on::timestamp + interval '12 hours', paid_method = 'card_terminal' where membership_id = $1 and due_on <= $2`, [id, today]);
+    await c.query(`insert into payments(tenant_id, club_id, direction, kind, amount_kop, method, person_id, charge_id, sale_category, created_at)
+      select ch.tenant_id, ch.club_id, 'in', 'charge', ch.amount_kop, 'card_terminal', ch.person_id, ch.id, m.sale_category, ch.paid_at
+      from charges ch join memberships m on m.id = ch.membership_id where ch.membership_id = $1 and ch.status = 'paid'`, [id]);
+  };
   const sell = async (person: string, product: string, installments = 1) => (await sellMembership(c, ctx, { personId: await pid(person), productId: await prod(product), installments })).id;
 
   // Реквизиты демо-клубов (вымышленные, для проверки печати договора)
@@ -81,12 +86,21 @@ async function seedMemberships(c: Db, t: string) {
     values ($1,$2,'Годовой безлимит со скидкой 15 %','Оформите годовой абонемент до конца месяца и получите 2 гостевых визита для друзей.',3570000,4200000,'за год','published',now()),
            ($1,$3,'Первый месяц подписки за 990 ₽','Для новых клиентов. Дальше 4 900 ₽ в месяц, отменить можно в любой момент.',99000,490000,'первый месяц','draft',null)`,
     [t, c1.id, c2.id]);
+  // Продажи этого месяца, чтобы в ДДС и план-факте были цифры
+  const demin = await sell('Кирилл Демин', 'Месяц безлимит'); await payAll(demin);
+  const ushakov = await sell('Глеб Ушаков', '10 посещений'); await payAll(ushakov);
+  const orlov = await sell('Глеб Орлов', 'Подписка «Безлимит»'); await payAll(orlov);
+  // План продаж на текущий месяц
+  const month = `${today.slice(0, 7)}-01`;
+  for (const [cl, plan] of [[c1, [['new', 50_000_000], ['renewal', 30_000_000], ['return', 10_000_000]]], [c2, [['subscription', 40_000_000], ['new', 5_000_000]]]] as const) {
+    for (const [cat, kop] of plan) await c.query('insert into sales_plans(tenant_id, club_id, month, category, amount_kop) values ($1,$2,$3,$4,$5)', [t, cl.id, month, cat, kop]);
+  }
   // Старые договоры подписаны на бумаге, у новой подписки договор ждёт подписи
   await c.query(`update contracts set status = 'signed', sign_method = 'paper_scan', signed_at = now() - interval '1 day'
     where membership_id = any($1)`, [[ryabov, gromov, mironova, akhmetov, laptevaId]]);
   await c.query(`update contracts set status = 'cancelled' where membership_id = $1`, [laptevaId]);
   await c.query(`update persons set segment = s.seg from (values ('Павел Рябов','действующий'),('Алексей Громов','на продление'),('Елена Миронова','бывший'),
-    ('Роман Фёдоров','активный подписчик'),('Тимур Ахметов','долг по списанию'),('Ксения Лаптева','отписавшийся')) s(n, seg) where full_name = s.n`);
+    ('Роман Фёдоров','активный подписчик'),('Кирилл Демин','действующий'),('Глеб Ушаков','действующий'),('Глеб Орлов','активный подписчик'),('Тимур Ахметов','долг по списанию'),('Ксения Лаптева','отписавшийся')) s(n, seg) where full_name = s.n`);
 }
 
 export async function seed(url = need('OWNER_DATABASE_URL'), quiet = false) {

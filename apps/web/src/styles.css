@@ -95,3 +95,9 @@ fieldset.item{margin:0;min-width:0}
 .ok-msg{border-color:var(--ok);color:var(--ok)}
 details.item summary{cursor:pointer}
 .md{font-size:14px;line-height:1.5;margin-top:6px} .md code{background:var(--surface-2);padding:1px 5px;border-radius:4px;font-size:12px}
+
+.kpis{display:grid;gap:12px;grid-template-columns:repeat(auto-fit,minmax(180px,1fr))} .kpis .card{display:grid;gap:4px} .kpis b{font-size:22px}
+.bar{position:relative;display:flex;justify-content:space-between;gap:8px;padding:6px 8px;border-radius:6px;overflow:hidden;font-size:13px}
+.bar i{position:absolute;left:0;top:0;bottom:0;background:var(--accent-soft);z-index:0} .bar span{position:relative;z-index:1}
+.meter{position:relative;display:inline-flex;min-width:120px;padding:2px 8px;border-radius:999px;background:var(--surface-2);overflow:hidden;font-size:12px}
+.meter i{position:absolute;left:0;top:0;bottom:0;background:var(--ok-soft)} td.bad,.num.bad{color:var(--bad)}

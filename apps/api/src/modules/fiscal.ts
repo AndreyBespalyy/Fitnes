@@ -69,9 +69,9 @@ export function atolOnlinePayload(r: Generic, s: FiscalSettings, externalId: str
   };
 }
 /** Задание для кассы в клубе: JSON-задание «Веб-сервера ККТ» АТОЛ (драйвер ДТО10). */
-export function atolLocalPayload(r: Generic, s: FiscalSettings, operatorName: string) {
+export function atolLocalPayload(r: Generic, s: FiscalSettings, operatorName: string, kind = 'sell') {
   return {
-    type: 'sell', taxationType: LOCAL_TAX[s.taxation], operator: { name: operatorName },
+    type: kind === 'sell_refund' ? 'sellReturn' : 'sell', taxationType: LOCAL_TAX[s.taxation], operator: { name: operatorName },
     ...(r.client.email || r.client.phone ? { clientInfo: { emailOrPhone: r.client.email ?? r.client.phone } } : {}),
     items: r.items.map((i) => ({ type: 'position', name: i.name.slice(0, 128), price: rub(i.priceKop), quantity: i.quantity, amount: rub(i.sumKop),
       paymentMethod: LOCAL_METHOD[s.paymentMethod], paymentObject: 'service', tax: { type: s.vat } })),
@@ -95,36 +95,53 @@ function checkReady(s: FiscalSettings) {
 }
 
 /** Собирает задание чека для платежа по текущим настройкам кассы клуба. null, если касса не подключена. */
-async function draft(db: Db, ctx: Pick<Ctx, 'userId'>, receiptId: string, chargeId: string, method: string) {
-  const c = (await db.query(`select ch.*, p.full_name from charges ch join persons p on p.id = ch.person_id where ch.id = $1`, [chargeId])).rows[0];
-  const s = await getFiscal(db, c.club_id);
+type Source = { clubId: string; personId: string; title: string; amountKop: number; method: string };
+async function chargeSource(db: Db, chargeId: string, method?: string): Promise<Source> {
+  const c = (await db.query('select club_id, person_id, title, amount_kop, paid_method from charges where id = $1', [chargeId])).rows[0];
+  return { clubId: c.club_id, personId: c.person_id, title: c.title, amountKop: Number(c.amount_kop), method: method ?? c.paid_method ?? 'card_terminal' };
+}
+async function refundSource(db: Db, refundId: string): Promise<Source> {
+  const r = (await db.query(`select r.club_id, r.person_id, r.amount_kop, r.method, m.product_name from refunds r join memberships m on m.id = r.membership_id where r.id = $1`, [refundId])).rows[0];
+  return { clubId: r.club_id, personId: r.person_id, title: `Возврат: ${r.product_name}`, amountKop: Number(r.amount_kop), method: r.method };
+}
+
+/** Собирает задание чека по текущим настройкам кассы клуба. null, если касса не подключена. */
+async function draft(db: Db, ctx: Pick<Ctx, 'userId'>, receiptId: string, src: Source, kind: 'sell' | 'sell_refund') {
+  const s = await getFiscal(db, src.clubId);
   if (s.mode === 'none') return null;
-  const contacts = (await db.query(`select type, value from person_contacts where person_id = $1 order by is_primary desc`, [c.person_id])).rows;
+  const p = (await db.query('select full_name from persons where id = $1', [src.personId])).rows[0];
+  const contacts = (await db.query(`select type, value from person_contacts where person_id = $1 order by is_primary desc`, [src.personId])).rows;
   const g: Generic = {
-    items: [{ name: c.title, priceKop: Number(c.amount_kop), quantity: 1, sumKop: Number(c.amount_kop) }], totalKop: Number(c.amount_kop),
-    payment: method === 'cash' ? 'cash' : 'electronic',
-    client: { email: contacts.find((x) => x.type === 'email')?.value ?? null, phone: contacts.find((x) => x.type === 'phone')?.value ?? null, name: c.full_name },
+    items: [{ name: src.title, priceKop: src.amountKop, quantity: 1, sumKop: src.amountKop }], totalKop: src.amountKop,
+    payment: src.method === 'cash' ? 'cash' : 'electronic',
+    client: { email: contacts.find((x) => x.type === 'email')?.value ?? null, phone: contacts.find((x) => x.type === 'phone')?.value ?? null, name: p?.full_name ?? null },
   };
   const operator = ctx.userId ? (await db.query('select full_name from users where id = $1', [ctx.userId])).rows[0]?.full_name ?? 'Кассир' : 'Кассир';
   const miss = checkReady(s);
   return {
-    clubId: c.club_id as string, personId: c.person_id as string, amountKop: Number(c.amount_kop), mode: s.mode,
-    provider: s.mode === 'cloud' ? 'atol_online' : s.provider === 'manual' ? 'manual' : 'atol_local',
-    payload: s.mode === 'cloud' ? atolOnlinePayload(g, s, receiptId) : atolLocalPayload(g, s, operator),
+    mode: s.mode, provider: s.mode === 'cloud' ? 'atol_online' : s.provider === 'manual' ? 'manual' : 'atol_local',
+    payload: s.mode === 'cloud' ? atolOnlinePayload(g, s, receiptId) : atolLocalPayload(g, s, operator, kind),
     status: miss.length ? 'failed' : 'pending', error: miss.length ? `Касса настроена не полностью: ${miss.join(', ')}` : null,
   };
 }
 
-/** Ставит чек в очередь после оплаты. Если касса клуба не подключена, чек не создаётся. */
-export async function receiptForCharge(db: Db, ctx: Pick<Ctx, 'tenantId' | 'userId'>, chargeId: string, method: string) {
+async function insertReceipt(db: Db, ctx: Pick<Ctx, 'tenantId' | 'userId'>, src: Source, kind: 'sell' | 'sell_refund', link: { chargeId?: string; refundId?: string }) {
   const id = (await db.query('select gen_random_uuid() as id')).rows[0].id as string;
-  const d = await draft(db, ctx, id, chargeId, method);
+  const d = await draft(db, ctx, id, src, kind);
   if (!d) return null;
   await db.query(
-    `insert into receipts(id, tenant_id, club_id, charge_id, person_id, mode, provider, status, amount_kop, payload, error, created_by)
-     values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`,
-    [id, ctx.tenantId, d.clubId, chargeId, d.personId, d.mode, d.provider, d.status, d.amountKop, JSON.stringify(d.payload), d.error, ctx.userId]);
+    `insert into receipts(id, tenant_id, club_id, charge_id, refund_id, person_id, kind, mode, provider, status, amount_kop, payload, error, created_by)
+     values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)`,
+    [id, ctx.tenantId, src.clubId, link.chargeId ?? null, link.refundId ?? null, src.personId, kind, d.mode, d.provider, d.status, src.amountKop, JSON.stringify(d.payload), d.error, ctx.userId]);
   return id;
+}
+/** Чек прихода после оплаты. Если касса клуба не подключена, чек не создаётся. */
+export async function receiptForCharge(db: Db, ctx: Pick<Ctx, 'tenantId' | 'userId'>, chargeId: string, method: string) {
+  return insertReceipt(db, ctx, await chargeSource(db, chargeId, method), 'sell', { chargeId });
+}
+/** Чек возврата прихода после выплаты возврата клиенту. */
+export async function receiptForRefund(db: Db, ctx: Pick<Ctx, 'tenantId' | 'userId'>, refundId: string) {
+  return insertReceipt(db, ctx, await refundSource(db, refundId), 'sell_refund', { refundId });
 }
 
 /* ---------- облачная касса: отправка и получение результата ---------- */
@@ -272,8 +289,9 @@ export function fiscalRoutes(app: FastifyInstance, pool: pg.Pool, opts: { fetch?
       if (!r) throw notFound('Чек не найден');
       if (r.status !== 'failed') throw badRequest('Повторить можно только чек с ошибкой');
       // Настройки могли исправить: собираем задание заново
-      const c = (await db.query('select r.charge_id, ch.paid_method from receipts r join charges ch on ch.id = r.charge_id where r.id = $1', [id])).rows[0];
-      const d = await draft(db, ctx, id, c.charge_id, c.paid_method ?? 'card_terminal');
+      const c = (await db.query('select charge_id, refund_id, kind from receipts where id = $1', [id])).rows[0];
+      const src = c.refund_id ? await refundSource(db, c.refund_id) : await chargeSource(db, c.charge_id);
+      const d = await draft(db, ctx, id, src, c.kind);
       if (!d) throw badRequest('Касса клуба отключена. Включите её в разделе «Касса» или отметьте чек вручную');
       await db.query(`update receipts set mode = $2, provider = $3, payload = $4, status = $5, error = $6, attempts = 0, next_attempt_at = now(), external_id = null, updated_at = now() where id = $1`,
         [id, d.mode, d.provider, JSON.stringify(d.payload), d.status, d.error]);

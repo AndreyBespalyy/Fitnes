@@ -34,6 +34,9 @@ before(async () => {
   const clubs = (await t.app.inject({ method: 'GET', url: '/api/clubs', cookies: ck['a.bespalyy'] })).json();
   centr = clubs.find((c: { name: string }) => c.name === 'Клуб «Центр»');
   sever = clubs.find((c: { name: string }) => c.name === 'Клуб «Север»');
+  // для оплат наличными нужна открытая кассовая смена
+  await t.app.inject({ method: 'POST', url: '/api/shifts/open', cookies: ck['d.lis'], payload: { clubId: centr.id, openingCashKop: 0 } });
+  await t.app.inject({ method: 'POST', url: '/api/shifts/open', cookies: ck['a.morozova'], payload: { clubId: sever.id, openingCashKop: 0 } });
 });
 after(async () => { await t.app.close(); await t.pool.end(); atol.close(); });
 

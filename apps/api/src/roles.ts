@@ -19,6 +19,9 @@ export const PERMISSIONS = {
   contractsSign: 'contracts.sign',     // печать, скан, подписание на планшете
   siteManage: 'site.manage',           // предложения клуба для сайта
   fiscalManage: 'fiscal.manage',       // касса клуба и банк эквайринга
+  shiftsWork: 'shifts.work',           // открытие и закрытие кассовой смены
+  financeWork: 'finance.work',         // расходы, план продаж
+  financeView: 'finance.view',         // журнал платежей, долги, ДДС, план-факт
 } as const;
 
 const P = PERMISSIONS;
@@ -32,7 +35,7 @@ export const ROLE_SEED = [
     permissions: Object.values(P).filter((p) => p !== P.sourcesManage) },
   { code: 'rop', name: 'Руководитель ОП', network_wide: false, sort: 4, permissions: [P.clubsView, P.staffView, P.personsView, P.leadsCreate, P.crmWork, P.crmViewAll, P.membershipsSell, P.membershipsView, P.contractsSign] },
   { code: 'manager', name: 'Менеджер ОП', network_wide: false, sort: 5, permissions: [P.clubsView, P.personsView, P.leadsCreate, P.crmWork, P.membershipsSell, P.membershipsView, P.contractsSign] },
-  { code: 'desk', name: 'Администратор ресепшн', network_wide: false, sort: 6, permissions: [P.clubsView, P.personsView, P.leadsCreate, P.membershipsSell, P.membershipsView, P.membershipsManage, P.contractsSign] },
-  { code: 'fin', name: 'Финансист', network_wide: false, sort: 7, permissions: [P.clubsView, P.personsView, P.membershipsView] },
+  { code: 'desk', name: 'Администратор ресепшн', network_wide: false, sort: 6, permissions: [P.clubsView, P.personsView, P.leadsCreate, P.membershipsSell, P.membershipsView, P.membershipsManage, P.contractsSign, P.shiftsWork] },
+  { code: 'fin', name: 'Финансист', network_wide: false, sort: 7, permissions: [P.clubsView, P.personsView, P.membershipsView, P.financeWork, P.financeView] },
   { code: 'trainer', name: 'Тренер', network_wide: false, sort: 8, permissions: [P.clubsView, P.membershipsView] },
 ];

@@ -5,6 +5,7 @@ import { BoardPage, LeadsPage, PersonCard, PipelinesAdmin, TasksPage } from './c
 import { TariffsPage } from './memberships.tsx';
 import { ContractsAdminPage, SitePage } from './contracts.tsx';
 import { FiscalPage, LocalKktAgent } from './fiscal.tsx';
+import { FinancePage } from './finance.tsx';
 
 export function App() {
   const [me, setMe] = useState<Me | null | undefined>(undefined);
@@ -68,7 +69,7 @@ function ChangePassword({ me, forced, onDone, onLogout }: { me: Me; forced?: boo
   );
 }
 
-type Tab = 'leads' | 'board' | 'tasks' | 'home' | 'clubs' | 'tariffs' | 'contracts' | 'site' | 'fiscal' | 'pipelines' | 'staff' | 'password';
+type Tab = 'leads' | 'board' | 'tasks' | 'home' | 'clubs' | 'tariffs' | 'contracts' | 'site' | 'fiscal' | 'finance' | 'pipelines' | 'staff' | 'password';
 
 function Shell({ me, onLogout }: { me: Me; onLogout: () => void }) {
   const isAdmin = can(me, 'clubs.manage') || can(me, 'staff.manage');
@@ -92,6 +93,7 @@ function Shell({ me, onLogout }: { me: Me; onLogout: () => void }) {
     ['tariffs', 'Тарифы', can(me, 'tariffs.manage') || can(me, 'memberships.sell')],
     ['contracts', 'Договоры', can(me, 'contracts.manage')],
     ['site', 'Сайт', can(me, 'site.manage')],
+    ['finance', 'Финансы', can(me, 'finance.view') || can(me, 'shifts.work') || can(me, 'approvals.decide')],
     ['fiscal', 'Касса', can(me, 'fiscal.manage') || can(me, 'memberships.manage')],
     ['pipelines', 'Воронки', can(me, 'pipelines.manage')],
     ['staff', 'Сотрудники', can(me, 'staff.view')],
@@ -118,6 +120,7 @@ function Shell({ me, onLogout }: { me: Me; onLogout: () => void }) {
         {tab === 'board' && <BoardPage key={ver} clubs={clubs} clubId={clubId} openPerson={setPersonId} />}
         {tab === 'tariffs' && <TariffsPage me={me} clubs={clubs} clubId={clubId} />}
         {tab === 'contracts' && <ContractsAdminPage me={me} clubs={clubs} clubId={clubId} />}
+        {tab === 'finance' && <FinancePage me={me} clubs={clubs} clubId={clubId} openPerson={setPersonId} />}
         {tab === 'fiscal' && <FiscalPage me={me} clubs={clubs} clubId={clubId} />}
         {tab === 'site' && <SitePage me={me} clubs={clubs} clubId={clubId} />}
         {tab === 'pipelines' && <PipelinesAdmin clubs={clubs} clubId={clubId} />}
