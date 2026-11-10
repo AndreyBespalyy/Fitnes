@@ -1,3 +1,5 @@
-*.docx binary
-*.png binary
-*.zip binary
+# Скрипты и файлы для Linux-сервера всегда с LF, даже при упаковке на Windows
+*.sh text eol=lf
+Dockerfile text eol=lf
+.dockerignore text eol=lf
+deploy/* text eol=lf
