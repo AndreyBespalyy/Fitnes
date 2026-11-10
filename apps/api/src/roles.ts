@@ -22,13 +22,14 @@ export const PERMISSIONS = {
   shiftsWork: 'shifts.work',           // открытие и закрытие кассовой смены
   financeWork: 'finance.work',         // расходы, план продаж
   financeView: 'finance.view',         // журнал платежей, долги, ДДС, план-факт
+  importManage: 'import.manage',       // перенос данных из 1С
 } as const;
 
 const P = PERMISSIONS;
 export const ROLE_SEED = [
   { code: 'owner', name: 'Собственник', network_wide: true, sort: 1, permissions: ['*'] },
   { code: 'admin', name: 'Администратор системы', network_wide: true, sort: 2,
-    permissions: [P.clubsView, P.clubsManage, P.staffView, P.staffManage, P.personsView, P.crmViewAll, P.pipelinesManage, P.sourcesManage, P.membershipsView] },
+    permissions: [P.clubsView, P.clubsManage, P.staffView, P.staffManage, P.personsView, P.crmViewAll, P.pipelinesManage, P.sourcesManage, P.membershipsView, P.importManage] },
   // Управляющий: всё, что собственник, но только в своём клубе (решение Андрея 10.11.2026).
   // Сетевые действия (создание клубов, общие источники лидов, сетевые роли) проверяются отдельно по ctx.allClubs.
   { code: 'gm', name: 'Управляющий', network_wide: false, sort: 3,
@@ -36,6 +37,6 @@ export const ROLE_SEED = [
   { code: 'rop', name: 'Руководитель ОП', network_wide: false, sort: 4, permissions: [P.clubsView, P.staffView, P.personsView, P.leadsCreate, P.crmWork, P.crmViewAll, P.membershipsSell, P.membershipsView, P.contractsSign] },
   { code: 'manager', name: 'Менеджер ОП', network_wide: false, sort: 5, permissions: [P.clubsView, P.personsView, P.leadsCreate, P.crmWork, P.membershipsSell, P.membershipsView, P.contractsSign] },
   { code: 'desk', name: 'Администратор ресепшн', network_wide: false, sort: 6, permissions: [P.clubsView, P.personsView, P.leadsCreate, P.membershipsSell, P.membershipsView, P.membershipsManage, P.contractsSign, P.shiftsWork] },
-  { code: 'fin', name: 'Финансист', network_wide: false, sort: 7, permissions: [P.clubsView, P.personsView, P.membershipsView, P.financeWork, P.financeView] },
+  { code: 'fin', name: 'Финансист', network_wide: false, sort: 7, permissions: [P.clubsView, P.personsView, P.membershipsView, P.financeWork, P.financeView, P.importManage] },
   { code: 'trainer', name: 'Тренер', network_wide: false, sort: 8, permissions: [P.clubsView, P.membershipsView] },
 ];

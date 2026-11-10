@@ -17,7 +17,7 @@ type Debt = { personId: string; personName: string; clubName: string; debtKop: n
 type Payment = { id: string; at: string; direction: string; kind: string; amountKop: number; method: string; personName: string | null; title: string; createdBy: string | null };
 
 const toKop = (s: string) => Math.round(Number(s.replace(',', '.').replace(/\s/g, '')) * 100);
-const METHOD: Record<string, string> = { cash: 'наличные', card_terminal: 'карта', sbp: 'СБП', bank_transfer: 'перевод', card: 'карта' };
+const METHOD: Record<string, string> = { cash: 'наличные', card_terminal: 'карта', sbp: 'СБП', bank_transfer: 'перевод', card: 'карта', online: 'онлайн', other: 'другое' };
 const KIND: Record<string, string> = { refund: 'Возврат', expense: 'Расход', discount: 'Скидка' };
 const d = (s: string) => s.split('-').reverse().join('.');
 const thisMonth = () => new Date().toISOString().slice(0, 7);

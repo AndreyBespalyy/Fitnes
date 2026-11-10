@@ -6,6 +6,7 @@ import { TariffsPage } from './memberships.tsx';
 import { ContractsAdminPage, SitePage } from './contracts.tsx';
 import { FiscalPage, LocalKktAgent } from './fiscal.tsx';
 import { FinancePage } from './finance.tsx';
+import { ImportPage } from './importer.tsx';
 
 export function App() {
   const [me, setMe] = useState<Me | null | undefined>(undefined);
@@ -69,7 +70,7 @@ function ChangePassword({ me, forced, onDone, onLogout }: { me: Me; forced?: boo
   );
 }
 
-type Tab = 'leads' | 'board' | 'tasks' | 'home' | 'clubs' | 'tariffs' | 'contracts' | 'site' | 'fiscal' | 'finance' | 'pipelines' | 'staff' | 'password';
+type Tab = 'leads' | 'board' | 'tasks' | 'home' | 'clubs' | 'tariffs' | 'contracts' | 'site' | 'fiscal' | 'finance' | 'import' | 'pipelines' | 'staff' | 'password';
 
 function Shell({ me, onLogout }: { me: Me; onLogout: () => void }) {
   const isAdmin = can(me, 'clubs.manage') || can(me, 'staff.manage');
@@ -95,6 +96,7 @@ function Shell({ me, onLogout }: { me: Me; onLogout: () => void }) {
     ['site', 'Сайт', can(me, 'site.manage')],
     ['finance', 'Финансы', can(me, 'finance.view') || can(me, 'shifts.work') || can(me, 'approvals.decide')],
     ['fiscal', 'Касса', can(me, 'fiscal.manage') || can(me, 'memberships.manage')],
+    ['import', 'Перенос из 1С', can(me, 'import.manage')],
     ['pipelines', 'Воронки', can(me, 'pipelines.manage')],
     ['staff', 'Сотрудники', can(me, 'staff.view')],
     ['password', 'Пароль', true],
@@ -122,6 +124,7 @@ function Shell({ me, onLogout }: { me: Me; onLogout: () => void }) {
         {tab === 'contracts' && <ContractsAdminPage me={me} clubs={clubs} clubId={clubId} />}
         {tab === 'finance' && <FinancePage me={me} clubs={clubs} clubId={clubId} openPerson={setPersonId} />}
         {tab === 'fiscal' && <FiscalPage me={me} clubs={clubs} clubId={clubId} />}
+        {tab === 'import' && <ImportPage clubs={clubs} clubId={clubId} />}
         {tab === 'site' && <SitePage me={me} clubs={clubs} clubId={clubId} />}
         {tab === 'pipelines' && <PipelinesAdmin clubs={clubs} clubId={clubId} />}
         {tab === 'home' && <Home key={ver} me={me} clubs={clubs} clubId={clubId} openPerson={setPersonId} />}
