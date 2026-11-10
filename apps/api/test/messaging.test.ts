@@ -160,7 +160,7 @@ test('WhatsApp через Green-API: при сбое сообщение не т�
 
 test('автосообщения: предпросмотр, отправка один раз, согласие и отписка', async () => {
   const trig = (await req('GET', `/api/msg/triggers?clubId=${c1}`, 'o.smirnov')).json();
-  assert.deepEqual(trig.map((x: { event: string }) => x.event), ['membership_ending', 'debt_overdue', 'inactive', 'birthday', 'welcome']);
+  assert.deepEqual(trig.map((x: { event: string }) => x.event), ['membership_ending', 'debt_overdue', 'inactive', 'birthday', 'welcome', 'ai_nurture']);
   assert.ok(trig.every((x: { enabled: boolean }) => !x.enabled), 'по умолчанию выключены');
   const ending = trig[0];
   assert.equal((await req('POST', `/api/msg/triggers/${ending.id}/run`, 'o.smirnov')).statusCode, 400, 'выключенное не запускается');

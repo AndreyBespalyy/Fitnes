@@ -201,6 +201,14 @@ async function candidates(db: Db, t: { event: string; days: number; club_id: str
     rows = await q(`select m.person_id, p.full_name, m.id::text as k from memberships m join persons p on p.id = m.person_id
       where m.club_id = $1 and m.status = 'active' and m.import_batch_id is null and m.created_at >= now() - interval '2 days'
         and not exists (select 1 from memberships o where o.person_id = m.person_id and o.id <> m.id and o.created_at < m.created_at)`, [t.club_id]);
+  } else if (t.event === 'ai_nurture') {
+    // Неприоритетные по оценке ИИ (шаг 15): не чаще раза в t.days дней, с предложением по действующему прейскуранту
+    rows = await q(`select s.person_id, p.full_name, 'ai:' || floor(($2::date - date '2026-01-01') / greatest($3::int, 1))::text as k,
+        case when s.offer ? 'name' then '«' || (s.offer ->> 'name') || '» за ' || to_char(((s.offer ->> 'priceKop')::bigint / 100), 'FM999 999 999') || ' ₽' else 'абонемент' end as dn
+      from client_scores s join persons p on p.id = s.person_id
+      where s.club_id = $1 and s.segment = 'auto' and s.kind in ('purchase', 'return') order by s.score desc limit 200`, [t.club_id, today, t.days]);
+    const seenAi = new Set<string>();
+    return rows.filter((r) => !seenAi.has(r.person_id) && seenAi.add(r.person_id)).map((r) => ({ personId: r.person_id, name: r.full_name, key: r.k, extra: { предложение: r.dn ?? 'абонемент' } }));
   }
   const seen = new Set<string>();
   return rows.filter((r) => !seen.has(r.person_id) && seen.add(r.person_id)).map((r) => ({ personId: r.person_id, name: r.full_name, key: r.k, extra: (r.dn ? { дней: r.dn } : {}) as Record<string, string> }));
@@ -313,13 +321,16 @@ export const DEFAULT_TEMPLATES: [string, string, string | null, number, boolean]
   ['Давно не были', '{имя}, мы скучаем! Вы не были в клубе {клуб} уже {дней} дн. Подобрать удобное время для тренировки?', 'inactive', 14, true],
   ['День рождения', '{имя}, клуб {клуб} поздравляет вас с днём рождения! Ждём на тренировке, на ресепшн для вас подарок.', 'birthday', 0, true],
   ['Добро пожаловать', '{имя}, добро пожаловать в клуб {клуб}! Если будут вопросы по абонементу или расписанию, пишите сюда.', 'welcome', 0, false],
+  ['Предложение неприоритетным (ИИ)', 'Здравствуйте, {имя}! Это клуб {клуб}. Вы интересовались занятиями у нас: сейчас можно оформить {предложение}. Если интересно, просто ответьте на это сообщение, подберём удобное время.', 'ai_nurture', 14, true],
   ['Приглашение на пробную тренировку', 'Здравствуйте, {имя}! Это клуб {клуб}. Приглашаем вас на бесплатную пробную тренировку. Когда вам удобно прийти?', null, 0, true],
   ['Как прошла тренировка', '{имя}, как вам первая тренировка в клубе {клуб}? Будем рады отзыву и ответим на вопросы.', null, 0, false],
 ];
 export async function ensureMsgDefaults(db: { query: Db['query'] }, tenantId: string, clubId: string) {
   await db.query('insert into club_msg_settings(club_id, tenant_id) values ($1,$2) on conflict (club_id) do nothing', [clubId, tenantId]);
-  if ((await db.query('select 1 from msg_templates where club_id = $1', [clubId])).rowCount) return;
+  const fresh = !(await db.query('select 1 from msg_templates where club_id = $1', [clubId])).rowCount;
   for (const [name, body, event, days, marketing] of DEFAULT_TEMPLATES) {
+    // Уже настроенный клуб получает только автосообщения, которых раньше не было (например, ai_nurture с шага 15)
+    if (!fresh && (!event || (await db.query('select 1 from msg_triggers where club_id = $1 and event = $2', [clubId, event])).rowCount)) continue;
     const id = (await db.query('insert into msg_templates(tenant_id, club_id, name, body) values ($1,$2,$3,$4) returning id', [tenantId, clubId, name, body])).rows[0].id;
     if (event) await db.query('insert into msg_triggers(tenant_id, club_id, event, days, template_id, marketing) values ($1,$2,$3,$4,$5,$6)', [tenantId, clubId, event, days, id, marketing]);
   }
@@ -534,7 +545,7 @@ export function messagingRoutes(app: FastifyInstance, pool: pg.Pool, opts: { fet
       return (await db.query(`select t.id, t.event, t.days, t.template_id as "templateId", tp.name as "templateName", t.marketing, t.enabled, t.send_hour as "sendHour",
           (select count(*)::int from msg_trigger_sends s where s.trigger_id = t.id and s.created_at > now() - interval '30 days') as "sent30"
         from msg_triggers t join msg_templates tp on tp.id = t.template_id where t.club_id = $1
-        order by array_position(array['membership_ending','debt_overdue','inactive','birthday','welcome'], t.event)`, [clubId])).rows;
+        order by array_position(array['membership_ending','debt_overdue','inactive','birthday','welcome','ai_nurture'], t.event)`, [clubId])).rows;
     });
   });
   app.put('/api/msg/triggers/:id', async (req) => {

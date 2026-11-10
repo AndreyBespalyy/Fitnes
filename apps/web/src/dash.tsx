@@ -233,6 +233,7 @@ function PlanEditor({ club, month, setMonth }: { club: Club; month: string; setM
   const [p, setP] = useState<Plans | null>(null);
   const [form, setForm] = useState<Record<string, Record<string, { amount: string; avg: string }>>>({});
   const [err, setErr] = useState('');
+  const [ai, setAi] = useState<{ rows: { category: string; name: string; suggestedKop: number | null; avgCheckKop: number | null; basis: string[] }[]; confidence: string; note: string } | null>(null);
   const load = () => api<Plans>('GET', `/api/plans?clubId=${club.id}&month=${month}`).then((x) => {
     setP(x);
     const f: typeof form = {};
@@ -240,8 +241,15 @@ function PlanEditor({ club, month, setMonth }: { club: Club; month: string; setM
     fill('club', x.club); x.managers.forEach((m) => fill(m.userId, m.targets));
     setForm(f);
   }).catch((e) => setErr(errText(e)));
-  useEffect(() => { load(); }, [club.id, month]);
+  useEffect(() => { load(); setAi(null); }, [club.id, month]);
   if (!p) return err ? <p className="err">{err}</p> : <p className="muted">Загрузка…</p>;
+  const askAi = async () => { setErr(''); try { setAi(await api('GET', `/api/ai/plan-suggestion?clubId=${club.id}&month=${month}`)); } catch (e) { setErr(errText(e)); } };
+  const applyAi = () => {
+    if (!ai) return;
+    const f = { ...form, club: { ...form.club } };
+    for (const r of ai.rows) if (r.suggestedKop && f.club[r.category]) f.club[r.category] = { amount: toRub(r.suggestedKop), avg: f.club[r.category].avg || toRub(r.avgCheckKop) };
+    setForm(f); toast('Расчёт ИИ подставлен в план клуба. Проверьте и сохраните');
+  };
   const set = (key: string, cat: string, field: 'amount' | 'avg', v: string) => setForm({ ...form, [key]: { ...form[key], [cat]: { ...form[key][cat], [field]: v } } });
   const avgOf = (cat: string) => toKop(form.club[cat].avg) ?? p.categories.find((c) => c.id === cat)?.suggestedAvgCheckKop ?? null;
   const clients = (key: string, cat: string) => { const a = toKop(form[key][cat].amount); const avg = avgOf(cat); return a && avg ? Math.ceil(a / avg) : null; };
@@ -288,22 +296,31 @@ function PlanEditor({ club, month, setMonth }: { club: Club; month: string; setM
             }
           }
           setForm(f);
-        }}>Распределить план клуба между менеджерами</button></div>}
+        }}>Распределить план клуба между менеджерами</button>
+        <button className="btn" onClick={askAi}>Расчёт ИИ</button></div>}
+      {ai && (
+        <div className="item" style={{ display: 'grid', gap: 6 }}>
+          <b>Расчётный план ИИ на {month} · уверенность {ai.confidence}</b>
+          {ai.rows.map((r) => <div key={r.category} className="small"><b>{r.name}: {r.suggestedKop ? rub(r.suggestedKop) : 'данных недостаточно'}</b>{r.basis.length ? ` · ${r.basis.join('; ')}` : ''}</div>)}
+          <div className="small muted">{ai.note}</div>
+          {!ro && <div><button className="btn sm pri" onClick={applyAi}>Подставить в план клуба</button></div>}
+        </div>)}
     </div>
   );
 }
 
 /* ---------- нормы KPI ---------- */
 function NormsEditor({ club }: { club: Club }) {
-  const [d, setD] = useState<{ metrics: { id: string; name: string }[]; norms: Record<string, number | null>; canEdit: boolean } | null>(null);
+  const [d, setD] = useState<{ metrics: { id: string; name: string }[]; norms: Record<string, number | null>; light: { green: number; yellow: number }; canEdit: boolean } | null>(null);
   const [f, setF] = useState<Record<string, string>>({});
+  const [lg, setLg] = useState({ green: '100', yellow: '85' });
   const [err, setErr] = useState('');
-  const load = () => api<NonNullable<typeof d>>('GET', `/api/kpi-norms?clubId=${club.id}`).then((x) => { setD(x); setF(Object.fromEntries(x.metrics.map((m) => [m.id, x.norms[m.id] === null ? '' : String(x.norms[m.id])]))); }).catch((e) => setErr(errText(e)));
+  const load = () => api<NonNullable<typeof d>>('GET', `/api/kpi-norms?clubId=${club.id}`).then((x) => { setD(x); setLg({ green: String(x.light.green), yellow: String(x.light.yellow) }); setF(Object.fromEntries(x.metrics.map((m) => [m.id, x.norms[m.id] === null ? '' : String(x.norms[m.id])]))); }).catch((e) => setErr(errText(e)));
   useEffect(() => { load(); }, [club.id]);
   if (!d) return err ? <p className="err">{err}</p> : <p className="muted">Загрузка…</p>;
   const save = async () => {
     setErr('');
-    try { await api('PUT', '/api/kpi-norms', { clubId: club.id, norms: Object.fromEntries(Object.entries(f).filter(([, v]) => v.trim() !== '').map(([k, v]) => [k, Number(v.replace(',', '.'))])) }); toast('Нормы сохранены'); load(); }
+    try { await api('PUT', '/api/kpi-norms', { clubId: club.id, norms: Object.fromEntries(Object.entries(f).filter(([, v]) => v.trim() !== '').map(([k, v]) => [k, Number(v.replace(',', '.'))])), light: { green: Number(lg.green), yellow: Number(lg.yellow) } }); toast('Нормы сохранены'); load(); }
     catch (e) { setErr(errText(e)); }
   };
   return (
@@ -313,6 +330,12 @@ function NormsEditor({ club }: { club: Club }) {
       {err && <p className="err">{err}</p>}
       <div className="grid2" style={{ gridTemplateColumns: 'repeat(auto-fit,minmax(200px,1fr))' }}>
         {d.metrics.map((m) => <label key={m.id} className="f">{m.name}<input inputMode="decimal" value={f[m.id] ?? ''} disabled={!d.canEdit} onChange={(e) => setF({ ...f, [m.id]: e.target.value })} /></label>)}
+      </div>
+      <h3 style={{ margin: '6px 0 0' }}>Светофор плана</h3>
+      <p className="small muted" style={{ margin: 0 }}>Сравнивается факт с планом на сегодняшний день месяца. Зелёный — не ниже первого порога, жёлтый — не ниже второго, иначе красный.</p>
+      <div className="grid2" style={{ gridTemplateColumns: 'repeat(auto-fit,minmax(200px,1fr))' }}>
+        <label className="f">Зелёный от, %<input inputMode="numeric" value={lg.green} disabled={!d.canEdit} onChange={(e) => setLg({ ...lg, green: e.target.value })} /></label>
+        <label className="f">Жёлтый от, %<input inputMode="numeric" value={lg.yellow} disabled={!d.canEdit} onChange={(e) => setLg({ ...lg, yellow: e.target.value })} /></label>
       </div>
       {d.canEdit && <div><button className="btn pri" onClick={save}>Сохранить нормы</button></div>}
     </div>

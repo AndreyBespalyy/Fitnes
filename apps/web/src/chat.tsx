@@ -23,6 +23,7 @@ const EVENT: Record<string, [string, string]> = {
   inactive: ['Давно не был в клубе', 'сколько дней без посещений'],
   birthday: ['День рождения', ''],
   welcome: ['Приветствие после покупки', ''],
+  ai_nurture: ['Неприоритетные клиенты по оценке ИИ', 'не чаще одного раза в столько дней'],
 };
 const STATUS: Record<string, string> = { queued: 'отправляется…', sent: 'отправлено', failed: 'не отправлено', received: '' };
 const time = (s: string) => new Date(s).toLocaleString('ru-RU', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });

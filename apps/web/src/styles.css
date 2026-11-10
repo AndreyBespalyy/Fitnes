@@ -159,3 +159,5 @@ a.btn{text-decoration:none;color:inherit}
 .tr-line .who{color:var(--muted);font-size:12px;font-weight:600;padding-top:2px}
 .tr-line .who.manager{color:var(--accent)}
 @media (max-width:600px){.tr-line{grid-template-columns:1fr;gap:0}}
+.hot-meter{display:block;height:4px;border-radius:2px;background:var(--line);position:relative;overflow:hidden}
+.hot-meter i{position:absolute;left:0;top:0;bottom:0;background:var(--accent)}

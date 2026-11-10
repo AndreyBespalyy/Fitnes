@@ -24,7 +24,7 @@ export const METRICS: { id: string; name: string; definition: string; formula: s
   { id: 'forecast', name: 'Прогноз на конец месяца', definition: 'Сколько будет к концу месяца, если продавать в том же темпе', formula: 'Факт ÷ прошедшие дни × дней в месяце', source: 'Журнал платежей', delay: 'Онлайн' },
   { id: 'deficit', name: 'Дефицит', definition: 'Сколько не хватит до плана при текущем темпе', formula: 'План − прогноз (если больше нуля)', source: 'План и журнал платежей', delay: 'Онлайн' },
   { id: 'day_plan', name: 'План на сегодня', definition: 'Сколько нужно продать сегодня, чтобы выйти на план', formula: '(План − факт до сегодня) ÷ оставшиеся дни, включая сегодня', source: 'План и журнал платежей', delay: 'Онлайн' },
-  { id: 'light', name: 'Светофор', definition: 'Идёт ли менеджер в темпе плана', formula: 'Факт ÷ (план × прошедшая доля месяца): зелёный ≥ 100 %, жёлтый ≥ 85 %, красный ниже', source: 'План и журнал платежей', delay: 'Онлайн' },
+  { id: 'light', name: 'Светофор', definition: 'Идёт ли менеджер в темпе плана', formula: 'Факт ÷ (план × прошедшая доля месяца): по умолчанию зелёный ≥ 100 %, жёлтый ≥ 85 %, красный ниже (пороги клуб меняет в нормах KPI)', source: 'План и журнал платежей', delay: 'Онлайн' },
   { id: 'clients', name: 'Продажи в клиентах', definition: 'Сколько клиентов купили абонемент, пакет или подписку (без гостевых визитов и расторгнутых)', formula: 'Число проданных абонементов', source: 'Абонементы', delay: 'Онлайн' },
   { id: 'leads', name: 'Лиды', definition: 'Новые обращения за период из всех каналов', formula: 'Число лидов', source: 'Лиды', delay: 'Онлайн' },
   { id: 'contacted', name: 'Связались', definition: 'Лиды, по которым менеджер выполнил первый контакт', formula: 'Лиды с отметкой первого ответа', source: 'Лиды и задачи', delay: 'Онлайн' },
@@ -97,13 +97,13 @@ async function today(db: Db, clubs: Club[]) {
   return (await db.query(`select to_char((now() at time zone $1)::date, 'YYYY-MM-DD') as d`, [tz])).rows[0].d as string;
 }
 /** Месяц: границы, сколько дней прошло (включая сегодня) и сколько осталось */
-function monthInfo(month: string, t: string) {
+export function monthInfo(month: string, t: string) {
   const from = `${month}-01`;
   const [y, m] = month.split('-').map(Number);
   const days = new Date(Date.UTC(y, m, 0)).getUTCDate();
   const to = `${month}-${String(days).padStart(2, '0')}`;
   const passed = t < from ? 0 : t > to ? days : daysBetween(from, t) + 1;
-  return { from, to, days, passed, left: Math.max(0, days - passed + (t >= from && t <= to ? 1 : 0)), current: t >= from && t <= to };
+  return { from, to, days, passed, left: Math.max(0, days - passed + (t >= from && t <= to ? 1 : 0)), current: t >= from && t <= to, green: 1, yellow: 0.85 };
 }
 function period(q: { from?: string; to?: string }, t: string) {
   const from = isDate(q.from) ? q.from! : `${t.slice(0, 7)}-01`;
@@ -115,7 +115,7 @@ function period(q: { from?: string; to?: string }, t: string) {
 
 /** Факт продаж в деньгах по клубу, менеджеру-продавцу и категории за период (местные даты клуба).
  *  Менеджеру засчитываются оплаты проданных им абонементов; у подписки — только первый месяц, дальше это автосписание. */
-async function salesFact(db: Db, clubIds: string[], from: string, to: string) {
+export async function salesFact(db: Db, clubIds: string[], from: string, to: string) {
   return (await db.query(`
     select p.club_id as "clubId", m.created_by as "userId", coalesce(p.sale_category, 'new') as category,
       (m.kind = 'subscription' and coalesce(ch.due_on, (p.created_at at time zone c.timezone)::date) > (m.created_at at time zone c.timezone)::date + 3) as recurring,
@@ -135,7 +135,7 @@ async function clientsFact(db: Db, clubIds: string[], from: string, to: string) 
     where m.club_id = any($1) and m.kind <> 'guest' and m.status <> 'cancelled' and (m.created_at at time zone c.timezone)::date between $2 and $3
     group by 1, 2, 3`, [clubIds, from, to])).rows as { clubId: string; userId: string | null; category: string; n: number }[];
 }
-async function targets(db: Db, clubIds: string[], month: string) {
+export async function targets(db: Db, clubIds: string[], month: string) {
   return (await db.query(`select club_id as "clubId", user_id as "userId", category, amount_kop::bigint as "amountKop", avg_check_kop::bigint as "avgCheckKop"
     from plan_targets where club_id = any($1) and month = $2`, [clubIds, `${month}-01`])).rows.map((r) => ({ ...r, amountKop: Number(r.amountKop), avgCheckKop: r.avgCheckKop == null ? null : Number(r.avgCheckKop) })) as
     { clubId: string; userId: string | null; category: string; amountKop: number; avgCheckKop: number | null }[];
@@ -148,7 +148,7 @@ function light(fact: number, plan: number | null, mi: ReturnType<typeof monthInf
   const expected = plan * (mi.passed / mi.days);
   if (expected <= 0) return 'green';
   const r = fact / expected;
-  return r >= 1 ? 'green' : r >= 0.85 ? 'yellow' : 'red';
+  return r >= mi.green ? 'green' : r >= mi.yellow ? 'yellow' : 'red';
 }
 /** План-факт по категориям для выбранного среза (клубы и, если задан, продавец) */
 function planFact(mi: ReturnType<typeof monthInfo>, tg: Awaited<ReturnType<typeof targets>>, sf: Awaited<ReturnType<typeof salesFact>>, cf: Awaited<ReturnType<typeof clientsFact>>,
@@ -180,7 +180,7 @@ function planFact(mi: ReturnType<typeof monthInfo>, tg: Awaited<ReturnType<typeo
   return { rows: rows.filter((r) => r.planKop !== null || r.factKop !== 0 || r.factClients !== 0), total };
 }
 
-async function salesStaff(db: Db, clubIds: string[]) {
+export async function salesStaff(db: Db, clubIds: string[]) {
   return (await db.query(`select distinct on (u.id, a.club_id) u.id, u.full_name as name, a.club_id as "clubId", a.role_code as role, r.name as "roleName"
     from user_assignments a join users u on u.id = a.user_id join roles r on r.code = a.role_code
     where a.club_id = any($1) and a.role_code = any($2) and u.status = 'active' and (a.active_to is null or a.active_to >= current_date)
@@ -188,7 +188,7 @@ async function salesStaff(db: Db, clubIds: string[]) {
 }
 
 /** Воронка лидов за период: лид → связались → встреча назначена → встреча состоялась → покупка */
-async function funnel(db: Db, clubIds: string[], from: string, to: string, by: 'source' | 'manager', userId?: string) {
+export async function funnel(db: Db, clubIds: string[], from: string, to: string, by: 'source' | 'manager', userId?: string) {
   const rows = (await db.query(`
     with l as (
       select l.id, l.club_id, l.person_id, l.created_at, l.assigned_to, l.first_response_at,
@@ -238,6 +238,14 @@ async function norms(db: Db, clubIds: string[]) {
   for (const c of clubIds) out[c] = Object.fromEntries(KPI.map((k) => [k.id, rows.find((r) => r.clubId === c && r.metric === k.id)?.v ?? DEFAULT_NORMS[k.id] ?? null]));
   return out;
 }
+/** Пороги светофора клуба (FR-AI-11): доля от плана на сегодня, выше которой «зелёный» и «жёлтый». Задаются в «Нормы KPI» */
+export const LIGHT_DEFAULT = { green: 100, yellow: 85 };
+export async function lightOf(db: Db, clubIds: string[]) {
+  if (clubIds.length !== 1) return { green: LIGHT_DEFAULT.green / 100, yellow: LIGHT_DEFAULT.yellow / 100 };
+  const r = (await db.query(`select metric, per_day::float as v from kpi_norms where club_id = $1 and metric in ('light_green', 'light_yellow')`, [clubIds[0]])).rows;
+  const v = (m: string, d: number) => (r.find((x) => x.metric === m)?.v ?? d) / 100;
+  return { green: v('light_green', LIGHT_DEFAULT.green), yellow: v('light_yellow', LIGHT_DEFAULT.yellow) };
+}
 /** Норма за период: суммарные показатели × дни; «просрочено» и «первый ответ» — не накапливаются */
 const normFor = (metric: string, perDay: number | null, days: number) => (perDay === null ? null : ['tasks_overdue', 'first_response'].includes(metric) ? perDay : Math.round(perDay * days * 10) / 10);
 function kpiStatus(metric: string, value: number | null, norm: number | null) {
@@ -256,7 +264,7 @@ export async function widgetData(db: Db, ctx: Ctx, id: string, q: Q) {
   const ids = clubs.map((c) => c.id);
   const t = await today(db, clubs);
   const month = isMonth(q.month) ? q.month! : t.slice(0, 7);
-  const mi = monthInfo(month, t);
+  const mi = { ...monthInfo(month, t), ...(await lightOf(db, ids)) };
   const base = { widget: id, title: w.title, updatedAt: new Date().toISOString(), today: t, month, clubs: clubs.map((c) => ({ id: c.id, name: c.name })) };
 
   if (id === 'day' || id === 'clubs') {
@@ -511,13 +519,21 @@ export function dashRoutes(app: FastifyInstance, pool: pg.Pool) {
     if (!can(ctx, P.dashView) && !can(ctx, P.crmWork)) throw forbidden();
     const { clubId } = req.query as { clubId?: string };
     if (!clubId || clubId === 'all') throw badRequest('Выберите клуб');
-    return withCtx(pool, ctx, async (db) => { await scope(db, clubId); return { metrics: KPI, norms: (await norms(db, [clubId]))[clubId], canEdit: can(ctx, P.planManage) }; });
+    return withCtx(pool, ctx, async (db) => {
+      await scope(db, clubId);
+      const l = await lightOf(db, [clubId]);
+      return { metrics: KPI, norms: (await norms(db, [clubId]))[clubId], light: { green: Math.round(l.green * 100), yellow: Math.round(l.yellow * 100) }, canEdit: can(ctx, P.planManage) };
+    });
   });
   app.put('/api/kpi-norms', async (req) => {
     const ctx = requireCtx(req);
     if (!can(ctx, P.planManage)) throw forbidden();
-    const b = (req.body ?? {}) as { clubId?: string; norms?: Record<string, number> };
+    const b = (req.body ?? {}) as { clubId?: string; norms?: Record<string, number>; light?: { green?: number; yellow?: number } };
     if (!b.clubId) throw badRequest('Выберите клуб');
+    if (b.light) {
+      const { green, yellow } = b.light;
+      if (!Number.isInteger(green) || !Number.isInteger(yellow) || yellow! < 1 || green! > 200 || yellow! >= green!) throw badRequest('Пороги светофора: жёлтый меньше зелёного, от 1 до 200 %');
+    }
     return withCtx(pool, ctx, async (db) => {
       await scope(db, b.clubId);
       for (const [k, v] of Object.entries(b.norms ?? {})) {
@@ -525,7 +541,10 @@ export function dashRoutes(app: FastifyInstance, pool: pg.Pool) {
         await db.query(`insert into kpi_norms(tenant_id, club_id, metric, per_day, updated_by) values ($1,$2,$3,$4,$5)
           on conflict (club_id, metric) do update set per_day = excluded.per_day, updated_by = excluded.updated_by, updated_at = now()`, [ctx.tenantId, b.clubId, k, v, ctx.userId]);
       }
-      await audit(db, ctx, 'kpi.norms_changed', 'club', b.clubId!, null, b.norms ?? {});
+      if (b.light) for (const [m, v] of [['light_green', b.light.green], ['light_yellow', b.light.yellow]] as const)
+        await db.query(`insert into kpi_norms(tenant_id, club_id, metric, per_day, updated_by) values ($1,$2,$3,$4,$5)
+          on conflict (club_id, metric) do update set per_day = excluded.per_day, updated_by = excluded.updated_by, updated_at = now()`, [ctx.tenantId, b.clubId, m, v, ctx.userId]);
+      await audit(db, ctx, 'kpi.norms_changed', 'club', b.clubId!, null, { ...(b.norms ?? {}), light: b.light });
       return { ok: true };
     });
   });
