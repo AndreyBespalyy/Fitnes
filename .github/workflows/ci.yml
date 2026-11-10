@@ -1,0 +1,33 @@
+name: Проверка
+on:
+  push:
+    branches: [main]
+  pull_request:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: pgadmin
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U postgres" --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      ADMIN_DATABASE_URL: postgres://postgres:pgadmin@localhost:5432/postgres
+      DB_OWNER_PASSWORD: fitnes_owner_ci
+      DB_APP_PASSWORD: fitnes_app_ci
+      OWNER_DATABASE_URL: postgres://fitnes_owner:fitnes_owner_ci@localhost:5432/fitnes
+      DATABASE_URL: postgres://fitnes_app:fitnes_app_ci@localhost:5432/fitnes
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm run db:setup
+      - run: npm test
+      - run: npm run build
