@@ -24,6 +24,7 @@ import { bankRoutes } from './modules/bank.ts';
 import { dashRoutes } from './modules/dash.ts';
 import { aiRoutes, startAiWorker } from './modules/ai.ts';
 import { aiSalesRoutes, startScoringWorker } from './modules/aiSales.ts';
+import { staffTimeRoutes } from './modules/staffTime.ts';
 import { mobileRoutes, startPushWorker } from './modules/mobile.ts';
 import { aiConfigFromEnv, type AiConfig } from './lib/aiClient.ts';
 import { join, dirname } from 'node:path';
@@ -99,6 +100,7 @@ export async function buildApp(pool: pg.Pool, opts: { webDist?: string; secureCo
   aiRoutes(app, pool, storage, ai);
   aiSalesRoutes(app, pool);
   mobileRoutes(app, pool, { fetch: opts.fetch });
+  staffTimeRoutes(app, pool);
   // Фоновая отправка чеков в облачную кассу (в тестах выключена, там вызывается напрямую)
   if (opts.messagingWorker) { const stop = startMessagingWorker(pool, opts.fetch); app.addHook('onClose', async () => stop()); }
   if (opts.billingWorker) { const stop = startBillingWorker(pool, opts.fetch); app.addHook('onClose', async () => stop()); }

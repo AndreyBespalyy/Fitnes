@@ -12,6 +12,7 @@ import { FinancePage } from './finance.tsx';
 import { ImportPage } from './importer.tsx';
 import { AccessPage } from './access.tsx';
 import { ChatsPage, MessagingAdmin } from './chat.tsx';
+import { StaffTimePage } from './staff.tsx';
 import { OfflineBar, ProfilePage, registerServiceWorker, StaffSessions } from './mobile.tsx';
 
 export function App() {
@@ -79,7 +80,7 @@ function ChangePassword({ me, forced, onDone, onLogout }: { me: Me; forced?: boo
   );
 }
 
-type Tab = 'dash' | 'hot' | 'calls' | 'leads' | 'board' | 'tasks' | 'home' | 'clubs' | 'tariffs' | 'contracts' | 'site' | 'fiscal' | 'finance' | 'import' | 'chats' | 'access' | 'messaging' | 'pipelines' | 'staff' | 'profile';
+type Tab = 'dash' | 'hot' | 'calls' | 'leads' | 'board' | 'tasks' | 'home' | 'clubs' | 'tariffs' | 'contracts' | 'site' | 'fiscal' | 'finance' | 'import' | 'chats' | 'access' | 'messaging' | 'pipelines' | 'staff' | 'stafftime' | 'profile';
 
 function Shell({ me, onLogout }: { me: Me; onLogout: () => void }) {
   const isAdmin = can(me, 'clubs.manage') || can(me, 'staff.manage');
@@ -122,6 +123,7 @@ function Shell({ me, onLogout }: { me: Me; onLogout: () => void }) {
     ['import', 'Перенос из 1С', can(me, 'import.manage')],
     ['pipelines', 'Воронки', can(me, 'pipelines.manage')],
     ['staff', 'Сотрудники', can(me, 'staff.view')],
+    ['stafftime', 'График и зарплата', true],
     ['profile', 'Профиль', true],
   ];
   const visible = tabs.filter((t) => t[2]);
@@ -166,6 +168,7 @@ function Shell({ me, onLogout }: { me: Me; onLogout: () => void }) {
         {tab === 'home' && <Home key={ver} me={me} clubs={clubs} clubId={clubId} openPerson={setPersonId} />}
         {tab === 'clubs' && <Clubs me={me} clubs={clubs} reload={reloadClubs} />}
         {tab === 'staff' && <StaffPage me={me} clubs={clubs} />}
+        {tab === 'stafftime' && <StaffTimePage me={me} clubs={clubs} clubId={clubId} />}
         {tab === 'profile' && <ProfilePage me={me} passwordForm={<ChangePassword me={me} onDone={() => { alertOk('Пароль изменён'); setTab(firstTab); }} />} />}
       </main>
       <nav className="bottom-nav" aria-label="Главные разделы">
