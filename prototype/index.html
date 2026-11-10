@@ -1,0 +1,433 @@
+<title>Клубная ОС — прототип</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Onest:wght@400;500;600;700;800&family=JetBrains+Mono:wght@500;600&display=swap">
+<style>
+/* Layout: верхняя панель «роль + клуб», ниже рабочая область роли; менеджер — в рамке телефона, остальные — на ширину экрана */
+:root{
+  --bg:#F3F6F6; --surface:#FFFFFF; --surface-2:#E9EFEF; --line:#D5DFDE;
+  --ink:#13232A; --muted:#5B6E73; --accent:#0E7C74; --accent-ink:#FFFFFF; --accent-soft:#D8EEEC;
+  --warm:#C9821F; --warm-soft:#FBEBD2;
+  --ok:#1F8A4C; --ok-soft:#DDF2E5; --warn:#B7791F; --warn-soft:#FBEED4; --bad:#C2413A; --bad-soft:#F9E0DE;
+  --f-head:"Onest",system-ui,sans-serif; --f-body:"Onest",system-ui,sans-serif; --f-num:"JetBrains Mono",ui-monospace,monospace;
+  --r:10px;
+}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
+  --bg:#0F1719; --surface:#162226; --surface-2:#1D2C31; --line:#2A3C42;
+  --ink:#E4EDEE; --muted:#93A7AC; --accent:#3BB3A8; --accent-ink:#06201D; --accent-soft:#163B38;
+  --warm:#E3A64E; --warm-soft:#3A2C17;
+  --ok:#4CC27E; --ok-soft:#173327; --warn:#E3A64E; --warn-soft:#3A2C17; --bad:#EE7A72; --bad-soft:#3D1F1D; color-scheme:dark}}
+:root[data-theme="dark"]{
+  --bg:#0F1719; --surface:#162226; --surface-2:#1D2C31; --line:#2A3C42;
+  --ink:#E4EDEE; --muted:#93A7AC; --accent:#3BB3A8; --accent-ink:#06201D; --accent-soft:#163B38;
+  --warm:#E3A64E; --warm-soft:#3A2C17;
+  --ok:#4CC27E; --ok-soft:#173327; --warn:#E3A64E; --warn-soft:#3A2C17; --bad:#EE7A72; --bad-soft:#3D1F1D; color-scheme:dark}
+*{box-sizing:border-box}
+body{background:var(--bg);color:var(--ink);font-family:var(--f-body);font-size:14px;line-height:1.45}
+button,input,select{font:inherit;color:inherit}
+.num{font-family:var(--f-num);font-variant-numeric:tabular-nums}
+h1,h2,h3{font-family:var(--f-head);margin:0;text-wrap:balance}
+h1{font-size:22px;font-weight:800;letter-spacing:-.01em}
+h2{font-size:16px;font-weight:700}
+h3{font-size:14px;font-weight:600}
+.lbl{font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);font-weight:600}
+.muted{color:var(--muted)}
+
+/* верхняя панель */
+.top{position:sticky;top:env(safe-area-inset-top,0px);z-index:5;background:var(--ink);color:var(--bg);
+  padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));padding-block:10px;
+  display:flex;flex-wrap:wrap;gap:10px 16px;align-items:center}
+body::before{content:"";position:fixed;inset:0 0 auto;height:env(safe-area-inset-top,0px);z-index:10;background:var(--ink)}
+.brand{font-family:var(--f-head);font-weight:800;font-size:16px;display:flex;gap:8px;align-items:center}
+.brand i{width:22px;height:22px;border-radius:6px;background:var(--accent);display:inline-block;position:relative}
+.brand i::after{content:"";position:absolute;inset:6px 4px;border-top:3px solid var(--bg);border-bottom:3px solid var(--bg)}
+.top .ctl{display:flex;gap:6px;align-items:center;font-size:12px}
+.top select{background:transparent;border:1px solid color-mix(in srgb,var(--bg) 35%,transparent);border-radius:8px;padding:5px 8px;color:var(--bg)}
+.top select option{color:#13232A}
+.top .demo{margin-left:auto;font-size:11px;opacity:.75}
+.wrap{padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));padding-block:18px 40px;max-width:1240px;margin:0 auto}
+
+/* общие элементы */
+.card{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);padding:14px;min-width:0}
+.grid{display:grid;gap:12px}
+.g4{grid-template-columns:repeat(auto-fit,minmax(170px,1fr))}
+.g2{grid-template-columns:repeat(auto-fit,minmax(320px,1fr))}
+.row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.between{justify-content:space-between}
+.btn{border:1px solid var(--line);background:var(--surface);border-radius:8px;padding:7px 12px;cursor:pointer;font-weight:600}
+.btn:hover{border-color:var(--accent)}
+.btn.pri{background:var(--accent);color:var(--accent-ink);border-color:var(--accent)}
+.btn.sm{padding:4px 9px;font-size:12px}
+.btn:focus-visible,select:focus-visible,input:focus-visible{outline:2px solid var(--warm);outline-offset:2px}
+.chip{display:inline-flex;align-items:center;gap:5px;font-size:11px;font-weight:600;padding:2px 8px;border-radius:999px;background:var(--surface-2);color:var(--muted);white-space:nowrap}
+.chip.ok{background:var(--ok-soft);color:var(--ok)} .chip.warn{background:var(--warn-soft);color:var(--warn)} .chip.bad{background:var(--bad-soft);color:var(--bad)} .chip.acc{background:var(--accent-soft);color:var(--accent)}
+.kpi .v{font-family:var(--f-num);font-size:24px;font-weight:600;letter-spacing:-.02em;margin-top:4px}
+.kpi .s{font-size:12px;color:var(--muted);margin-top:2px}
+.bar{height:6px;background:var(--surface-2);border-radius:99px;overflow:hidden;margin-top:8px}
+.bar b{display:block;height:100%;background:var(--accent);border-radius:99px}
+.bar.warn b{background:var(--warn)} .bar.bad b{background:var(--bad)}
+.tbl{overflow-x:auto}
+table{width:100%;border-collapse:collapse;font-size:13px}
+th{text-align:left;font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);font-weight:600;padding:6px 8px;border-bottom:1px solid var(--line)}
+td{padding:8px;border-bottom:1px solid var(--line);vertical-align:top}
+td.r,th.r{text-align:right}
+.fresh{font-size:11px;color:var(--muted)}
+.dot{width:10px;height:10px;border-radius:50%;display:inline-block}
+.dot.ok{background:var(--ok)}.dot.warn{background:var(--warn)}.dot.bad{background:var(--bad)}
+.sect{display:grid;gap:12px;margin-top:16px}
+.head{display:flex;flex-wrap:wrap;gap:8px 16px;align-items:end;justify-content:space-between}
+.tabs{display:flex;gap:4px;flex-wrap:wrap}
+.tabs button{border:0;background:transparent;padding:6px 10px;border-radius:8px;cursor:pointer;color:var(--muted);font-weight:600}
+.tabs button[aria-pressed="true"]{background:var(--accent-soft);color:var(--accent)}
+.note{font-size:12px;color:var(--muted);border-left:3px solid var(--warm);padding:4px 10px;background:var(--warm-soft);border-radius:0 6px 6px 0}
+.ai{border:1px dashed var(--accent);background:var(--accent-soft)}
+.ai .lbl{color:var(--accent)}
+input[type=text],input[type=tel],input[type=email],select.f{width:100%;border:1px solid var(--line);background:var(--surface);border-radius:8px;padding:8px 10px}
+label.fl{display:grid;gap:4px;font-size:12px;color:var(--muted);font-weight:600}
+.toast{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(20px + env(safe-area-inset-bottom,0px));background:var(--ink);color:var(--bg);padding:10px 16px;border-radius:10px;font-weight:600;z-index:20;max-width:calc(100% - 32px)}
+
+/* телефон менеджера */
+.phoneWrap{display:flex;gap:24px;flex-wrap:wrap;align-items:flex-start}
+.phone{width:390px;max-width:100%;background:var(--surface);border:1px solid var(--line);border-radius:28px;overflow:hidden;box-shadow:0 10px 30px -18px rgba(0,0,0,.35);display:flex;flex-direction:column;height:760px;max-height:calc(100vh - 120px);min-height:560px}
+.ph-top{padding:14px 16px 10px;border-bottom:1px solid var(--line)}
+.ph-body{flex:1;overflow-y:auto;padding:12px 14px;display:grid;gap:10px;align-content:start}
+.ph-nav{display:grid;grid-template-columns:repeat(4,1fr);border-top:1px solid var(--line)}
+.ph-nav button{border:0;background:transparent;padding:10px 4px 12px;font-size:11px;font-weight:600;color:var(--muted);cursor:pointer}
+.ph-nav button[aria-current="true"]{color:var(--accent)}
+.task{display:grid;grid-template-columns:4px 1fr auto;gap:10px;align-items:center;padding:10px;border:1px solid var(--line);border-radius:10px;background:var(--surface);cursor:pointer;text-align:left;width:100%}
+.task .stripe{align-self:stretch;border-radius:4px;background:var(--line)}
+.task .stripe.hot{background:var(--bad)} .task .stripe.warm{background:var(--warn)} .task .stripe.cold{background:var(--accent)}
+.task .t{font-weight:600}
+.task .why{font-size:12px;color:var(--muted)}
+.side{flex:1;min-width:260px;max-width:520px;display:grid;gap:12px}
+.cat{display:grid;grid-template-columns:1fr auto;gap:2px 8px;font-size:12px}
+.steps{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:6px}
+.steps span{font-size:11px;font-weight:700;padding:3px 8px;border-radius:99px;background:var(--surface-2);color:var(--muted)}
+.steps span.on{background:var(--accent);color:var(--accent-ink)}
+.scan{display:grid;place-items:center;gap:6px;padding:22px;border-radius:12px;text-align:center}
+.scan.ok{background:var(--ok-soft);color:var(--ok)} .scan.bad{background:var(--bad-soft);color:var(--bad)}
+.scan .big{font-family:var(--f-head);font-size:22px;font-weight:800}
+@media (max-width:440px){.phone{border-radius:16px;height:auto;max-height:none}.ph-body{overflow:visible}}
+@media (prefers-reduced-motion:no-preference){.fade{animation:f .25s ease}@keyframes f{from{opacity:.4;transform:translateY(3px)}to{opacity:1;transform:none}}}
+</style>
+
+<header class="top">
+  <div class="brand"><i></i>Клубная ОС</div>
+  <div class="ctl"><label for="role">Роль</label>
+    <select id="role">
+      <option value="owner">Собственник</option>
+      <option value="manager">Менеджер ОП</option>
+      <option value="rop">Руководитель ОП</option>
+      <option value="gm">Управляющий</option>
+      <option value="desk">Ресепшн</option>
+      <option value="fin">Финансист</option>
+      <option value="admin">Администратор системы</option>
+    </select></div>
+  <div class="ctl"><label for="club">Клуб</label><select id="club"></select></div>
+  <div class="demo">Прототип · тестовые данные</div>
+</header>
+<main class="wrap" id="app"></main>
+<div class="toast" id="toast" hidden></div>
+
+<script>
+/* ---------- тестовые данные ---------- */
+const S = {
+  clubs:[
+    {id:'c1',name:'Клуб «Центр»',city:'Москва, ул. Тверская, 12',tz:'Europe/Moscow',model:'term'},
+    {id:'c2',name:'Клуб «Север»',city:'Москва, Дмитровское ш., 89',tz:'Europe/Moscow',model:'sub'}
+  ],
+  staff:[
+    {id:1,name:'Андрей Беспалый',role:'owner',clubs:['*'],active:true},
+    {id:2,name:'Ирина Котова',role:'admin',clubs:['*'],active:true},
+    {id:3,name:'Олег Смирнов',role:'gm',clubs:['c1'],active:true},
+    {id:4,name:'Ольга Астафьева',role:'rop',clubs:['c1'],active:true},
+    {id:5,name:'Мария Волкова',role:'manager',clubs:['c1'],active:true},
+    {id:6,name:'Дарья Лис',role:'desk',clubs:['c1'],active:true},
+    {id:7,name:'Екатерина Орлова',role:'fin',clubs:['c1'],active:true},
+    {id:8,name:'Артём Ким',role:'trainer',clubs:['c1'],active:true},
+    {id:9,name:'Сергей Павлов',role:'gm',clubs:['c2'],active:true},
+    {id:10,name:'Наталья Белова',role:'rop',clubs:['c2'],active:true},
+    {id:11,name:'Игорь Зуев',role:'manager',clubs:['c2'],active:true},
+    {id:12,name:'Алина Морозова',role:'desk',clubs:['c2'],active:true},
+    {id:13,name:'Виктор Гусев',role:'fin',clubs:['c2'],active:true},
+    {id:14,name:'Полина Ершова',role:'trainer',clubs:['c2'],active:true}
+  ]
+};
+const ROLES={owner:'Собственник',admin:'Администратор системы',gm:'Управляющий',rop:'Руководитель ОП',manager:'Менеджер ОП',desk:'Администратор ресепшн',fin:'Финансист',trainer:'Тренер'};
+const MODEL={term:'Абонементы на срок',sub:'Подписка (ежемесячное списание)'};
+
+/* данные по модели продаж */
+const BY_MODEL={
+  term:{
+    cats:[['Новые клиенты',420000,268000],['Продления',610000,402000],['Возобновление бывших',180000,77000],['Персональные тренировки',150000,96000]],
+    avgLabel:'Средневзвешенный абонемент',avg:'38 400 ₽',
+    clients:[
+      {n:'Алексей Громов',cat:'На продление',why:'Абонемент «Год» заканчивается через 5 дней. Был 46 раз за год',act:'Позвонить, предложить продление со сдвигом от даты окончания',heat:'hot',sum:'42 000 ₽',ph:'+7 916 ***-**-21'},
+      {n:'Светлана Юдина',cat:'Лид',why:'Заявка с сайта 18 мин назад, источник: Яндекс.Директ',act:'Перезвонить сейчас — превышена норма первого ответа',heat:'hot',sum:'38 400 ₽',ph:'+7 903 ***-**-08'},
+      {n:'Павел Рябов',cat:'Был на встрече',why:'Встреча 3 дня назад, сказал «подумаю», возражение — цена',act:'Предложить рассрочку на 3 месяца',heat:'warm',sum:'36 000 ₽',ph:'+7 926 ***-**-55'},
+      {n:'Елена Миронова',cat:'Бывший член клуба',why:'Абонемент закончился 2 месяца назад, ходила 3 раза в неделю',act:'Возобновление: акция «вернись осенью» −10%',heat:'warm',sum:'34 560 ₽',ph:'+7 985 ***-**-14'},
+      {n:'Кирилл Демин',cat:'Гость',why:'Гостевой визит вчера, понравился зал единоборств',act:'Пригласить на пробную персональную тренировку',heat:'cold',sum:'—',ph:'+7 915 ***-**-90'}
+    ]},
+  sub:{
+    cats:[['Новые подписки',380000,251000],['Возврат отписавшихся',140000,52000],['Удержание (без отписок)',520000,489000],['Персональные тренировки',120000,71000]],
+    avgLabel:'Средняя подписка в месяц',avg:'4 900 ₽',
+    clients:[
+      {n:'Тимур Ахметов',cat:'Списание не прошло',why:'Не прошло списание 2 900 ₽, карта просрочена. Попытка 2 из 3',act:'Отправить ссылку на смену карты в Telegram',heat:'hot',sum:'4 900 ₽/мес',ph:'+7 977 ***-**-31'},
+      {n:'Анна Ковалёва',cat:'Лид',why:'Заявка из Telegram 9 мин назад: «сколько стоит подписка?»',act:'Ответить и пригласить на гостевой визит',heat:'hot',sum:'4 900 ₽/мес',ph:'+7 905 ***-**-77'},
+      {n:'Роман Фёдоров',cat:'Риск отписки',why:'Не был 19 дней, раньше ходил 3 раза в неделю',act:'Позвонить, предложить заморозку вместо отписки',heat:'warm',sum:'4 900 ₽/мес',ph:'+7 916 ***-**-46'},
+      {n:'Ксения Лаптева',cat:'Отписавшийся',why:'Отписалась 40 дней назад, причина — переезд в другой район. Клуб «Центр» рядом с новым адресом',act:'Предложить перейти в клуб «Центр» сети',heat:'warm',sum:'4 900 ₽/мес',ph:'+7 999 ***-**-12'},
+      {n:'Глеб Орлов',cat:'Гость',why:'Пришёл по QR-анкете на ресепшн 2 дня назад',act:'Звонок-знакомство, первый месяц 990 ₽',heat:'cold',sum:'990 ₽',ph:'+7 925 ***-**-65'}
+    ]}
+};
+const MGRS={c1:[['Мария Волкова','ok',92,31,12],['Анна Ли','ok',81,27,9],['Пётр Нос','warn',63,22,6],['Максим Ульев','bad',41,14,3]],
+            c2:[['Игорь Зуев','ok',88,29,10],['Вера Сомова','warn',66,20,5],['Денис Агеев','bad',38,11,2]]};
+const DAY={c1:{sales:186400,cash:171900,exp:42300,visits:612,leads:38,conv:24},c2:{sales:97300,cash:112600,exp:31800,visits:448,leads:29,conv:21}};
+
+let st={role:'owner',club:'c1',mTab:'home',client:null,sale:0,deskRes:null,adminTab:'clubs',wiz:null,approvals:[
+  {id:1,what:'Возврат 18 500 ₽ — Громова Т. (переезд), остаток после заморозки',who:'Олег Смирнов, управляющий',club:'c1',lim:'выше лимита управляющего 15 000 ₽'},
+  {id:2,what:'Расход 64 000 ₽ — ремонт беговой дорожки №4',who:'Сергей Павлов, управляющий',club:'c2',lim:'выше лимита 50 000 ₽'}]};
+
+/* ---------- утилиты ---------- */
+const $=s=>document.querySelector(s);
+const rub=n=>n.toLocaleString('ru-RU')+' ₽';
+const esc=s=>String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const club=()=>S.clubs.find(c=>c.id===st.club)||S.clubs[0];
+const data=()=>BY_MODEL[club().model];
+function toast(t){const el=$('#toast');el.textContent=t;el.hidden=false;clearTimeout(toast.t);toast.t=setTimeout(()=>el.hidden=true,2600)}
+function nowStr(){const d=new Date();return d.toLocaleTimeString('ru-RU',{hour:'2-digit',minute:'2-digit'})}
+function pct(f,p){return Math.round(f/p*100)}
+function barCls(p){return p>=85?'':p>=60?'warn':'bad'}
+function fillClubs(){const sel=$('#club');const all=['owner','admin'].includes(st.role);
+  sel.innerHTML=(all?'<option value="all">Вся сеть</option>':'')+S.clubs.map(c=>`<option value="${c.id}">${esc(c.name)}</option>`).join('');
+  if(!all&&st.club==='all')st.club='c1'; sel.value=st.club;}
+
+/* ---------- экраны ---------- */
+function planBlock(compact){
+  const d=data();
+  return d.cats.map(([n,p,f])=>{const pc=pct(f,p);return `<div>
+    <div class="row between"><span>${n}</span><span class="num">${pc}%</span></div>
+    <div class="bar ${barCls(pc)}"><b style="width:${Math.min(pc,100)}%"></b></div>
+    ${compact?'':`<div class="row between fresh"><span>факт ${rub(f)}</span><span>план ${rub(p)} · дефицит ${rub(Math.max(p-f,0))}</span></div>`}
+  </div>`}).join('');
+}
+function ownerView(){
+  const ids=st.club==='all'?S.clubs.map(c=>c.id):[st.club];
+  const sum=k=>ids.reduce((a,i)=>a+((DAY[i]||{sales:0,cash:0,exp:0,visits:0,leads:0,conv:0})[k]),0);
+  const sales=sum('sales'),cash=sum('cash'),exp=sum('exp');
+  const title=st.club==='all'?'Вся сеть':club().name;
+  const appr=st.approvals.filter(a=>st.club==='all'||a.club===st.club);
+  return `<div class="head"><div><div class="lbl">Эффективность дня</div><h1>${esc(title)}</h1></div>
+    <div class="fresh">Продажи и деньги обновлены в ${nowStr()} · раз в минуту</div></div>
+  <div class="grid g4 sect">
+    <div class="card kpi"><div class="lbl">Продажи сегодня</div><div class="v">${rub(sales)}</div><div class="s">план дня ${rub(Math.round(sales*1.12))}</div></div>
+    <div class="card kpi"><div class="lbl">Поступления</div><div class="v">${rub(cash)}</div><div class="s">касса, эквайринг, СБП, банк</div></div>
+    <div class="card kpi"><div class="lbl">Расходы</div><div class="v">${rub(exp)}</div><div class="s">утверждённые за день</div></div>
+    <div class="card kpi"><div class="lbl">Результат дня</div><div class="v" style="color:var(--ok)">${rub(cash-exp)}</div><div class="s">поступления − расходы</div></div>
+    <div class="card kpi"><div class="lbl">Посещения</div><div class="v">${sum('visits')}</div><div class="s">уникальных клиентов</div></div>
+    <div class="card kpi"><div class="lbl">Новые лиды</div><div class="v">${sum('leads')}</div><div class="s">конверсия в покупку ${Math.round(sum('conv')/ids.length)}%</div></div>
+  </div>
+  <div class="grid g2 sect">
+    <div class="card"><div class="row between"><h2>План месяца по категориям</h2>${st.club==='all'?'':`<span class="chip acc">${MODEL[club().model]}</span>`}</div>
+      <div class="grid" style="margin-top:10px">${st.club==='all'?'<p class="muted">Выберите клуб, чтобы увидеть категории плана: у клубов разные модели продаж.</p>':planBlock()}</div></div>
+    <div class="card"><h2>Ждут вашего решения</h2>
+      <div class="grid" style="margin-top:10px">${appr.length?appr.map(a=>`<div class="card" style="background:var(--surface-2)">
+        <div style="font-weight:600">${esc(a.what)}</div><div class="fresh">${esc(a.who)} · ${esc(a.lim)}</div>
+        <div class="row" style="margin-top:8px"><button class="btn pri sm" data-appr="${a.id}" data-ok="1">Утвердить</button><button class="btn sm" data-appr="${a.id}">Отклонить</button></div></div>`).join(''):'<p class="muted">Всё утверждено.</p>'}</div>
+      <p class="fresh" style="margin-top:8px">Утверждение требует подтверждения вторым фактором.</p></div>
+  </div>
+  <div class="card sect ai"><div class="lbl">Предложение ИИ · уверенность средняя</div>
+    <p style="margin:6px 0 0">${club().model==='sub'&&st.club!=='all'?'Отток подписчиков в «Севере» вырос с 4,1% до 5,6% за 4 недели: 31 подписчик не был больше 14 дней. Предлагаю создать задачу менеджерам «звонок удержания» по этому сегменту.':'Продления в «Центре» на 11% ниже плана: у 64 клиентов абонемент заканчивается в ближайшие 14 дней, у 22 из них нет задачи. Предлагаю автоматически ставить задачу за 14 дней до окончания.'}</p>
+    <p class="fresh">Основание: посещения и договоры за 90 дней. ИИ ничего не меняет без утверждения.</p>
+    <div class="row" style="margin-top:6px"><button class="btn pri sm" data-toast="Предложение отправлено на тест в песочнице">Проверить на истории</button><button class="btn sm" data-toast="Предложение отклонено">Отклонить</button></div></div>`;
+}
+function managerView(){
+  const d=data(),c=club();
+  let body='';
+  if(st.client!==null){const k=d.clients[st.client];
+    if(st.sale>0){body=saleFlow(k)}else{
+    body=`<button class="btn sm" data-back>← Назад</button>
+    <div><h2>${esc(k.n)}</h2><div class="row" style="margin-top:4px"><span class="chip ${k.heat==='hot'?'bad':k.heat==='warm'?'warn':'acc'}">${esc(k.cat)}</span><span class="fresh num">${k.ph}</span></div></div>
+    <div class="row"><button class="btn pri" data-call>Позвонить</button><button class="btn" data-toast="Открыта переписка в Telegram">Написать</button><button class="btn" data-sale>Оформить продажу</button></div>
+    <div class="card ai"><div class="lbl">Резюме последнего звонка · создано ИИ</div>
+      <p style="margin:6px 0">${esc(k.why)}. Клиент интересуется вечерними тренировками, возражение — стоимость. Договорились: перезвонить завтра в 19:00.</p>
+      <div class="row"><button class="btn pri sm" data-toast="Резюме подтверждено, задача на завтра 19:00 создана">Подтвердить</button><button class="btn sm" data-toast="Открыт редактор резюме">Исправить</button></div></div>
+    <div class="card"><div class="lbl">Рекомендованное действие</div><p style="margin:4px 0 0">${esc(k.act)}</p></div>
+    <div class="card"><div class="lbl">Карточка</div>
+      <div class="cat" style="margin-top:6px"><span class="muted">Источник</span><span>Яндекс.Директ (авто)</span><span class="muted">Ответственный</span><span>${esc(S.staff.find(s=>s.role==='manager'&&s.clubs.includes(c.id))?.name||'—')}</span><span class="muted">Посещений за 90 дней</span><span class="num">${k.heat==='hot'?34:k.heat==='warm'?6:1}</span><span class="muted">Долг</span><span class="num">0 ₽</span><span class="muted">Согласия</span><span>ПДн, запись звонков</span></div></div>
+    <button class="btn" data-close>Закрыть карточку</button>`}
+  } else if(st.mTab==='home'){
+    body=`<div class="card"><div class="row between"><span class="lbl">План на сегодня</span><span class="fresh">${nowStr()}</span></div>
+      <div class="row between" style="margin-top:4px"><span class="num" style="font-size:22px;font-weight:600">${rub(48300)}</span><span class="chip warn">выполнено 41%</span></div>
+      <div class="bar warn"><b style="width:41%"></b></div>
+      <div class="grid" style="margin-top:10px;gap:8px">${planBlock(true)}</div></div>
+    <div class="lbl" style="margin-top:4px">План дня от ИИ · ${d.clients.length} клиентов по приоритету</div>
+    ${d.clients.map((k,i)=>`<button class="task" data-client="${i}"><span class="stripe ${k.heat}"></span><span style="min-width:0"><span class="t">${esc(k.n)}</span><br><span class="why">${esc(k.cat)} · ${esc(k.act)}</span></span><span class="num fresh">${esc(k.sum)}</span></button>`).join('')}`;
+  } else if(st.mTab==='tasks'){
+    body=`<h2>Задачи</h2>
+    <div class="lbl" style="color:var(--bad)">Просрочено · 1</div>
+    <button class="task" data-client="2"><span class="stripe hot"></span><span><span class="t">Перезвонить: ${esc(d.clients[2].n)}</span><br><span class="why">вчера 18:00</span></span><span class="chip bad">просрочено</span></button>
+    <div class="lbl">Сегодня · 3</div>
+    ${d.clients.slice(0,3).map((k,i)=>`<button class="task" data-client="${i}"><span class="stripe ${k.heat}"></span><span><span class="t">${i===1?'Первый ответ: ':'Звонок: '}${esc(k.n)}</span><br><span class="why">${['10:30','сейчас','16:00'][i]}</span></span><span class="fresh">${['звонок','лид','встреча'][i]}</span></button>`).join('')}`;
+  } else if(st.mTab==='hot'){
+    body=`<h2>Горячие клиенты</h2><p class="fresh" style="margin:0">Не отказывались, планировали покупку, без «не может купить». Список собран за 1,2 с.</p>
+    ${d.clients.filter(k=>k.heat!=='cold').map(k=>{const i=d.clients.indexOf(k);return `<button class="task" data-client="${i}"><span class="stripe ${k.heat}"></span><span><span class="t">${esc(k.n)}</span><br><span class="why">Предложение: ${esc(k.act)}</span></span><span class="num fresh">${esc(k.sum)}</span></button>`}).join('')}`;
+  } else {
+    body=`<h2>Мой месяц</h2>
+    <div class="card"><div class="lbl">Личный план</div><div class="row between" style="margin-top:4px"><span class="num" style="font-size:20px;font-weight:600">${rub(c.model==='sub'?212000:298000)}</span><span class="chip ok">74%</span></div><div class="bar"><b style="width:74%"></b></div><p class="fresh">прогноз на конец месяца 96%</p></div>
+    <div class="card"><div class="lbl">Мои показатели сегодня</div><div class="cat" style="margin-top:6px"><span class="muted">Звонки с разговором</span><span class="num">23</span><span class="muted">Эфирное время</span><span class="num">1 ч 48 мин</span><span class="muted">Назначено встреч</span><span class="num">5</span><span class="muted">Продажи</span><span class="num">2</span><span class="muted">Время первого ответа</span><span class="num">3 мин</span></div></div>
+    <div class="card ai"><div class="lbl">Совет на неделю</div><p style="margin:4px 0 0">Сильная сторона — продления (конверсия 61%). Проседаете на бывших клиентах: 3 из 9 звонков без предложения. Начинайте разговор с изменений в клубе.</p></div>`;
+  }
+  return `<div class="head"><div><div class="lbl">Мобильное рабочее место · ${esc(c.name)}</div><h1>Менеджер отдела продаж</h1></div></div>
+  <div class="phoneWrap sect">
+    <div class="phone" role="region" aria-label="Экран телефона менеджера">
+      <div class="ph-top"><div class="row between"><b>${esc(S.staff.find(s=>s.role==='manager'&&s.clubs.includes(c.id))?.name||'Менеджер')}</b><span class="chip acc">${c.model==='sub'?'подписка':'абонементы'}</span></div></div>
+      <div class="ph-body fade">${body}</div>
+      <nav class="ph-nav">${[['home','Сегодня'],['tasks','Задачи'],['hot','Горячие'],['me','Мой месяц']].map(([k,t])=>`<button data-mtab="${k}" aria-current="${st.mTab===k&&st.client===null}">${t}</button>`).join('')}</nav>
+    </div>
+    <div class="side">
+      <div class="note">Нажмите на клиента в «Плане дня», чтобы открыть карточку, позвонить и пройти продажу до оплаты. На пилоте это веб-приложение на экране телефона, позже приложение в App Store и Google Play.</div>
+      <div class="card"><h3>Что проверяем на этом экране</h3><ul class="muted" style="margin:6px 0 0;padding-left:18px">
+        <li>Понятен ли план дня и порядок звонков</li><li>Хватает ли информации в причине и рекомендации</li><li>Удобно ли подтверждать резюме звонка одним касанием</li><li>Быстро ли проходит продажа: тариф → договор → подпись → оплата</li></ul></div>
+    </div>
+  </div>`;
+}
+function saleFlow(k){
+  const sub=club().model==='sub';
+  const steps=['Тариф','Договор','Подпись','Оплата'];
+  const head=`<div class="steps">${steps.map((s,i)=>`<span class="${i<st.sale?'on':''}">${i+1}. ${s}</span>`).join('')}</div>`;
+  const tariffs=sub?[['Подписка «Безлимит»','4 900 ₽/мес'],['Подписка «Дневная»','3 400 ₽/мес'],['Первый месяц для новых','990 ₽']]:[['Абонемент «Год»','42 000 ₽'],['Абонемент «Полгода»','25 800 ₽'],['Рассрочка «Год», 3 платежа','3 × 14 000 ₽']];
+  if(st.sale===1)return `<button class="btn sm" data-back>← Карточка</button><h2>Продажа: ${esc(k.n)}</h2>${head}
+    ${tariffs.map((t,i)=>`<button class="task" data-sale-next><span class="stripe ${i===0?'hot':'cold'}"></span><span><span class="t">${t[0]}</span>${i===0?'<br><span class="why">рекомендовано ИИ по истории клиента</span>':''}</span><span class="num">${t[1]}</span></button>`).join('')}
+    ${sub?'':'<p class="fresh">Продление считается от даты окончания текущего абонемента, клиент не теряет дни.</p>'}`;
+  if(st.sale===2)return `${head}<div class="card"><div class="lbl">Договор собран из карточки</div><p style="margin:6px 0">Договор оказания услуг № ${sub?'С':'Ц'}-2026-1184 · ${esc(k.n)} · ${tariffs[0][0]} · ${tariffs[0][1]}</p><p class="fresh">Шаблон «${sub?'Подписка':'Абонемент'} v3», утверждён юристом 02.11.2026</p></div><button class="btn pri" data-sale-next>Отправить на подпись</button>`;
+  if(st.sale===3)return `${head}<div class="card"><div class="lbl">Подпись простой электронной подписью</div><p style="margin:6px 0">Клиенту отправлен код по SMS на ${k.ph}. Статус «подписан» ставится только после подтверждения кода.</p></div><button class="btn pri" data-sale-next>Клиент ввёл код — подписано</button>`;
+  if(st.sale===4)return `${head}<div class="card"><div class="lbl">Оплата</div><p style="margin:6px 0">Ссылка на оплату ${tariffs[0][1]} отправлена в Telegram. ${sub?'После первой оплаты карта сохраняется для ежемесячного списания.':''}</p></div><button class="btn pri" data-sale-next>Банк подтвердил оплату</button><p class="fresh">Сделка становится «выиграна» только после подтверждения банка, не по нажатию кнопки.</p>`;
+  return `<div class="scan ok"><div class="big">Продано</div><div>Чек отправлен клиенту, доступ в клуб включён</div></div><button class="btn" data-back-home>К плану дня</button>`;
+}
+function ropView(){
+  const c=club(); const m=MGRS[c.id]||[];
+  return `<div class="head"><div><div class="lbl">Отдел продаж · ${esc(c.name)}</div><h1>Руководитель отдела продаж</h1></div><div class="fresh">Обновлено в ${nowStr()}</div></div>
+  <div class="grid g2 sect">
+    <div class="card"><h2>Светофор менеджеров</h2><div class="tbl" style="margin-top:8px"><table>
+      <thead><tr><th>Менеджер</th><th class="r">План, %</th><th class="r">Встречи</th><th class="r">Продажи</th></tr></thead>
+      <tbody>${m.map(([n,s,p,mt,sl])=>`<tr><td><span class="dot ${s}"></span> ${esc(n)}</td><td class="r num">${p}</td><td class="r num">${mt}</td><td class="r num">${sl}</td></tr>`).join('')}</tbody></table></div>
+      <p class="fresh">Пороги: зелёный от 85% плана, жёлтый 60–85%, красный ниже 60%. Настраиваются клубом.</p></div>
+    <div class="card"><h2>План отдела · ${MODEL[c.model]}</h2><div class="grid" style="margin-top:10px">${planBlock()}</div></div>
+  </div>
+  <div class="card sect"><h2>Конверсия по каналам</h2><div class="tbl" style="margin-top:8px"><table>
+    <thead><tr><th>Канал</th><th class="r">Лиды</th><th class="r">Диалог → встреча</th><th class="r">Доходимость</th><th class="r">Встреча → покупка</th></tr></thead>
+    <tbody>${[['Яндекс.Директ',142,38,71,34],['Сайт (органика)',88,44,78,41],['Telegram',61,29,64,28],['Яндекс.Карты',37,51,82,46],['Рекомендации',24,67,88,58]].map(r=>`<tr><td>${r[0]}</td><td class="r num">${r[1]}</td><td class="r num">${r[2]}%</td><td class="r num">${r[3]}%</td><td class="r num">${r[4]}%</td></tr>`).join('')}</tbody></table></div></div>
+  <div class="grid g2 sect">
+    <div class="card"><h2>Требует внимания</h2><div class="grid" style="margin-top:8px;gap:6px">
+      <div class="row between"><span>Лиды без ответа дольше 5 минут</span><span class="chip bad">3</span></div>
+      <div class="row between"><span>Неподтверждённые резюме звонков</span><span class="chip warn">7</span></div>
+      <div class="row between"><span>Сделки без следующего шага</span><span class="chip warn">4</span></div>
+      <div class="row between"><span>«Продано» без оплаты</span><span class="chip bad">1</span></div></div></div>
+    <div class="card ai"><div class="lbl">Рекомендация на сегодня</div><p style="margin:6px 0 0">${esc((MGRS[c.id]||[])[3]?.[0]||(MGRS[c.id]||[])[2]?.[0]||'')}: 4 из 6 встреч без предложения рассрочки. Прослушать 2 звонка и разобрать возражение «дорого» по скрипту.</p></div>
+  </div>`;
+}
+function gmView(){const c=club();return `<div class="head"><div><div class="lbl">${esc(c.name)} · ${MODEL[c.model]}</div><h1>Управляющий</h1></div><div class="fresh">Обновлено в ${nowStr()}</div></div>
+  <div class="grid g4 sect">
+    <div class="card kpi"><div class="lbl">Выполнение плана</div><div class="v">68%</div><div class="s">на 10 ноября, норма 33%</div></div>
+    <div class="card kpi"><div class="lbl">${c.model==='sub'?'Отток подписчиков':'Продления в срок'}</div><div class="v">${c.model==='sub'?'5,6%':'71%'}</div><div class="s">за 30 дней</div></div>
+    <div class="card kpi"><div class="lbl">Долги клиентов</div><div class="v">${rub(c.model==='sub'?38200:126500)}</div><div class="s">${c.model==='sub'?'неуспешные списания':'рассрочки с просрочкой'}</div></div>
+    <div class="card kpi"><div class="lbl">Ручные проходы</div><div class="v">4</div><div class="s">за сегодня, все с причиной</div></div></div>
+  <div class="grid g2 sect"><div class="card"><h2>План по категориям</h2><div class="grid" style="margin-top:10px">${planBlock()}</div></div>
+  <div class="card"><h2>Мои лимиты утверждения</h2><div class="cat" style="margin-top:8px"><span class="muted">Возврат</span><span class="num">до 15 000 ₽</span><span class="muted">Скидка</span><span class="num">до 15%</span><span class="muted">Расход</span><span class="num">до 50 000 ₽</span></div><p class="fresh">Всё, что выше, уходит собственнику.</p>
+  <button class="btn" style="margin-top:8px" data-toast="Форма расхода откроется в рабочей версии">Добавить расход</button></div></div>`}
+function deskView(){const c=club();const r=st.deskRes;
+  return `<div class="head"><div><div class="lbl">${esc(c.name)} · смена открыта в 07:00</div><h1>Ресепшн</h1></div><div class="row"><span class="chip ok">Турникеты на связи</span><span class="chip ok">Касса на связи</span></div></div>
+  <div class="grid g2 sect">
+    <div class="card"><h2>Проход</h2><p class="fresh">Нажмите, чтобы смоделировать проход по карте, браслету или QR-коду.</p>
+      <div class="row" style="margin:8px 0"><button class="btn" data-scan="ok">Действующий клиент</button><button class="btn" data-scan="frozen">Замороженный</button><button class="btn" data-scan="debt">Долг</button><button class="btn" data-scan="club">Чужой клуб</button></div>
+      ${r?`<div class="scan ${r.ok?'ok':'bad'} fade"><div class="big">${r.ok?'Проход разрешён':'Проход запрещён'}</div><div>${esc(r.t)}</div>${r.ok?'':`<div class="row" style="justify-content:center;margin-top:6px">${r.a.map(x=>`<button class="btn sm" data-toast="${esc(x)}: откроется форма">${esc(x)}</button>`).join('')}<button class="btn sm" data-toast="Ручной проход: нужно указать причину">Пустить вручную</button></div>`}</div>`:''}
+    </div>
+    <div class="card"><h2>Гость</h2><p class="fresh">После пилота гость заполняет анкету сам по QR-коду на стойке.</p>
+      <div class="grid" style="margin-top:8px;gap:8px"><label class="fl" for="g-ph">Телефон<input id="g-ph" type="tel" value="+7 916 555-12-34"></label>
+      <label class="fl" for="g-src">Откуда узнали (обязательно)<select id="g-src" class="f"><option>Яндекс.Карты</option><option>Рекомендация друга</option><option>Сайт</option><option>Проходил мимо</option></select></label>
+      <button class="btn pri" data-toast="Дубль не найден. Гость создан, лид и сделка в воронке «Новые» назначены менеджеру">Оформить гостевой визит</button></div></div>
+  </div>
+  <div class="card sect"><div class="row between"><h2>Касса · смена</h2><button class="btn sm" data-toast="Закрытие смены: пересчитайте наличные">Закрыть смену</button></div>
+    <div class="cat" style="margin-top:8px;max-width:420px"><span class="muted">Остаток на начало</span><span class="num">5 000 ₽</span><span class="muted">Наличные за смену</span><span class="num">23 400 ₽</span><span class="muted">Карты и СБП</span><span class="num">71 900 ₽</span><span class="muted">Чеков пробито</span><span class="num">19</span><span class="muted">Чек в очереди</span><span class="num">0</span></div></div>`}
+function finView(){const c=club();return `<div class="head"><div><div class="lbl">${esc(c.name)}</div><h1>Финансист</h1></div><div class="fresh">Сверка за 09.11.2026</div></div>
+  <div class="grid g4 sect">
+    <div class="card kpi"><div class="lbl">Сверено</div><div class="v">142</div><div class="s">платежа совпали с банком</div></div>
+    <div class="card kpi"><div class="lbl">Не сверено</div><div class="v" style="color:var(--bad)">2</div><div class="s">задачи созданы</div></div>
+    <div class="card kpi"><div class="lbl">Комиссия эквайринга</div><div class="v">${rub(4870)}</div><div class="s">1,9% от оборота</div></div>
+    <div class="card kpi"><div class="lbl">Возвраты на согласовании</div><div class="v">1</div><div class="s">ждёт собственника</div></div></div>
+  <div class="card sect"><h2>Несверенные платежи</h2><div class="tbl" style="margin-top:8px"><table><thead><tr><th>Дата</th><th>Клиент</th><th class="r">Сумма</th><th>Причина</th><th>Статус</th></tr></thead><tbody>
+    <tr><td class="num">09.11</td><td>Громов А.</td><td class="r num">14 000 ₽</td><td>Нет поступления в выписке</td><td><span class="chip warn">не сверено</span></td></tr>
+    <tr><td class="num">09.11</td><td>Юдина С.</td><td class="r num">2 900 ₽</td><td>Сумма в банке 2 845 ₽ (комиссия не учтена)</td><td><span class="chip warn">не сверено</span></td></tr></tbody></table></div></div>`}
+function adminView(){
+  const tabs=`<div class="tabs" role="group">${[['clubs','Клубы'],['staff','Сотрудники']].map(([k,t])=>`<button data-atab="${k}" aria-pressed="${st.adminTab===k}">${t}</button>`).join('')}</div>`;
+  let body='';
+  if(st.adminTab==='clubs'){
+    if(st.wiz){body=wizard()}else{
+    body=`<div class="row between"><p class="muted" style="margin:0">У каждого клуба своя модель продаж. От неё зависят категории плана, воронки, тарифы и показатели.</p><button class="btn pri" data-wiz>+ Новый клуб</button></div>
+    <div class="grid g2" style="margin-top:12px">${S.clubs.map(c=>`<div class="card"><div class="row between"><h2>${esc(c.name)}</h2><span class="chip acc">${c.model==='sub'?'подписка':'абонементы'}</span></div>
+      <p class="muted" style="margin:4px 0 10px">${esc(c.city)} · ${S.staff.filter(s=>s.clubs.includes(c.id)).length} сотрудников</p>
+      <label class="fl" for="m-${c.id}">Модель продаж<select class="f" id="m-${c.id}" data-model="${c.id}"><option value="term" ${c.model==='term'?'selected':''}>${MODEL.term}</option><option value="sub" ${c.model==='sub'?'selected':''}>${MODEL.sub}</option></select></label>
+      <p class="fresh" style="margin-top:6px">При смене модели действующие договоры сохраняют свои условия.</p></div>`).join('')}</div>`}
+  } else {
+    body=`<div class="card"><h2>Добавить сотрудника</h2><div class="grid g4" style="margin-top:8px;align-items:end">
+      <label class="fl" for="n-name">ФИО<input id="n-name" type="text" placeholder="Иванов Иван"></label>
+      <label class="fl" for="n-role">Роль<select class="f" id="n-role">${Object.entries(ROLES).filter(([k])=>k!=='owner').map(([k,v])=>`<option value="${k}">${v}</option>`).join('')}</select></label>
+      <label class="fl" for="n-club">Клуб<select class="f" id="n-club">${S.clubs.map(c=>`<option value="${c.id}">${esc(c.name)}</option>`).join('')}<option value="*">Вся сеть</option></select></label>
+      <button class="btn pri" data-addstaff>Добавить</button></div></div>
+    <div class="card" style="margin-top:12px"><div class="tbl"><table><thead><tr><th>Сотрудник</th><th>Роль</th><th>Клубы</th><th>Статус</th><th></th></tr></thead><tbody>
+    ${S.staff.map(s=>`<tr><td>${esc(s.name)}</td><td>${ROLES[s.role]}</td><td>${s.clubs[0]==='*'?'Вся сеть':s.clubs.map(i=>esc(S.clubs.find(c=>c.id===i)?.name||'')).join(', ')}</td><td>${s.active?'<span class="chip ok">активен</span>':'<span class="chip">заблокирован</span>'}</td><td class="r">${s.role==='owner'?'':`<button class="btn sm" data-block="${s.id}">${s.active?'Заблокировать':'Вернуть'}</button>`}</td></tr>`).join('')}
+    </tbody></table></div><p class="fresh">Заблокированный сотрудник не может войти, его история и клиенты сохраняются.</p></div>`;
+  }
+  return `<div class="head"><div><div class="lbl">Настройки сети</div><h1>Администратор системы</h1></div>${tabs}</div><div class="sect">${body}</div>`;
+}
+function wizard(){const w=st.wiz;
+  const head=`<div class="steps">${['Клуб','Модель продаж','Готовые настройки'].map((s,i)=>`<span class="${i<=w.step?'on':''}">${i+1}. ${s}</span>`).join('')}</div>`;
+  if(w.step===0)return `<div class="card" style="max-width:560px">${head}<h2>Новый клуб</h2><div class="grid" style="margin-top:10px;gap:10px">
+    <label class="fl" for="w-name">Название<input id="w-name" type="text" value="${esc(w.name)}" placeholder="Клуб «Юг»"></label>
+    <label class="fl" for="w-addr">Адрес<input id="w-addr" type="text" value="${esc(w.addr)}" placeholder="Город, улица, дом"></label>
+    <label class="fl" for="w-tz">Часовой пояс<select class="f" id="w-tz"><option>Europe/Moscow (МСК)</option><option>Asia/Yekaterinburg (МСК+2)</option><option>Asia/Novosibirsk (МСК+4)</option></select></label>
+    <div class="row"><button class="btn" data-wiz-cancel>Отмена</button><button class="btn pri" data-wiz-next>Далее</button></div></div></div>`;
+  if(w.step===1)return `<div class="card" style="max-width:560px">${head}<h2>По какой модели продаёт клуб?</h2><p class="fresh">Выбор обязателен. Позже его можно изменить в карточке клуба.</p>
+    <div class="grid" style="margin-top:10px;gap:8px">${['term','sub'].map(m=>`<button class="task" data-wiz-model="${m}" aria-pressed="${w.model===m}" style="${w.model===m?'border-color:var(--accent);background:var(--accent-soft)':''}"><span class="stripe ${w.model===m?'cold':''}"></span><span><span class="t">${MODEL[m]}</span><br><span class="why">${m==='term'?'Категории плана: новые, продления, возобновление бывших':'Категории плана: новые подписки, возврат отписавшихся, удержание; показатели: регулярная выручка и отток'}</span></span><span></span></button>`).join('')}</div>
+    <div class="row" style="margin-top:10px"><button class="btn" data-wiz-back>Назад</button><button class="btn pri" data-wiz-next ${w.model?'':'disabled'}>Далее</button></div></div>`;
+  return `<div class="card" style="max-width:560px">${head}<h2>Готовые настройки</h2><p class="muted">Для модели «${MODEL[w.model]}» будут созданы примеры тарифов, воронки и категории плана. Их можно поменять после создания.</p>
+    <div class="row" style="margin-top:10px"><button class="btn" data-wiz-back>Назад</button><button class="btn pri" data-wiz-done>Создать клуб</button></div></div>`;
+}
+
+/* ---------- отрисовка и события ---------- */
+function render(){
+  fillClubs();
+  const v={owner:ownerView,manager:managerView,rop:ropView,gm:gmView,desk:deskView,fin:finView,admin:adminView}[st.role];
+  if(st.club==='all'&&!['owner','admin'].includes(st.role))st.club='c1';
+  if(st.club==='all'&&st.role==='admin'){}
+  $('#app').innerHTML=v();
+}
+$('#role').addEventListener('change',e=>{st.role=e.target.value;st.client=null;st.sale=0;st.mTab='home';st.deskRes=null;if(!['owner','admin'].includes(st.role)&&st.club==='all')st.club='c1';render()});
+$('#club').addEventListener('change',e=>{st.club=e.target.value;st.client=null;st.sale=0;st.deskRes=null;render()});
+document.addEventListener('click',e=>{
+  const t=e.target.closest('button');if(!t)return;const d=t.dataset;
+  if(d.toast){toast(d.toast);return}
+  if(d.mtab){st.mTab=d.mtab;st.client=null;st.sale=0}
+  else if(d.client!==undefined){st.client=+d.client;st.sale=0}
+  else if('back' in d){if(st.sale>0)st.sale=0;else st.client=null}
+  else if('backHome' in d){st.client=null;st.sale=0;st.mTab='home'}
+  else if('call' in d){toast('Звонок через АТС клуба · запись включена');return}
+  else if('sale' in d){st.sale=1}
+  else if('saleNext' in d){st.sale++;if(st.sale===5)toast('Сделка выиграна, план дня обновлён')}
+  else if('close' in d){toast('Нельзя закрыть карточку: поставьте следующую задачу или закройте сделку');return}
+  else if(d.appr){const ok=d.ok;st.approvals=st.approvals.filter(a=>a.id!==+d.appr);toast(ok?'Утверждено после подтверждения кодом':'Отклонено, инициатор получил уведомление')}
+  else if(d.scan){const m={ok:{ok:true,t:'Абонемент активен до 14.08.2027'},frozen:{ok:false,t:'Абонемент заморожен до 15.12.2026',a:['Разморозить']},debt:{ok:false,t:club().model==='sub'?'Не прошло списание за ноябрь, долг 4 900 ₽':'Просрочен платёж по рассрочке, долг 14 000 ₽',a:['Принять оплату']},club:{ok:false,t:'Тариф действует только в клубе «'+(st.club==='c1'?'Север':'Центр')+'»',a:['Сменить тариф']}};st.deskRes=m[d.scan]}
+  else if(d.atab){st.adminTab=d.atab;st.wiz=null}
+  else if('wiz' in d){st.wiz={step:0,name:'',addr:'',model:null}}
+  else if('wizCancel' in d){st.wiz=null}
+  else if('wizNext' in d){if(st.wiz.step===0){st.wiz.name=$('#w-name').value.trim();st.wiz.addr=$('#w-addr').value.trim();if(!st.wiz.name){toast('Укажите название клуба');return}}st.wiz.step++}
+  else if('wizBack' in d){st.wiz.step--}
+  else if(d.wizModel){st.wiz.model=d.wizModel}
+  else if('wizDone' in d){const id='c'+(S.clubs.length+1);S.clubs.push({id,name:st.wiz.name,city:st.wiz.addr||'адрес не указан',tz:'Europe/Moscow',model:st.wiz.model});DAY[id]={sales:0,cash:0,exp:0,visits:0,leads:0,conv:0};MGRS[id]=[];toast('Клуб «'+st.wiz.name+'» создан');st.wiz=null}
+  else if('addstaff' in d){const n=$('#n-name').value.trim();if(!n){toast('Укажите ФИО сотрудника');return}S.staff.push({id:Date.now(),name:n,role:$('#n-role').value,clubs:[$('#n-club').value],active:true});toast('Сотрудник добавлен, приглашение отправлено по SMS')}
+  else if(d.block){const s=S.staff.find(x=>x.id===+d.block);s.active=!s.active;toast(s.active?'Доступ возвращён':'Сотрудник заблокирован, история сохранена')}
+  else return;
+  render();
+});
+document.addEventListener('change',e=>{const m=e.target.dataset?.model;if(m){const c=S.clubs.find(x=>x.id===m);c.model=e.target.value;toast('Модель продаж изменена: '+MODEL[c.model]);render()}});
+render();
+</script>
