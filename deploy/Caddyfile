@@ -1,0 +1,4 @@
+app.amoglobal.ru, test.amoglobal.ru {
+	encode gzip
+	reverse_proxy app:3000
+}
