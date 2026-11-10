@@ -5,6 +5,7 @@ import { join, dirname } from 'node:path';
 import { connect, need } from './common.ts';
 import { ROLE_SEED } from '../../src/roles.ts';
 import { seedDemoHistory } from './demoHistory.ts';
+import { seedDemoCalls } from './demoCalls.ts';
 import type { Db } from '../../src/db.ts';
 
 export async function migrate(url = need('OWNER_DATABASE_URL'), quiet = false) {
@@ -59,6 +60,9 @@ export async function migrate(url = need('OWNER_DATABASE_URL'), quiet = false) {
     await c.query('begin');
     try { if (await seedDemoHistory(c as unknown as Db, demo.id) && !quiet) console.log('Добавлена демо-история продаж'); await c.query('commit'); }
     catch (e) { await c.query('rollback'); console.error('Демо-история не добавлена:', (e as Error).message); }
+    await c.query('begin');
+    try { if (await seedDemoCalls(c as unknown as Db, demo.id) && !quiet) console.log('Добавлены демо-разговоры'); await c.query('commit'); }
+    catch (e) { await c.query('rollback'); console.error('Демо-разговоры не добавлены:', (e as Error).message); }
   }
   await c.end();
   if (!quiet) console.log('Миграции применены');

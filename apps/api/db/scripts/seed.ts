@@ -13,6 +13,7 @@ import { encrypt } from '../../src/modules/fiscal.ts';
 import { createHash } from 'node:crypto';
 import type { Db } from '../../src/db.ts';
 import { seedDemoHistory } from './demoHistory.ts';
+import { seedDemoCalls } from './demoCalls.ts';
 
 const STAFF: [string, string, string, 'c1' | 'c2' | '*'][] = [
   ['a.bespalyy', 'Андрей Беспалый', 'owner', '*'],
@@ -186,7 +187,7 @@ export async function seed(url = need('OWNER_DATABASE_URL'), quiet = false, demo
   await c.query(`update leads set created_at = now() - interval '20 minutes', first_response_due_at = now() - interval '15 minutes'
                  where id = (select id from leads order by created_at limit 1)`);
   await c.query(`update tasks set due_at = now() - interval '15 minutes' where lead_id = (select id from leads order by created_at limit 1)`);
-  if (demoHistory) await seedDemoHistory(c as unknown as Db, t);
+  if (demoHistory) { await seedDemoHistory(c as unknown as Db, t); await seedDemoCalls(c as unknown as Db, t); }
   await c.query('commit');
   await c.end();
   if (!quiet) {

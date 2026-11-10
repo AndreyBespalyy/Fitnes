@@ -28,9 +28,9 @@ export function decode(u: Upload, allowed: string[]) {
   return { buf, mime, name: (u.fileName || `файл.${EXT[mime]}`).slice(0, 200) };
 }
 
-export async function saveFile(db: Db, storage: string, ctx: Actor, clubId: string, kind: string, f: { buf: Buffer; mime: string; name: string }) {
+export async function saveFile(db: Db, storage: string, ctx: Actor, clubId: string, kind: string, f: { buf: Buffer; mime: string; name: string; ext?: string }) {
   const sha = createHash('sha256').update(f.buf).digest('hex');
-  const rel = join(ctx.tenantId, sha.slice(0, 2), `${sha}.${EXT[f.mime]}`);
+  const rel = join(ctx.tenantId, sha.slice(0, 2), `${sha}.${f.ext ?? EXT[f.mime]}`);
   const abs = join(storage, rel);
   if (!existsSync(abs)) { mkdirSync(join(storage, ctx.tenantId, sha.slice(0, 2)), { recursive: true }); writeFileSync(abs, f.buf); }
   const id = (await db.query(

@@ -153,3 +153,9 @@ tr.total td{border-top:2px solid var(--line);background:var(--surface)}
 .num.ok{color:var(--ok)}
 a.btn{text-decoration:none;color:inherit}
 @media (max-width:640px){.dash-w .kpis{grid-template-columns:repeat(2,minmax(0,1fr))}.dash-w .kpis b{font-size:17px}}
+
+/* Шаг 14: расшифровка разговора */
+.tr-line{display:grid;grid-template-columns:84px 1fr;gap:8px;font-size:14px;line-height:1.45}
+.tr-line .who{color:var(--muted);font-size:12px;font-weight:600;padding-top:2px}
+.tr-line .who.manager{color:var(--accent)}
+@media (max-width:600px){.tr-line{grid-template-columns:1fr;gap:0}}

@@ -4,3 +4,4 @@ dist/
 *.log
 storage/
 .claude/settings.local.json
+services/ai/**/__pycache__

@@ -12,7 +12,7 @@ process.env.FISCAL_SECRET_KEY ||= 'test-fiscal-secret-key-0123456789';
 const withDb = (url: string, db: string) => { const u = new URL(url); u.pathname = `/${db}`; return u.toString(); };
 
 /** Поднимает чистую тестовую базу fitnes_test с тестовыми данными и возвращает приложение. */
-export async function setupTestApp() {
+export async function setupTestApp(opts: Omit<Parameters<typeof buildApp>[1], 'storageDir'> = {}) {
   const admin = new pg.Client({ connectionString: process.env.ADMIN_DATABASE_URL });
   await admin.connect();
   const exists = await admin.query(`select 1 from pg_database where datname = 'fitnes_test'`);
@@ -27,8 +27,9 @@ export async function setupTestApp() {
   await migrate(ownerUrl, true);
   await seed(ownerUrl, true, false);
   const pool = createPool(appUrl);
-  const app = await buildApp(pool, { storageDir: mkdtempSync(join(tmpdir(), 'fitnes-storage-')) });
-  return { app, pool, ownerUrl };
+  const storage = mkdtempSync(join(tmpdir(), 'fitnes-storage-'));
+  const app = await buildApp(pool, { ...opts, storageDir: storage });
+  return { app, pool, ownerUrl, storage };
 }
 
 export const PASSWORD = process.env.SEED_PASSWORD || 'Fitnes-2026';

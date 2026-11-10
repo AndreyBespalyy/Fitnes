@@ -137,7 +137,7 @@ async function addTask(db: Db, ctx: Ctx, o: { id: string; club_id: string; perso
 }
 
 const TASK_SELECT = `select t.id, t.kind, t.title, t.due_at as "dueAt", t.done_at as "doneAt", t.result, t.club_id as "clubId",
-  t.person_id as "personId", p.full_name as "personName", t.opportunity_id as "opportunityId", t.assignee_id as "assigneeId",
+  t.person_id as "personId", p.full_name as "personName", t.opportunity_id as "opportunityId", t.assignee_id as "assigneeId", t.call_id as "callId",
   u.full_name as "assigneeName", (t.done_at is null and t.due_at < now()) as overdue
   from tasks t left join persons p on p.id = t.person_id left join users u on u.id = t.assignee_id`;
 
@@ -306,6 +306,8 @@ export function crmRoutes(app: FastifyInstance, pool: pg.Pool) {
       if (!t || (onlyMine(ctx) && t.assignee_id !== ctx.userId)) throw notFound('Задача не найдена');
       if (t.done_at) throw badRequest('Задача уже выполнена');
       if (!b.result?.trim()) throw badRequest('Коротко напишите результат');
+      if (t.call_id && (await db.query(`select 1 from call_summaries s join calls c on c.id = s.call_id where s.call_id = $1 and s.status in ('draft', 'needs_manual') and c.user_id = $2`, [t.call_id, t.assignee_id])).rowCount)
+        throw badRequest('Сначала подтвердите итог разговора во вкладке «Звонки»', 'call_summary_required');
       if (t.opportunity_id) {
         const o = (await db.query('select * from opportunities where id = $1', [t.opportunity_id])).rows[0];
         if (o?.status === 'open') {

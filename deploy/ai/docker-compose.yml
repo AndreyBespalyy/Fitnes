@@ -1,0 +1,26 @@
+# ИИ-контур на GPU-сервере (1 GPU 48–80 ГБ, ТЗ 6.6). Запуск: docker compose -f deploy/ai/docker-compose.yml --env-file deploy/ai/.env up -d
+# Наружу открыт только порт ИИ-сервера, и только для адреса сервера CRM (см. deploy/ai/README.md).
+services:
+  vllm:
+    image: vllm/vllm-openai:v0.6.6
+    restart: unless-stopped
+    command: ["--model", "${LLM_MODEL:-Qwen/Qwen2.5-32B-Instruct-AWQ}", "--max-model-len", "16384", "--gpu-memory-utilization", "0.70", "--api-key", "${LLM_KEY:-local}"]
+    volumes: ["models:/root/.cache/huggingface"]
+    deploy: { resources: { reservations: { devices: [{ driver: nvidia, count: all, capabilities: [gpu] }] } } }
+  ai:
+    build: ../../services/ai
+    restart: unless-stopped
+    depends_on: [vllm]
+    environment:
+      AI_TOKEN: ${AI_TOKEN:?задайте AI_TOKEN в deploy/ai/.env}
+      ASR_MODEL: ${ASR_MODEL:-large-v3}
+      ASR_COMPUTE: float16
+      ASR_MANAGER_CHANNEL: ${ASR_MANAGER_CHANNEL:-0}
+      LLM_URL: http://vllm:8000/v1
+      LLM_MODEL: ${LLM_MODEL:-Qwen/Qwen2.5-32B-Instruct-AWQ}
+      LLM_KEY: ${LLM_KEY:-local}
+    volumes: ["models:/models"]
+    ports: ["8100:8100"]
+    deploy: { resources: { reservations: { devices: [{ driver: nvidia, count: all, capabilities: [gpu] }] } } }
+volumes:
+  models:

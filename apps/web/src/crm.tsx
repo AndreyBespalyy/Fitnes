@@ -5,6 +5,7 @@ import { MembershipsBlock } from './memberships.tsx';
 import { PersonChats } from './chat.tsx';
 import { PersonPasses } from './access.tsx';
 import { PersonCards } from './payments.tsx';
+import { CallDialog, PersonCalls } from './calls.tsx';
 
 type Stage = { id: string; name: string; kind: 'open' | 'won' | 'lost'; openCount?: number };
 type Pipeline = { id: string; clubId: string; name: string; purpose: string; isDefaultForLeads: boolean; isActive: boolean; stages: Stage[] };
@@ -13,7 +14,7 @@ type Lead = { id: string; createdAt: string; clubName: string; personId: string;
   isRepeat: boolean; assigneeName: string | null; dueAt: string; respondedAt: string | null; responseState: 'in_time' | 'late' | 'overdue' | 'waiting' };
 type Opp = { id: string; stageId: string; personId: string; personName: string; ownerName: string | null; nextTaskAt: string | null; overdue: boolean };
 type Task = { id: string; kind: string; title: string; dueAt: string; doneAt: string | null; result: string | null; personId: string | null; personName: string | null;
-  opportunityId: string | null; assigneeName: string | null; overdue: boolean };
+  opportunityId: string | null; assigneeName: string | null; overdue: boolean; callId: string | null };
 type Card = {
   person: { id: string; fullName: string; segment: string; homeClubId: string | null; homeClubName: string | null; createdAt: string; autopayEnabled: boolean; autopayChangedAt: string | null; marketingConsent: boolean; messagingOptOut: boolean };
   contacts: { type: string; value: string; isPrimary: boolean }[];
@@ -141,6 +142,7 @@ export function TasksPage({ me, clubId, openPerson }: { me: Me; clubId: string; 
   const [tasks, setTasks] = useState<Task[]>([]);
   const [scope, setScope] = useState<'mine' | 'all'>('mine');
   const [doing, setDoing] = useState<Task | null>(null);
+  const [call, setCall] = useState<string | null>(null);
   const reload = () => api<Task[]>('GET', `/api/tasks?scope=${scope}${clubId !== 'all' ? `&clubId=${clubId}` : ''}`).then(setTasks).catch(() => setTasks([]));
   useEffect(() => { reload(); }, [scope, clubId]);
   const now = Date.now();
@@ -165,7 +167,8 @@ export function TasksPage({ me, clubId, openPerson }: { me: Me; clubId: string; 
                   <div className="small">{dt(t.dueAt)}{scope === 'all' && t.assigneeName ? ` · ${t.assigneeName}` : ''}</div></div>
                 <div className="row">
                   {t.personId && <button className="btn sm" onClick={() => openPerson(t.personId!)}>{t.personName}</button>}
-                  <button className="btn sm pri" onClick={() => setDoing(t)}>Выполнить</button>
+                  {t.callId && <button className="btn sm pri" onClick={() => setCall(t.callId)}>Итог разговора</button>}
+                  <button className={`btn sm ${t.callId ? '' : 'pri'}`} onClick={() => setDoing(t)}>Выполнить</button>
                 </div>
               </div>
               {doing?.id === t.id && <CompleteTask task={t} onDone={() => { setDoing(null); reload(); }} onCancel={() => setDoing(null)} />}
@@ -173,6 +176,7 @@ export function TasksPage({ me, clubId, openPerson }: { me: Me; clubId: string; 
         </div>
       ))}
       {tasks.length === 0 && <div className="card"><p className="muted" style={{ margin: 0 }}>Открытых задач нет.</p></div>}
+      {call && <CallDialog id={call} onClose={() => { setCall(null); reload(); }} openPerson={openPerson} />}
     </>
   );
 }
@@ -293,6 +297,7 @@ export function PersonCard({ me, id, onClose }: { me: Me; id: string; onClose: (
                 </div>))}
             </div>)}
 
+          {work && <PersonCalls personId={card.person.id} />}
           <div className="card" style={{ display: 'grid', gap: 6 }}><h2>Задачи</h2>
             {card.tasks.length === 0 && <p className="muted" style={{ margin: 0 }}>Задач нет.</p>}
             {card.tasks.map((t) => (
