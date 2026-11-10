@@ -99,7 +99,8 @@ export async function personMemberships(db: Db, personId: string) {
     out.push({
       id: m.id, clubId: m.club_id, clubName: m.club_name, kind: m.kind, productName: m.product_name, amountKop: Number(m.amount_kop),
       startsOn: m.starts_on, endsOn: m.ends_on, visitsLeft: m.visits_left, installments: m.installments, nextChargeOn: m.next_charge_on,
-      status: m.status, freezeAllowed: m.freeze_allowed && s.freezeEnabled, ...membershipState(m, f, c, s, today, ct.get(m.id)?.status),
+      status: m.status, freezeAllowed: m.freeze_allowed && s.freezeEnabled,
+      networkAccess: m.network_access, accessFrom: m.access_from ? String(m.access_from).slice(0, 5) : null, accessTo: m.access_to ? String(m.access_to).slice(0, 5) : null, ...membershipState(m, f, c, s, today, ct.get(m.id)?.status),
       contract: ct.get(m.id) ?? null,
       freezes: f.map((x) => ({ id: x.id, startsOn: x.starts_on, endsOn: x.ends_on, endedEarlyOn: x.ended_early_on, days: x.days })),
       charges: c.map((x) => ({ id: x.id, kind: x.kind, title: x.title, dueOn: x.due_on, amountKop: Number(x.amount_kop), status: x.status,
@@ -161,8 +162,10 @@ export async function sellMembership(db: Db, ctx: Pick<Ctx, 'tenantId' | 'userId
   const category = prod.kind === 'subscription' ? 'subscription' : renewedFrom ? 'renewal' : before > 0 ? 'return' : 'new';
   const id = (await db.query(
     `insert into memberships(tenant_id, club_id, person_id, product_id, price_version_id, kind, product_name, amount_kop, starts_on, ends_on, visits_left,
-       installments, next_charge_on, renewed_from_id, created_by, sale_category) values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16) returning id`,
-    [ctx.tenantId, prod.club_id, b.personId, prod.id, price.id, prod.kind, prod.name, amount, startsOn, endsOn, visits, n, nextCharge, renewedFrom, ctx.userId, category])).rows[0].id;
+       installments, next_charge_on, renewed_from_id, created_by, sale_category, network_access, access_from, access_to)
+       values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19) returning id`,
+    [ctx.tenantId, prod.club_id, b.personId, prod.id, price.id, prod.kind, prod.name, amount, startsOn, endsOn, visits, n, nextCharge, renewedFrom, ctx.userId, category,
+      prod.network_access ?? false, prod.access_from ?? null, prod.access_to ?? null])).rows[0].id;
 
   // График платежей: первый платёж в день продажи, остальные помесячно
   const part = Math.floor(amount / n);
@@ -238,6 +241,7 @@ export async function unfreezeMembership(db: Db, ctx: Pick<Ctx, 'tenantId' | 'us
 /* ---------- маршруты ---------- */
 const PRODUCT_SELECT = `select p.id, p.club_id as "clubId", p.kind, p.name, p.duration_days as "durationDays", p.visits_count as "visitsCount",
   p.validity_days as "validityDays", p.freeze_allowed as "freezeAllowed", p.installments_allowed as "installmentsAllowed", p.is_active as "isActive", p.sort,
+  p.network_access as "networkAccess", to_char(p.access_from, 'HH24:MI') as "accessFrom", to_char(p.access_to, 'HH24:MI') as "accessTo",
   (select amount_kop from price_versions v where v.product_id = p.id and v.valid_from <= now() order by v.valid_from desc limit 1)::bigint as "priceKop",
   coalesce((select json_agg(json_build_object('amountKop', v.amount_kop, 'validFrom', v.valid_from) order by v.valid_from desc)
      from price_versions v where v.product_id = p.id), '[]') as prices
@@ -245,7 +249,13 @@ const PRODUCT_SELECT = `select p.id, p.club_id as "clubId", p.kind, p.name, p.du
 
 const KINDS = ['term', 'subscription', 'visits', 'personal', 'guest'];
 type ProductIn = { clubId?: string; kind?: string; name?: string; durationDays?: number; visitsCount?: number; validityDays?: number;
-  freezeAllowed?: boolean; installmentsAllowed?: boolean; isActive?: boolean; priceKop?: number };
+  freezeAllowed?: boolean; installmentsAllowed?: boolean; isActive?: boolean; priceKop?: number;
+  networkAccess?: boolean; accessFrom?: string | null; accessTo?: string | null };
+const TIME = /^([01]\d|2[0-3]):[0-5]\d$/;
+function checkAccessTimes(b: ProductIn) {
+  for (const t of [b.accessFrom, b.accessTo]) if (t !== undefined && t !== null && t !== '' && !TIME.test(t)) throw badRequest('Время укажите в формате ЧЧ:ММ, например 07:00');
+}
+const timeOrNull = (t: string | null | undefined) => (t ? t : null);
 
 function checkProduct(b: ProductIn, kind: string) {
   if (kind === 'term' && !(Number.isInteger(b.durationDays) && b.durationDays! > 0)) throw badRequest('Укажите срок абонемента в днях');
@@ -302,6 +312,7 @@ export function membershipRoutes(app: FastifyInstance, pool: pg.Pool) {
     if (!b.name?.trim()) throw badRequest('Укажите название тарифа');
     if (!Number.isInteger(b.priceKop) || b.priceKop! < 0) throw badRequest('Укажите цену');
     checkProduct(b, b.kind!);
+    checkAccessTimes(b);
     const res = await withCtx(pool, ctx, async (db) => {
       const club = (await db.query('select sales_model from clubs where id = $1', [b.clubId])).rows[0];
       if (!club) throw badRequest('Клуб не найден');
@@ -310,10 +321,10 @@ export function membershipRoutes(app: FastifyInstance, pool: pg.Pool) {
       }
       if ((await db.query('select 1 from products where club_id = $1 and lower(name) = lower($2)', [b.clubId, b.name!.trim()])).rowCount) throw badRequest('Тариф с таким названием уже есть');
       const id = (await db.query(
-        `insert into products(tenant_id, club_id, kind, name, duration_days, visits_count, validity_days, freeze_allowed, installments_allowed)
-         values ($1,$2,$3,$4,$5,$6,$7,$8,$9) returning id`,
+        `insert into products(tenant_id, club_id, kind, name, duration_days, visits_count, validity_days, freeze_allowed, installments_allowed, network_access, access_from, access_to)
+         values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) returning id`,
         [ctx.tenantId, b.clubId, b.kind, b.name!.trim(), b.kind === 'term' ? b.durationDays : null, ['visits', 'personal'].includes(b.kind!) ? b.visitsCount : null,
-          b.validityDays ?? null, b.freezeAllowed ?? b.kind === 'term', b.installmentsAllowed ?? false])).rows[0].id;
+          b.validityDays ?? null, b.freezeAllowed ?? b.kind === 'term', b.installmentsAllowed ?? false, b.networkAccess ?? false, timeOrNull(b.accessFrom), timeOrNull(b.accessTo)])).rows[0].id;
       await db.query('insert into price_versions(tenant_id, club_id, product_id, amount_kop, created_by) values ($1,$2,$3,$4,$5)', [ctx.tenantId, b.clubId, id, b.priceKop, ctx.userId]);
       const row = (await db.query(`${PRODUCT_SELECT} where p.id = $1`, [id])).rows[0];
       await audit(db, ctx, 'product.created', 'product', id, null, row);
@@ -332,6 +343,12 @@ export function membershipRoutes(app: FastifyInstance, pool: pg.Pool) {
       if (!before) throw notFound('Тариф не найден');
       if (b.name !== undefined && !b.name.trim()) throw badRequest('Название не может быть пустым');
       checkProduct({ durationDays: before.durationDays, visitsCount: before.visitsCount, ...b }, before.kind);
+      checkAccessTimes(b);
+      if (b.networkAccess !== undefined || b.accessFrom !== undefined || b.accessTo !== undefined) {
+        await db.query(`update products set network_access = coalesce($2, network_access), access_from = case when $5 then $3::time else access_from end,
+           access_to = case when $6 then $4::time else access_to end where id = $1`,
+        [id, b.networkAccess ?? null, timeOrNull(b.accessFrom), timeOrNull(b.accessTo), b.accessFrom !== undefined, b.accessTo !== undefined]);
+      }
       await db.query(
         `update products set name = coalesce($2, name), duration_days = coalesce($3, duration_days), visits_count = coalesce($4, visits_count),
            validity_days = coalesce($5, validity_days), freeze_allowed = coalesce($6, freeze_allowed), installments_allowed = coalesce($7, installments_allowed),

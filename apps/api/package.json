@@ -11,7 +11,8 @@
     "db:reset": "tsx --env-file-if-exists=../../.env db/scripts/reset.ts",
     "import:samples": "tsx db/scripts/importSamples.ts",
     "test": "tsx --env-file-if-exists=../../.env --test --test-concurrency=1 test/*.test.ts",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "gateway": "tsx --env-file-if-exists=../../.env src/gateway.ts"
   },
   "dependencies": {
     "@fastify/cookie": "^11.0.2",

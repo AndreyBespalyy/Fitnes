@@ -7,6 +7,8 @@ import { applyClubPreset, applyMembershipPreset, ensureLeadSources } from '../..
 import { addDays, addMonths, sellMembership } from '../../src/modules/memberships.ts';
 import { createLead } from '../../src/modules/crm.ts';
 import { handleInbound } from '../../src/modules/messaging.ts';
+import { decide, recordEvent } from '../../src/modules/acs.ts';
+import { createHash } from 'node:crypto';
 import type { Db } from '../../src/db.ts';
 
 const STAFF: [string, string, string, 'c1' | 'c2' | '*'][] = [
@@ -174,6 +176,7 @@ export async function seed(url = need('OWNER_DATABASE_URL'), quiet = false) {
   }
   await seedMemberships(c as unknown as Db, t);
   await seedMessaging(c as unknown as Db, t, clubs);
+  await seedAccess(c as unknown as Db, t, clubs);
   // Один лид с просроченным первым ответом, чтобы было видно контроль нормы
   await c.query(`update leads set created_at = now() - interval '20 minutes', first_response_due_at = now() - interval '15 minutes'
                  where id = (select id from leads order by created_at limit 1)`);
@@ -201,6 +204,58 @@ async function seedMessaging(c: Db, t: string, clubs: Record<string, string>) {
   await handleInbound(c, actor, { ...wa, secret: null }, { chatId: '79260000155', externalId: 'seed-3', text: 'Можно перенести персональную тренировку на завтра?', name: 'Павел', phone: '79260000155', at: at(15) });
   await c.query(`update persons set marketing_consent = true where full_name in ('Павел Рябов', 'Алексей Громов', 'Роман Фёдоров')`);
   await c.query(`update persons set birth_date = (now() at time zone 'Europe/Moscow')::date - interval '30 years' where full_name = 'Павел Рябов'`);
+}
+
+// Шаг 11. Турникеты, шлюзы, карты и немного проходов
+export const DEMO_GATEWAY_KEYS = { c1: 'demo-centr-gateway-key', c2: 'demo-sever-gateway-key' };
+async function seedAccess(c: Db, t: string, clubs: Record<string, string>) {
+  const ids: Record<string, { gw: string; inP: string; outP: string }> = {};
+  for (const k of ['c1', 'c2'] as const) {
+    const gw = (await c.query(`insert into access_gateways(tenant_id, club_id, name, token_hash) values ($1,$2,'Шлюз ресепшн',$3) returning id`,
+      [t, clubs[k], createHash('sha256').update(DEMO_GATEWAY_KEYS[k]).digest('hex')])).rows[0].id;
+    const inP = (await c.query(`insert into access_points(tenant_id, club_id, gateway_id, name, direction) values ($1,$2,$3,'Турникет вход','in') returning id`, [t, clubs[k], gw])).rows[0].id;
+    const outP = (await c.query(`insert into access_points(tenant_id, club_id, gateway_id, name, direction) values ($1,$2,$3,'Турникет выход','out') returning id`, [t, clubs[k], gw])).rows[0].id;
+    ids[k] = { gw, inP, outP };
+  }
+  const card = async (k: 'c1' | 'c2', name: string, code: string, kind = 'card', status = 'active') => {
+    const p = (await c.query('select id from persons where full_name = $1', [name])).rows[0];
+    const u = p ? null : (await c.query('select id from users where full_name = $1', [name])).rows[0];
+    await c.query(`insert into access_credentials(tenant_id, club_id, person_id, user_id, kind, code, status, revoked_at, revoke_reason) values ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
+      [t, clubs[k], p?.id ?? null, u?.id ?? null, kind, code, status, status === 'active' ? null : new Date(), status === 'active' ? null : 'Сломалась, выдана новая']);
+  };
+  await card('c1', 'Павел Рябов', '099999', 'card', 'replaced');
+  await card('c1', 'Павел Рябов', '100001');
+  await card('c1', 'Алексей Громов', '100002', 'bracelet');
+  await card('c1', 'Елена Миронова', '100003');
+  await card('c1', 'Кирилл Демин', '100004');
+  await card('c1', 'Глеб Ушаков', '100005');
+  await card('c2', 'Роман Фёдоров', '200001');
+  await card('c2', 'Тимур Ахметов', '200002');
+  await card('c2', 'Ксения Лаптева', '200003');
+  await card('c2', 'Глеб Орлов', '200004');
+  await card('c1', 'Дарья Лис', '900001');
+  await card('c2', 'Алина Морозова', '900002');
+  // История посещений Рябова за месяц: вход и выход
+  const ryabov = (await c.query(`select id from persons where full_name = 'Павел Рябов'`)).rows[0].id;
+  for (const d of [3, 5, 8, 10, 12, 15, 17, 19, 22, 24, 26, 29]) {
+    await c.query(`insert into visits(tenant_id, club_id, person_id, visited_at, exit_at, source) values ($1,$2,$3, now() - make_interval(days => $4) - interval '3 hours', now() - make_interval(days => $4) - interval '90 minutes', 'acs')`,
+      [t, clubs.c1, ryabov, d]);
+  }
+  // Сегодняшние проходы на ресепшн (по часам клуба, ночью система честно ответит «клуб закрыт»)
+  const ev = async (k: 'c1' | 'c2', code: string, dir: 'in' | 'out', minAgo: number) => {
+    const at = new Date(Date.now() - minAgo * 60_000);
+    const d = await decide(c, clubs[k], code, dir, at);
+    await recordEvent(c, t, { clubId: clubs[k], pointId: dir === 'in' ? ids[k].inP : ids[k].outP, gatewayId: ids[k].gw, externalId: `seed-${k}-${code}-${minAgo}`, at, direction: dir, code, mode: 'online' }, d);
+  };
+  await ev('c1', '900001', 'in', 125);
+  await ev('c1', '100001', 'in', 95);
+  await ev('c1', '100003', 'in', 80);
+  await ev('c1', '099999', 'in', 70);
+  await ev('c1', '100002', 'in', 50);
+  await ev('c1', '100001', 'out', 20);
+  await ev('c2', '200002', 'in', 60);
+  await ev('c2', '200001', 'in', 40);
+  await ev('c2', '900002', 'in', 130);
 }
 
 if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) await seed();

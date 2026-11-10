@@ -11,7 +11,8 @@ export type Settings = {
   subscriptionRetryAttempts: number; subscriptionRetryIntervalDays: number; renewalReminderDays: number; contractRequiredForAccess: boolean;
 };
 export type Product = { id: string; clubId: string; kind: string; name: string; durationDays: number | null; visitsCount: number | null; validityDays: number | null;
-  freezeAllowed: boolean; installmentsAllowed: boolean; isActive: boolean; priceKop: number | null; prices: { amountKop: number; validFrom: string }[] };
+  freezeAllowed: boolean; installmentsAllowed: boolean; isActive: boolean; priceKop: number | null;
+  networkAccess: boolean; accessFrom: string | null; accessTo: string | null; prices: { amountKop: number; validFrom: string }[] };
 type Charge = { id: string; kind: string; title: string; dueOn: string; amountKop: number; status: string; paidMethod: string | null; overdue: boolean };
 type Membership = { id: string; clubId: string; clubName: string; kind: string; productName: string; amountKop: number; startsOn: string; endsOn: string | null;
   visitsLeft: number | null; installments: number; nextChargeOn: string | null; status: string; state: string; access: boolean; reason: string; freezeAllowed: boolean;
@@ -107,7 +108,7 @@ function Products({ club, manage }: { club: Club; manage: boolean }) {
   const [price, setPrice] = useState('');
   const [hist, setHist] = useState<string | null>(null);
   const kinds = club.salesModel === 'term' ? ['term', 'visits', 'personal', 'guest'] : ['subscription', 'visits', 'personal', 'guest'];
-  const [f, setF] = useState({ kind: kinds[0], name: '', price: '', durationDays: 30, visitsCount: 10, validityDays: 60, installmentsAllowed: false, freezeAllowed: true });
+  const [f, setF] = useState({ kind: kinds[0], name: '', price: '', durationDays: 30, visitsCount: 10, validityDays: 60, installmentsAllowed: false, freezeAllowed: true, networkAccess: false, accessFrom: '', accessTo: '' });
   const reload = () => api<Product[]>('GET', `/api/products?clubId=${club.id}`).then(setList).catch((x) => setErr(errText(x)));
   useEffect(() => { reload(); }, [club.id]);
   const act = async (fn: () => Promise<unknown>, ok: string) => { setErr(''); try { await fn(); toast(ok); reload(); return true; } catch (x) { setErr(errText(x)); return false; } };
@@ -119,10 +120,12 @@ function Products({ club, manage }: { club: Club; manage: boolean }) {
       visitsCount: ['visits', 'personal'].includes(f.kind) ? f.visitsCount : undefined,
       validityDays: ['visits', 'personal', 'guest'].includes(f.kind) ? f.validityDays : undefined,
       installmentsAllowed: f.installmentsAllowed, freezeAllowed: f.kind === 'term' ? f.freezeAllowed : false,
+      networkAccess: f.networkAccess, accessFrom: f.accessFrom || null, accessTo: f.accessTo || null,
     }), `Тариф «${f.name}» добавлен`);
     if (done) setF({ ...f, name: '', price: '' });
   };
-  const terms = (p: Product) => p.kind === 'term' ? `${p.durationDays} дн.` : p.kind === 'subscription' ? 'в месяц' : p.visitsCount ? `${p.visitsCount} зан., ${p.validityDays ?? 90} дн.` : `${p.validityDays ?? 1} дн.`;
+  const base = (p: Product) => p.kind === 'term' ? `${p.durationDays} дн.` : p.kind === 'subscription' ? 'в месяц' : p.visitsCount ? `${p.visitsCount} зан., ${p.validityDays ?? 90} дн.` : `${p.validityDays ?? 1} дн.`;
+  const terms = (p: Product) => [base(p), p.accessFrom || p.accessTo ? `проход ${p.accessFrom ? `с ${p.accessFrom} ` : ''}${p.accessTo ? `до ${p.accessTo}` : ''}`.trim() : '', p.networkAccess ? 'все клубы сети' : ''].filter(Boolean).join(', ');
   return (
     <div className="card" style={{ display: 'grid', gap: 10 }}>
       <h2>Тарифы клуба</h2>
@@ -162,7 +165,10 @@ function Products({ club, manage }: { club: Club; manage: boolean }) {
           <div className="row">
             {f.kind === 'term' && <Check label="Можно заморозить" value={f.freezeAllowed} onChange={(v) => setF({ ...f, freezeAllowed: v })} />}
             {f.kind !== 'subscription' && <Check label="Можно в рассрочку" value={f.installmentsAllowed} onChange={(v) => setF({ ...f, installmentsAllowed: v })} />}
+            {f.kind !== 'personal' && <Check label="Проход во все клубы сети" value={f.networkAccess} onChange={(v) => setF({ ...f, networkAccess: v })} />}
           </div>
+          {f.kind !== 'personal' && <div className="row small">Проход по тарифу: с <input type="time" value={f.accessFrom} onChange={(e) => setF({ ...f, accessFrom: e.target.value })} style={{ width: 'auto' }} />
+            до <input type="time" value={f.accessTo} onChange={(e) => setF({ ...f, accessTo: e.target.value })} style={{ width: 'auto' }} /> (пусто — в любое время работы клуба)</div>}
           <div><button className="btn pri" disabled={!f.name.trim() || !f.price}>Добавить тариф</button></div>
         </form>)}
     </div>

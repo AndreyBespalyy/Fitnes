@@ -50,7 +50,7 @@ export async function ensureLeadSources(db: Q, tenantId: string) {
 }
 
 // Шаг 6. Тарифы по умолчанию для нового клуба (цены в копейках, собственник или управляющий меняет их в разделе «Тарифы»)
-type ProductDef = { kind: string; name: string; priceKop: number; durationDays?: number; visitsCount?: number; validityDays?: number; freeze?: boolean; installments?: boolean };
+type ProductDef = { kind: string; name: string; priceKop: number; durationDays?: number; visitsCount?: number; validityDays?: number; freeze?: boolean; installments?: boolean; accessTo?: string };
 export const PRODUCT_PRESETS: Record<'term' | 'subscription', ProductDef[]> = {
   term: [
     { kind: 'term', name: 'Годовой безлимит', priceKop: 4_200_000, durationDays: 365, freeze: true, installments: true },
@@ -62,7 +62,7 @@ export const PRODUCT_PRESETS: Record<'term' | 'subscription', ProductDef[]> = {
   ],
   subscription: [
     { kind: 'subscription', name: 'Подписка «Безлимит»', priceKop: 490_000, freeze: false },
-    { kind: 'subscription', name: 'Подписка «Дневная» (до 17:00)', priceKop: 340_000, freeze: false },
+    { kind: 'subscription', name: 'Подписка «Дневная» (до 17:00)', priceKop: 340_000, freeze: false, accessTo: '17:00' },
     { kind: 'guest', name: 'Гостевой визит', priceKop: 100_000, validityDays: 1, freeze: false },
     { kind: 'personal', name: 'Персональные тренировки, 10 занятий', priceKop: 2_500_000, visitsCount: 10, validityDays: 90, freeze: false, installments: true },
   ],
@@ -70,13 +70,14 @@ export const PRODUCT_PRESETS: Record<'term' | 'subscription', ProductDef[]> = {
 
 export async function applyMembershipPreset(db: Q, tenantId: string, clubId: string, model: 'term' | 'subscription') {
   await db.query('insert into club_membership_settings(club_id, tenant_id) values ($1,$2) on conflict (club_id) do nothing', [clubId, tenantId]);
+  await db.query('insert into club_access_settings(club_id, tenant_id) values ($1,$2) on conflict (club_id) do nothing', [clubId, tenantId]);
   if ((await db.query('select 1 from products where club_id = $1 limit 1', [clubId])).rowCount) return;
   let sort = 0;
   for (const p of PRODUCT_PRESETS[model]) {
     const id = (await db.query(
-      `insert into products(tenant_id, club_id, kind, name, duration_days, visits_count, validity_days, freeze_allowed, installments_allowed, sort)
-       values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) returning id`,
-      [tenantId, clubId, p.kind, p.name, p.durationDays ?? null, p.visitsCount ?? null, p.validityDays ?? null, !!p.freeze, !!p.installments, sort++])).rows[0].id;
+      `insert into products(tenant_id, club_id, kind, name, duration_days, visits_count, validity_days, freeze_allowed, installments_allowed, sort, access_to)
+       values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) returning id`,
+      [tenantId, clubId, p.kind, p.name, p.durationDays ?? null, p.visitsCount ?? null, p.validityDays ?? null, !!p.freeze, !!p.installments, sort++, p.accessTo ?? null])).rows[0].id;
     await db.query('insert into price_versions(tenant_id, club_id, product_id, amount_kop) values ($1,$2,$3,$4)', [tenantId, clubId, id, p.priceKop]);
   }
 }

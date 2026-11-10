@@ -25,20 +25,22 @@ export const PERMISSIONS = {
   importManage: 'import.manage',       // перенос данных из 1С
   messagesWork: 'messages.work',       // переписка с клиентами
   messagesManage: 'messages.manage',   // каналы, шаблоны, автосообщения
+  acsWork: 'acs.work',                 // ресепшн: проходы, ручной проход, выдача карт
+  acsManage: 'acs.manage',             // турникеты, шлюзы, правила прохода, отчёт
 } as const;
 
 const P = PERMISSIONS;
 export const ROLE_SEED = [
   { code: 'owner', name: 'Собственник', network_wide: true, sort: 1, permissions: ['*'] },
   { code: 'admin', name: 'Администратор системы', network_wide: true, sort: 2,
-    permissions: [P.clubsView, P.clubsManage, P.staffView, P.staffManage, P.personsView, P.crmViewAll, P.pipelinesManage, P.sourcesManage, P.membershipsView, P.importManage] },
+    permissions: [P.clubsView, P.clubsManage, P.staffView, P.staffManage, P.personsView, P.crmViewAll, P.pipelinesManage, P.sourcesManage, P.membershipsView, P.importManage, P.acsManage] },
   // Управляющий: всё, что собственник, но только в своём клубе (решение Андрея 10.11.2026).
   // Сетевые действия (создание клубов, общие источники лидов, сетевые роли) проверяются отдельно по ctx.allClubs.
   { code: 'gm', name: 'Управляющий', network_wide: false, sort: 3,
     permissions: Object.values(P).filter((p) => p !== P.sourcesManage) },
   { code: 'rop', name: 'Руководитель ОП', network_wide: false, sort: 4, permissions: [P.clubsView, P.staffView, P.personsView, P.leadsCreate, P.crmWork, P.crmViewAll, P.membershipsSell, P.membershipsView, P.contractsSign, P.messagesWork] },
   { code: 'manager', name: 'Менеджер ОП', network_wide: false, sort: 5, permissions: [P.clubsView, P.personsView, P.leadsCreate, P.crmWork, P.membershipsSell, P.membershipsView, P.contractsSign, P.messagesWork] },
-  { code: 'desk', name: 'Администратор ресепшн', network_wide: false, sort: 6, permissions: [P.clubsView, P.personsView, P.leadsCreate, P.membershipsSell, P.membershipsView, P.membershipsManage, P.contractsSign, P.shiftsWork, P.messagesWork] },
+  { code: 'desk', name: 'Администратор ресепшн', network_wide: false, sort: 6, permissions: [P.clubsView, P.personsView, P.leadsCreate, P.membershipsSell, P.membershipsView, P.membershipsManage, P.contractsSign, P.shiftsWork, P.messagesWork, P.acsWork] },
   { code: 'fin', name: 'Финансист', network_wide: false, sort: 7, permissions: [P.clubsView, P.personsView, P.membershipsView, P.financeWork, P.financeView, P.importManage] },
   { code: 'trainer', name: 'Тренер', network_wide: false, sort: 8, permissions: [P.clubsView, P.membershipsView] },
 ];

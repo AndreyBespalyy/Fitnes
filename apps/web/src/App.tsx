@@ -7,6 +7,7 @@ import { ContractsAdminPage, SitePage } from './contracts.tsx';
 import { FiscalPage, LocalKktAgent } from './fiscal.tsx';
 import { FinancePage } from './finance.tsx';
 import { ImportPage } from './importer.tsx';
+import { AccessPage } from './access.tsx';
 import { ChatsPage, MessagingAdmin } from './chat.tsx';
 
 export function App() {
@@ -71,7 +72,7 @@ function ChangePassword({ me, forced, onDone, onLogout }: { me: Me; forced?: boo
   );
 }
 
-type Tab = 'leads' | 'board' | 'tasks' | 'home' | 'clubs' | 'tariffs' | 'contracts' | 'site' | 'fiscal' | 'finance' | 'import' | 'chats' | 'messaging' | 'pipelines' | 'staff' | 'password';
+type Tab = 'leads' | 'board' | 'tasks' | 'home' | 'clubs' | 'tariffs' | 'contracts' | 'site' | 'fiscal' | 'finance' | 'import' | 'chats' | 'access' | 'messaging' | 'pipelines' | 'staff' | 'password';
 
 function Shell({ me, onLogout }: { me: Me; onLogout: () => void }) {
   const isAdmin = can(me, 'clubs.manage') || can(me, 'staff.manage');
@@ -92,6 +93,7 @@ function Shell({ me, onLogout }: { me: Me; onLogout: () => void }) {
     ['board', 'Сделки', can(me, 'crm.work')],
     ['chats', 'Переписка', can(me, 'messages.work')],
     ['home', 'Клиенты', can(me, 'persons.view')],
+    ['access', 'Проходы', can(me, 'acs.work') || can(me, 'acs.manage')],
     ['clubs', 'Клубы', can(me, 'clubs.manage')],
     ['tariffs', 'Тарифы', can(me, 'tariffs.manage') || can(me, 'memberships.sell')],
     ['contracts', 'Договоры', can(me, 'contracts.manage')],
@@ -128,6 +130,7 @@ function Shell({ me, onLogout }: { me: Me; onLogout: () => void }) {
         {tab === 'finance' && <FinancePage me={me} clubs={clubs} clubId={clubId} openPerson={setPersonId} />}
         {tab === 'fiscal' && <FiscalPage me={me} clubs={clubs} clubId={clubId} />}
         {tab === 'chats' && <ChatsPage me={me} clubs={clubs} clubId={clubId} openPerson={setPersonId} />}
+        {tab === 'access' && <AccessPage me={me} clubs={clubs} clubId={clubId} openPerson={setPersonId} />}
         {tab === 'messaging' && <MessagingAdmin me={me} clubs={clubs} clubId={clubId} />}
         {tab === 'import' && <ImportPage clubs={clubs} clubId={clubId} />}
         {tab === 'site' && <SitePage me={me} clubs={clubs} clubId={clubId} />}

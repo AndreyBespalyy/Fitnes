@@ -127,3 +127,16 @@ button.link{border:0;background:none;color:var(--accent);cursor:pointer;padding:
   .composer{grid-template-columns:1fr}
   .msg{max-width:92%}
 }
+
+/* Шаг 11. Проходы */
+.acs-grid{display:grid;gap:12px;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));align-items:start}
+.verdict{display:grid;gap:4px;padding:12px;border-radius:10px;border:2px solid var(--line)}
+.verdict b{font-size:18px}
+.verdict.allow{border-color:var(--ok);background:var(--ok-soft)} .verdict.allow b{color:var(--ok)}
+.verdict.deny{border-color:var(--bad);background:var(--bad-soft)} .verdict.deny b{color:var(--bad)}
+.verdict .btn{justify-self:start}
+span.bad{color:var(--bad)}
+.qr{width:164px;height:164px;image-rendering:pixelated;background:#fff;border-radius:8px;padding:4px}
+details summary{cursor:pointer}
+.acs select,.acs input[type=time],.acs input[type=date],.acs input[type=number]{border:1px solid var(--line);background:var(--surface);border-radius:8px;padding:9px 8px;width:auto}
+.alerts{display:grid;gap:6px} .alerts p{margin:0}
