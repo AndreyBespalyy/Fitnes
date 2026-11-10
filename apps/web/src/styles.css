@@ -101,3 +101,29 @@ details.item summary{cursor:pointer}
 .bar i{position:absolute;left:0;top:0;bottom:0;background:var(--accent-soft);z-index:0} .bar span{position:relative;z-index:1}
 .meter{position:relative;display:inline-flex;min-width:120px;padding:2px 8px;border-radius:999px;background:var(--surface-2);overflow:hidden;font-size:12px}
 .meter i{position:absolute;left:0;top:0;bottom:0;background:var(--ok-soft)} td.bad,.num.bad{color:var(--bad)}
+
+/* Шаг 10. Переписка */
+.chat-layout{display:grid;grid-template-columns:minmax(260px,340px) 1fr;gap:12px;min-height:calc(100vh - 170px)}
+.chat-list{display:grid;grid-template-columns:minmax(0,1fr);gap:8px;align-content:start;overflow-y:auto;max-height:calc(100vh - 150px)}
+.chat-main{display:grid;min-width:0}
+.conv{display:grid;grid-template-columns:minmax(0,1fr);gap:3px;text-align:left;width:100%;border:1px solid var(--line);background:var(--surface);border-radius:10px;padding:9px 10px;cursor:pointer;font:inherit;color:inherit}
+.conv:hover{border-color:var(--accent)} .conv.on{border-color:var(--accent);background:var(--accent-soft)}
+.ellipsis{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0;flex:1}
+.badge{background:var(--accent);color:var(--accent-ink);border-radius:99px;font-size:11px;font-weight:700;padding:1px 7px}
+.chat-pane{display:grid;gap:8px;grid-template-rows:auto auto 1fr auto auto;min-height:0}
+.msgs{display:flex;flex-direction:column;gap:8px;overflow-y:auto;max-height:calc(100vh - 330px);min-height:180px;padding:6px 2px}
+.msg{display:grid;gap:2px;max-width:78%} .msg.in{align-self:flex-start} .msg.out{align-self:flex-end;text-align:right}
+.bubble{padding:8px 11px;border-radius:12px;background:var(--surface-2);white-space:pre-wrap;text-align:left;overflow-wrap:anywhere}
+.msg.out .bubble{background:var(--accent-soft)}
+.composer{display:grid;grid-template-columns:150px 1fr auto;gap:8px;align-items:end}
+.composer textarea,textarea{width:100%;border:1px solid var(--line);background:var(--surface);border-radius:8px;padding:9px 10px;font:inherit;color:inherit;resize:vertical}
+.composer select{border:1px solid var(--line);background:var(--surface);border-radius:8px;padding:9px 6px}
+button.link{border:0;background:none;color:var(--accent);cursor:pointer;padding:0;font:inherit;text-decoration:underline}
+.show-narrow{display:none}
+@media (max-width:760px){
+  .chat-layout{grid-template-columns:1fr}
+  .hide-narrow{display:none}
+  .show-narrow{display:inline-flex}
+  .composer{grid-template-columns:1fr}
+  .msg{max-width:92%}
+}

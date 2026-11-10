@@ -6,6 +6,7 @@ import { ROLE_SEED } from '../../src/roles.ts';
 import { applyClubPreset, applyMembershipPreset, ensureLeadSources } from '../../src/presets.ts';
 import { addDays, addMonths, sellMembership } from '../../src/modules/memberships.ts';
 import { createLead } from '../../src/modules/crm.ts';
+import { handleInbound } from '../../src/modules/messaging.ts';
 import type { Db } from '../../src/db.ts';
 
 const STAFF: [string, string, string, 'c1' | 'c2' | '*'][] = [
@@ -172,6 +173,7 @@ export async function seed(url = need('OWNER_DATABASE_URL'), quiet = false) {
     await c.query('insert into approval_limits(tenant_id, role_code, kind, max_amount_kop, max_percent) values ($1,$2,$3,$4,$5)', [t, role, kind, kop, pct]);
   }
   await seedMemberships(c as unknown as Db, t);
+  await seedMessaging(c as unknown as Db, t, clubs);
   // Один лид с просроченным первым ответом, чтобы было видно контроль нормы
   await c.query(`update leads set created_at = now() - interval '20 minutes', first_response_due_at = now() - interval '15 minutes'
                  where id = (select id from leads order by created_at limit 1)`);
@@ -182,6 +184,23 @@ export async function seed(url = need('OWNER_DATABASE_URL'), quiet = false) {
     console.log(`Тестовые данные созданы: 2 клуба, ${STAFF.length} сотрудников, ${PERSONS.length} клиентов.`);
     console.log(`Вход: логин, например a.bespalyy (собственник) или i.kotova (администратор), пароль ${password}`);
   }
+}
+
+// Шаг 10. Тестовые каналы и пара диалогов, чтобы окно переписки не было пустым
+async function seedMessaging(c: Db, t: string, clubs: Record<string, string>) {
+  const ch = async (club: string, messenger: string, name: string) => (await c.query(`insert into msg_channels(tenant_id, club_id, kind, messenger, name, webhook_token)
+    values ($1,$2,'test',$3,$4,md5(random()::text)) returning *`, [t, club, messenger, name])).rows[0];
+  const wa = await ch(clubs.c1, 'whatsapp', 'Тестовый WhatsApp');
+  const tg = await ch(clubs.c1, 'telegram', 'Тестовый Telegram');
+  await ch(clubs.c2, 'whatsapp', 'Тестовый WhatsApp');
+  const actor = { tenantId: t, userId: null };
+  const at = (min: number) => new Date(Date.now() - min * 60_000);
+  await handleInbound(c, actor, { ...wa, secret: null }, { chatId: '79161230011', externalId: 'seed-1', text: 'Здравствуйте! Сколько стоит годовой абонемент?', name: 'Марина Белых', phone: '79161230011', at: at(95) });
+  await handleInbound(c, actor, { ...tg, secret: null }, { chatId: '500100200', externalId: 'seed-2', text: 'Добрый день, есть ли у вас бассейн?', name: 'Игорь Пан', phone: null, at: at(40) });
+  // Действующий клиент пишет в WhatsApp со своего номера — диалог попадает в его карточку
+  await handleInbound(c, actor, { ...wa, secret: null }, { chatId: '79260000155', externalId: 'seed-3', text: 'Можно перенести персональную тренировку на завтра?', name: 'Павел', phone: '79260000155', at: at(15) });
+  await c.query(`update persons set marketing_consent = true where full_name in ('Павел Рябов', 'Алексей Громов', 'Роман Фёдоров')`);
+  await c.query(`update persons set birth_date = (now() at time zone 'Europe/Moscow')::date - interval '30 years' where full_name = 'Павел Рябов'`);
 }
 
 if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) await seed();

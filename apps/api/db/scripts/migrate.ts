@@ -36,6 +36,7 @@ export async function migrate(url = need('OWNER_DATABASE_URL'), quiet = false) {
     revoke insert, update, delete on expense_categories from fitnes_app;
     revoke delete on visits, import_batches, import_external_ids from fitnes_app;
     revoke update on import_external_ids from fitnes_app;
+    revoke delete on msg_conversations, msg_messages, msg_trigger_sends from fitnes_app;
     revoke insert, update, delete on schema_migrations, roles from fitnes_app;
     grant usage, select on all sequences in schema public to fitnes_app;
     grant execute on all functions in schema public to fitnes_app;

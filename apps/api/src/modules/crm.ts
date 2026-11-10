@@ -18,9 +18,10 @@ export function normalizePhone(raw: string | undefined | null): string | null {
 export const maskPhone = (p: string | null) => (p ? p.replace(/^(\+7)(\d{3})(\d{3})(\d{2})(\d{2})$/, '$1 $2 ***-**-$5') : null);
 
 type Actor = { tenantId: string; userId: string | null; ip?: string };
-type LeadInput = {
+export type LeadInput = {
   clubId?: string; fullName?: string; phone?: string; email?: string; sourceId?: string | null; sourceCode?: string;
   comment?: string; campaign?: string; utm?: Record<string, string>; externalEventId?: string; assignedTo?: string;
+  contact?: { type: 'telegram' | 'whatsapp'; value: string; normalized: string }; // мессенджер без телефона (Telegram)
 };
 
 async function pickAssignee(db: Db, clubId: string): Promise<string | null> {
@@ -46,7 +47,7 @@ export async function createLead(db: Db, actor: Actor, b: LeadInput) {
   const phone = normalizePhone(b.phone);
   if (b.phone && !phone) throw badRequest('Телефон указан неверно. Нужен номер вида +7 900 000-00-00');
   const email = b.email?.trim().toLowerCase() || null;
-  if (!phone && !email) throw badRequest('Укажите телефон или e-mail');
+  if (!phone && !email && !b.contact) throw badRequest('Укажите телефон или e-mail');
   let sourceId = b.sourceId ?? null;
   if (!sourceId && b.sourceCode) sourceId = (await db.query('select id from lead_sources where code = $1', [b.sourceCode])).rows[0]?.id ?? null;
   if (!sourceId) throw badRequest('Укажите источник лида (откуда клиент узнал о клубе)', 'source_required');
@@ -57,7 +58,7 @@ export async function createLead(db: Db, actor: Actor, b: LeadInput) {
   }
 
   let found: { person_id: string; home_club_id: string } | undefined;
-  for (const v of [phone, email].filter((x): x is string => !!x)) {
+  for (const v of [phone, email, b.contact?.normalized].filter((x): x is string => !!x)) {
     found = (await db.query('select * from find_person_by_contact($1, $2)', [actor.tenantId, v])).rows[0];
     if (found) break;
   }
@@ -70,6 +71,8 @@ export async function createLead(db: Db, actor: Actor, b: LeadInput) {
       [actor.tenantId, b.clubId, name, 'лид'])).rows[0].id;
     if (phone) await db.query(`insert into person_contacts(tenant_id, person_id, type, value, normalized_value, is_primary) values ($1,$2,'phone',$3,$3,true)`, [actor.tenantId, personId, phone]);
     if (email) await db.query(`insert into person_contacts(tenant_id, person_id, type, value, normalized_value, is_primary) values ($1,$2,'email',$3,$3,$4)`, [actor.tenantId, personId, email, !phone]);
+    if (b.contact) await db.query(`insert into person_contacts(tenant_id, person_id, type, value, normalized_value, is_primary) values ($1,$2,$3,$4,$5,$6)`,
+      [actor.tenantId, personId, b.contact.type, b.contact.value, b.contact.normalized, !phone && !email]);
   }
 
   // Открытая сделка этого клиента в клубе используется повторно, вторая не создаётся
@@ -182,7 +185,8 @@ export function crmRoutes(app: FastifyInstance, pool: pg.Pool) {
     return withCtx(pool, ctx, async (db) => {
       const person = (await db.query(
         `select p.id, p.full_name as "fullName", p.birth_date as "birthDate", p.segment, p.home_club_id as "homeClubId", c.name as "homeClubName", p.created_at as "createdAt",
-           p.autopay_enabled as "autopayEnabled", p.autopay_changed_at as "autopayChangedAt"
+           p.autopay_enabled as "autopayEnabled", p.autopay_changed_at as "autopayChangedAt",
+           p.marketing_consent as "marketingConsent", p.messaging_opt_out as "messagingOptOut"
          from persons p left join clubs c on c.id = p.home_club_id where p.id = $1`, [id])).rows[0];
       if (!person) throw notFound('Клиент не найден');
       const contacts = (await db.query('select type, value, is_primary as "isPrimary" from person_contacts where person_id = $1 order by is_primary desc', [id])).rows

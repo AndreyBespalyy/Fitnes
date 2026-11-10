@@ -1,5 +1,6 @@
 // Готовые настройки клуба по модели продаж: воронки с этапами и источники лидов.
 import type pg from 'pg';
+import { ensureMsgDefaults } from './modules/messaging.ts';
 
 type Q = Pick<pg.ClientBase, 'query'>;
 type StageDef = [name: string, kind: 'open' | 'won' | 'lost'];
@@ -22,7 +23,7 @@ export const PIPELINE_PRESETS: Record<'term' | 'subscription', PipelineDef[]> = 
 };
 
 export const SOURCE_PRESET: [code: string, name: string, channel: string][] = [
-  ['site', 'Сайт', 'site'], ['yandex_direct', 'Яндекс.Директ', 'ads'], ['telegram', 'Telegram', 'messenger'],
+  ['site', 'Сайт', 'site'], ['yandex_direct', 'Яндекс.Директ', 'ads'], ['telegram', 'Telegram', 'messenger'], ['whatsapp', 'WhatsApp', 'messenger'],
   ['phone', 'Входящий звонок', 'phone'], ['yandex_maps', 'Яндекс.Карты', 'maps'], ['walk_in', 'Пришёл сам', 'walk_in'],
   ['referral', 'Рекомендация', 'referral'], ['other', 'Другое', 'other'],
 ];
@@ -39,6 +40,7 @@ export async function applyClubPreset(db: Q, tenantId: string, clubId: string, m
     }
   }
   await applyMembershipPreset(db, tenantId, clubId, model);
+  await ensureMsgDefaults(db as never, tenantId, clubId);
 }
 
 export async function ensureLeadSources(db: Q, tenantId: string) {

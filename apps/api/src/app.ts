@@ -16,10 +16,11 @@ import { siteRoutes } from './modules/site.ts';
 import { fiscalRoutes, startFiscalWorker } from './modules/fiscal.ts';
 import { financeRoutes } from './modules/finance.ts';
 import { importRoutes } from './modules/import.ts';
+import { messagingRoutes, startMessagingWorker } from './modules/messaging.ts';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-export async function buildApp(pool: pg.Pool, opts: { webDist?: string; secureCookie?: boolean; logger?: boolean; storageDir?: string; fiscalWorker?: boolean; fetch?: typeof fetch } = {}) {
+export async function buildApp(pool: pg.Pool, opts: { webDist?: string; secureCookie?: boolean; logger?: boolean; storageDir?: string; fiscalWorker?: boolean; messagingWorker?: boolean; fetch?: typeof fetch } = {}) {
   const app = Fastify({ logger: opts.logger ?? false, trustProxy: true });
   await app.register(cookie);
 
@@ -59,7 +60,9 @@ export async function buildApp(pool: pg.Pool, opts: { webDist?: string; secureCo
   fiscalRoutes(app, pool, { fetch: opts.fetch });
   financeRoutes(app, pool);
   importRoutes(app, pool);
+  messagingRoutes(app, pool, { fetch: opts.fetch });
   // Фоновая отправка чеков в облачную кассу (в тестах выключена, там вызывается напрямую)
+  if (opts.messagingWorker) { const stop = startMessagingWorker(pool, opts.fetch); app.addHook('onClose', async () => stop()); }
   if (opts.fiscalWorker) { const stop = startFiscalWorker(pool); app.addHook('onClose', async () => stop()); }
 
   if (opts.webDist && existsSync(opts.webDist)) {
