@@ -99,3 +99,13 @@ export function editRatio(a: string, b: string) {
 
 /** Правки до 20 % текста считаются несущественными: резюме принято (цель шага 14 — не менее 80 % таких) */
 export const MINOR_EDIT = 0.2;
+
+/* ---------- ИИ-помощник настройки ---------- */
+export type ConfigFieldBrief = { path: string; label: string; type: string; min?: number; max?: number; value: unknown };
+export type ConfigSuggestion = { changes: { path: string; value: unknown }[]; preset?: string; explanation?: string; unknown?: string[]; engine?: string };
+/** Предложение изменений настроек по просьбе словами. Уходят только названия и значения настроек клуба. */
+export async function aiConfigSuggest(cfg: AiConfig, text: string, fields: ConfigFieldBrief[]) {
+  return call<ConfigSuggestion>(cfg, '/v1/config-suggest', {
+    method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ text, fields }),
+  }, 60_000);
+}

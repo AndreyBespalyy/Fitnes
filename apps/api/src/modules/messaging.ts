@@ -173,8 +173,8 @@ async function markFirstResponse(db: Db, personId: string | null, clubId: string
 }
 
 /* ---------- автосообщения ---------- */
-type Candidate = { personId: string; name: string; key: string; extra: Record<string, string> };
-async function candidates(db: Db, t: { event: string; days: number; club_id: string }, today: string): Promise<Candidate[]> {
+export type Candidate = { personId: string; name: string; key: string; extra: Record<string, string> };
+export async function candidates(db: Db, t: { event: string; days: number; club_id: string }, today: string): Promise<Candidate[]> {
   const q = async (sql: string, params: unknown[]) => (await db.query(sql, params)).rows as (Candidate & { person_id: string; full_name: string; k: string; dn?: string })[];
   let rows: { person_id: string; full_name: string; k: string; dn?: string }[] = [];
   if (t.event === 'membership_ending') {
@@ -191,7 +191,7 @@ async function candidates(db: Db, t: { event: string; days: number; club_id: str
           (select max((v.visited_at at time zone c.timezone)::date) from visits v where v.person_id = m.person_id and v.club_id = m.club_id) as last
         from memberships m join persons p on p.id = m.person_id join clubs c on c.id = m.club_id
         where m.club_id = $1 and m.status = 'active' and m.starts_on <= $2 and (m.ends_on is null or m.ends_on >= $2)
-        group by m.person_id, p.full_name) x
+        group by m.person_id, p.full_name, m.club_id, c.timezone) x
       where coalesce(x.last, x.started) <= $3`, [t.club_id, today, addDays(today, -t.days)]);
   } else if (t.event === 'birthday') {
     rows = await q(`select p.id as person_id, p.full_name, extract(year from $2::date)::text as k from persons p
