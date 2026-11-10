@@ -6,8 +6,10 @@ cd /opt/fitnes
 exec 9>/run/fitnes-update.lock
 flock -n 9 || exit 0
 git fetch -q origin main
-if [ "$(git rev-parse HEAD)" = "$(git rev-parse origin/main)" ]; then exit 0; fi
-echo "$(date -Is) обновление $(git rev-parse --short HEAD) -> $(git rev-parse --short origin/main)"
+cur=$(git rev-parse -q --verify HEAD || echo нет)
+new=$(git rev-parse origin/main)
+if [ "$cur" = "$new" ]; then exit 0; fi
+echo "$(date -Is) обновление ${cur:0:7} -> ${new:0:7}"
 git reset -q --hard origin/main
 cd deploy
 docker compose up -d --build
