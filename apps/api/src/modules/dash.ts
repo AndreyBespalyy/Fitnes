@@ -88,7 +88,7 @@ const isDate = (s?: string) => /^\d{4}-\d{2}-\d{2}$/.test(s ?? '');
 const pct = (a: number, b: number) => (b > 0 ? Math.round((a * 1000) / b) / 10 : null);
 
 async function scope(db: Db, clubId?: string): Promise<Club[]> {
-  const rows = (await db.query(`select id, name, timezone from clubs where status = 'active' and ($1::uuid is null or id = $1) order by created_at`, [clubId && clubId !== 'all' ? clubId : null])).rows as Club[];
+  const rows = (await db.query(`select id, name, timezone from clubs where status = 'active' and (($1::uuid is null and not is_demo) or id = $1) order by created_at`, [clubId && clubId !== 'all' ? clubId : null])).rows as Club[];
   if (clubId && clubId !== 'all' && !rows.length) throw badRequest('Клуб не найден');
   return rows;
 }

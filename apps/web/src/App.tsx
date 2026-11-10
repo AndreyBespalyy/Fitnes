@@ -1,3 +1,4 @@
+import { HelpPage, OnboardingPage } from './onboarding.tsx';
 import { CallsPage } from './calls.tsx';
 import { HotPage } from './hot.tsx';
 import { DashPage } from './dash.tsx';
@@ -82,7 +83,7 @@ function ChangePassword({ me, forced, onDone, onLogout }: { me: Me; forced?: boo
   );
 }
 
-type Tab = 'dash' | 'hot' | 'calls' | 'leads' | 'board' | 'tasks' | 'home' | 'clubs' | 'tariffs' | 'contracts' | 'site' | 'fiscal' | 'finance' | 'import' | 'chats' | 'access' | 'messaging' | 'pipelines' | 'staff' | 'stafftime' | 'config' | 'reviews' | 'profile';
+type Tab = 'dash' | 'hot' | 'calls' | 'leads' | 'board' | 'tasks' | 'home' | 'clubs' | 'tariffs' | 'contracts' | 'site' | 'fiscal' | 'finance' | 'import' | 'chats' | 'access' | 'messaging' | 'pipelines' | 'staff' | 'stafftime' | 'config' | 'reviews' | 'onboarding' | 'help' | 'profile';
 
 function Shell({ me, onLogout }: { me: Me; onLogout: () => void }) {
   const isAdmin = can(me, 'clubs.manage') || can(me, 'staff.manage');
@@ -128,6 +129,8 @@ function Shell({ me, onLogout }: { me: Me; onLogout: () => void }) {
     ['reviews', 'Обзоры', can(me, 'crm.work') || can(me, 'dash.view') || can(me, 'ai.review')],
     ['stafftime', 'График и зарплата', true],
     ['config', 'Настройки клуба', can(me, 'config.manage')],
+    ['onboarding', 'Подключение клубов', can(me, 'clubs.manage')],
+    ['help', 'Помощь', true],
     ['profile', 'Профиль', true],
   ];
   const visible = tabs.filter((t) => t[2]);
@@ -174,6 +177,8 @@ function Shell({ me, onLogout }: { me: Me; onLogout: () => void }) {
         {tab === 'staff' && <StaffPage me={me} clubs={clubs} />}
         {tab === 'stafftime' && <StaffTimePage me={me} clubs={clubs} clubId={clubId} />}
         {tab === 'config' && <ConfigPage me={me} clubs={clubs} clubId={clubId} />}
+        {tab === 'onboarding' && <OnboardingPage me={me} clubId={clubId} go={(t) => setTab(t as Tab)} reloadClubs={reloadClubs} />}
+        {tab === 'help' && <HelpPage me={me} clubs={clubs} clubId={clubId} page={tab} />}
         {tab === 'reviews' && <ReviewsPage me={me} clubs={clubs} clubId={clubId} openPerson={setPersonId} />}
         {tab === 'profile' && <ProfilePage me={me} passwordForm={<ChangePassword me={me} onDone={() => { alertOk('Пароль изменён'); setTab(firstTab); }} />} />}
       </main>
@@ -237,7 +242,7 @@ function Clubs({ me, clubs, reload }: { me: Me; clubs: Club[]; reload: () => voi
       <div className="grid2">
         {clubs.map((c) => (
           <div className="card" key={c.id}>
-            <div className="row between"><h2>{c.name}</h2><span className="chip acc">{MODEL_SHORT[c.salesModel]}</span></div>
+            <div className="row between"><h2>{c.name}</h2><span>{c.isDemo && <span className="chip">демо</span>} <span className="chip acc">{MODEL_SHORT[c.salesModel]}</span></span></div>
             <p className="muted" style={{ margin: '4px 0 10px' }}>{c.address || 'адрес не указан'} · сотрудников: {c.staffCount} · клиентов: {c.personsCount}</p>
             <label className="f">Модель продаж
               <select className="f" value={c.salesModel} onChange={(e) => changeModel(c, e.target.value)}>

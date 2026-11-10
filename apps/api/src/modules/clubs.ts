@@ -5,12 +5,13 @@ import { audit, withCtx } from '../db.ts';
 import { badRequest, forbidden, notFound } from '../errors.ts';
 import { PERMISSIONS as P } from '../roles.ts';
 import { applyClubPreset } from '../presets.ts';
+import { checkLimit } from './onboarding.ts';
 
 const MODELS = ['term', 'subscription'];
 const TZ = ['Europe/Kaliningrad', 'Europe/Moscow', 'Europe/Samara', 'Asia/Yekaterinburg', 'Asia/Omsk', 'Asia/Novosibirsk',
   'Asia/Krasnoyarsk', 'Asia/Irkutsk', 'Asia/Yakutsk', 'Asia/Vladivostok', 'Asia/Magadan', 'Asia/Kamchatka'];
 
-const SELECT = `select c.id, c.name, c.address, c.timezone, c.sales_model as "salesModel", c.status, c.first_response_minutes as "firstResponseMinutes",
+const SELECT = `select c.id, c.name, c.address, c.timezone, c.sales_model as "salesModel", c.status, c.first_response_minutes as "firstResponseMinutes", c.is_demo as "isDemo",
   (select count(distinct a.user_id)::int from user_assignments a join users u on u.id = a.user_id
      where a.club_id = c.id and u.status = 'active') as "staffCount",
   (select count(*)::int from persons p where p.home_club_id = c.id) as "personsCount"
@@ -19,7 +20,7 @@ const SELECT = `select c.id, c.name, c.address, c.timezone, c.sales_model as "sa
 export function clubRoutes(app: FastifyInstance, pool: pg.Pool) {
   app.get('/api/clubs', async (req) => {
     const ctx = requirePerm(req, P.clubsView);
-    return withCtx(pool, ctx, async (db) => (await db.query(`${SELECT} order by c.created_at`)).rows);
+    return withCtx(pool, ctx, async (db) => (await db.query(`${SELECT} where c.status = 'active' order by c.is_demo, c.created_at`)).rows);
   });
 
   app.post('/api/clubs', async (req, reply) => {
@@ -34,6 +35,7 @@ export function clubRoutes(app: FastifyInstance, pool: pg.Pool) {
     const club = await withCtx(pool, ctx, async (db) => {
       const dup = await db.query('select 1 from clubs where tenant_id = $1 and lower(name) = lower($2)', [ctx.tenantId, name]);
       if (dup.rowCount) throw badRequest('Клуб с таким названием уже есть');
+      await checkLimit(db, 'clubs');
       const id = (await db.query(
         'insert into clubs(tenant_id, name, address, timezone, sales_model) values ($1,$2,$3,$4,$5) returning id',
         [ctx.tenantId, name, b.address?.trim() || null, tz, b.salesModel])).rows[0].id;

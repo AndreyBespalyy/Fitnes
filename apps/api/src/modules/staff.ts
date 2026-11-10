@@ -4,6 +4,7 @@ import { can, requirePerm } from '../auth.ts';
 import { audit, withCtx, type Db, type Ctx } from '../db.ts';
 import { badRequest, forbidden, notFound } from '../errors.ts';
 import { hashPassword, tempPassword } from '../passwords.ts';
+import { checkLimit } from './onboarding.ts';
 import { PERMISSIONS as P } from '../roles.ts';
 
 const TR: Record<string, string> = { а: 'a', б: 'b', в: 'v', г: 'g', д: 'd', е: 'e', ё: 'e', ж: 'zh', з: 'z', и: 'i', й: 'y', к: 'k', л: 'l', м: 'm',
@@ -69,6 +70,7 @@ export function staffRoutes(app: FastifyInstance, pool: pg.Pool) {
       else if (!clubId) throw badRequest('Выберите клуб для этой роли');
       if (!ctx.allClubs && clubId && !ctx.clubIds.includes(clubId)) throw forbidden('Можно добавлять сотрудников только в свой клуб');
       if (clubId && !(await db.query('select 1 from clubs where id = $1', [clubId])).rowCount) throw badRequest('Клуб не найден');
+      await checkLimit(db, 'users');
       let login = b.login?.trim().toLowerCase();
       if (login) {
         if (!/^[a-z0-9._-]{3,40}$/.test(login)) throw badRequest('Логин: латиница, цифры, точка, от 3 до 40 символов');
