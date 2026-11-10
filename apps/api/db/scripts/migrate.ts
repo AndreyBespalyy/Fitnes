@@ -26,6 +26,8 @@ export async function migrate(url = need('OWNER_DATABASE_URL'), quiet = false) {
     grant usage on schema public to fitnes_app;
     grant select, insert, update, delete on all tables in schema public to fitnes_app;
     revoke update, delete on audit_log from fitnes_app;
+    revoke update, delete on price_versions, membership_operations from fitnes_app;
+    revoke delete on charges, memberships, freezes from fitnes_app;
     revoke insert, update, delete on schema_migrations, roles from fitnes_app;
     grant usage, select on all sequences in schema public to fitnes_app;
     grant execute on all functions in schema public to fitnes_app;

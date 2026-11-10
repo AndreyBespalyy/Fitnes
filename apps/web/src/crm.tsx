@@ -1,6 +1,7 @@
 import { useEffect, useState, type FormEvent } from 'react';
 import { api, can, type Club, type Me } from './api.ts';
 import { dt, errText, fromLocal, localInput, toast } from './ui.ts';
+import { MembershipsBlock } from './memberships.tsx';
 
 type Stage = { id: string; name: string; kind: 'open' | 'won' | 'lost'; openCount?: number };
 type Pipeline = { id: string; clubId: string; name: string; purpose: string; isDefaultForLeads: boolean; isActive: boolean; stages: Stage[] };
@@ -11,7 +12,7 @@ type Opp = { id: string; stageId: string; personId: string; personName: string; 
 type Task = { id: string; kind: string; title: string; dueAt: string; doneAt: string | null; result: string | null; personId: string | null; personName: string | null;
   opportunityId: string | null; assigneeName: string | null; overdue: boolean };
 type Card = {
-  person: { id: string; fullName: string; segment: string; homeClubName: string | null; createdAt: string };
+  person: { id: string; fullName: string; segment: string; homeClubId: string | null; homeClubName: string | null; createdAt: string };
   contacts: { type: string; value: string; isPrimary: boolean }[];
   leads: { id: string; createdAt: string; sourceName: string | null; comment: string | null; isRepeat: boolean; clubName: string; dueAt: string; respondedAt: string | null }[];
   opportunities: { id: string; status: string; clubName: string; pipelineName: string; stageId: string; stageName: string; ownerName: string | null; lostReason: string | null; stages: Stage[] }[];
@@ -235,6 +236,7 @@ export function PersonCard({ me, id, onClose }: { me: Me; id: string; onClose: (
             <div className="row" style={{ marginTop: 4 }}><span className="chip acc">{card.person.segment}</span>
               <span className="small">{card.person.homeClubName ?? 'клиент другого клуба сети'} · в базе с {dt(card.person.createdAt)}</span></div></div>
           <div className="card kv">{card.contacts.map((c, i) => <span key={i} style={{ display: 'contents' }}><span>{c.type === 'phone' ? 'Телефон' : c.type === 'email' ? 'E-mail' : c.type}</span><span className="num">{c.value}</span></span>)}</div>
+          <MembershipsBlock me={me} personId={card.person.id} homeClubId={card.person.homeClubId} />
 
           {card.opportunities.map((o) => (
             <div key={o.id} className="card" style={{ display: 'grid', gap: 8 }}>

@@ -67,3 +67,6 @@ input,select.f{width:100%;border:1px solid var(--line);background:var(--surface)
 .stagebar button.won{color:var(--ok)} .stagebar button.lost{color:var(--bad)}
 .srow{display:grid;grid-template-columns:auto 1fr 170px auto;gap:6px;align-items:center}
 @media (max-width:560px){.srow{grid-template-columns:1fr 1fr}.srow .ord{grid-column:1/-1}}
+
+.small.bad{color:var(--bad)}
+fieldset.item{margin:0;min-width:0}

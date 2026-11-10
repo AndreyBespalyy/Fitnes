@@ -10,6 +10,7 @@ import { personRoutes } from './modules/persons.ts';
 import { crmRoutes } from './modules/crm.ts';
 import { pipelineRoutes } from './modules/pipelines.ts';
 import { staffRoutes } from './modules/staff.ts';
+import { membershipRoutes } from './modules/memberships.ts';
 
 export async function buildApp(pool: pg.Pool, opts: { webDist?: string; secureCookie?: boolean; logger?: boolean } = {}) {
   const app = Fastify({ logger: opts.logger ?? false, trustProxy: true });
@@ -43,6 +44,7 @@ export async function buildApp(pool: pg.Pool, opts: { webDist?: string; secureCo
   personRoutes(app, pool);
   crmRoutes(app, pool);
   pipelineRoutes(app, pool);
+  membershipRoutes(app, pool);
 
   if (opts.webDist && existsSync(opts.webDist)) {
     await app.register(fstatic, { root: opts.webDist });

@@ -2,7 +2,7 @@ import type { FastifyInstance } from 'fastify';
 import type pg from 'pg';
 import { requirePerm } from '../auth.ts';
 import { audit, withCtx } from '../db.ts';
-import { badRequest, notFound } from '../errors.ts';
+import { badRequest, forbidden, notFound } from '../errors.ts';
 import { PERMISSIONS as P } from '../roles.ts';
 import { applyClubPreset } from '../presets.ts';
 
@@ -24,6 +24,7 @@ export function clubRoutes(app: FastifyInstance, pool: pg.Pool) {
 
   app.post('/api/clubs', async (req, reply) => {
     const ctx = requirePerm(req, P.clubsManage);
+    if (!ctx.allClubs) throw forbidden('Создавать клубы может собственник или администратор системы');
     const b = (req.body ?? {}) as { name?: string; address?: string; timezone?: string; salesModel?: string };
     const name = b.name?.trim();
     if (!name) throw badRequest('Укажите название клуба');

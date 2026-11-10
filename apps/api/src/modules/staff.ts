@@ -64,8 +64,10 @@ export function staffRoutes(app: FastifyInstance, pool: pg.Pool) {
       const role = (await db.query('select code, network_wide from roles where code = $1', [b.role])).rows[0];
       if (!role) throw badRequest('Неизвестная роль');
       let clubId: string | null = b.clubId || null;
+      if (role.network_wide && !ctx.allClubs) throw forbidden('Сетевые роли назначает собственник или администратор системы');
       if (role.network_wide) clubId = null;
       else if (!clubId) throw badRequest('Выберите клуб для этой роли');
+      if (!ctx.allClubs && clubId && !ctx.clubIds.includes(clubId)) throw forbidden('Можно добавлять сотрудников только в свой клуб');
       if (clubId && !(await db.query('select 1 from clubs where id = $1', [clubId])).rowCount) throw badRequest('Клуб не найден');
       let login = b.login?.trim().toLowerCase();
       if (login) {
@@ -91,6 +93,11 @@ export function staffRoutes(app: FastifyInstance, pool: pg.Pool) {
     if (id === ctx.userId) throw badRequest('Нельзя выполнить это действие со своей учётной записью');
     const isOwner = (await db.query(`select 1 from user_assignments where user_id = $1 and role_code = 'owner'`, [id])).rowCount;
     if (isOwner && !can(ctx, '*')) throw forbidden('Учётной записью собственника управляет только собственник');
+    if (!ctx.allClubs) {
+      const a = (await db.query('select club_id from user_assignments where user_id = $1', [id])).rows as { club_id: string | null }[];
+      if (a.some((x) => x.club_id === null)) throw forbidden('Сотрудниками сети управляет собственник или администратор системы');
+      if (!a.some((x) => x.club_id && ctx.clubIds.includes(x.club_id))) throw forbidden('Сотрудник не из вашего клуба');
+    }
   };
 
   app.post('/api/staff/:id/block', async (req) => {

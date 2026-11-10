@@ -3,7 +3,8 @@ import { fileURLToPath } from 'node:url';
 import { hash } from '@node-rs/argon2';
 import { connect, need } from './common.ts';
 import { ROLE_SEED } from '../../src/roles.ts';
-import { applyClubPreset, ensureLeadSources } from '../../src/presets.ts';
+import { applyClubPreset, applyMembershipPreset, ensureLeadSources } from '../../src/presets.ts';
+import { addDays, addMonths, sellMembership } from '../../src/modules/memberships.ts';
 import { createLead } from '../../src/modules/crm.ts';
 import type { Db } from '../../src/db.ts';
 
@@ -38,6 +39,36 @@ const PERSONS: [string, string, 'c1' | 'c2', string][] = [
   ['Глеб Орлов', 'гость', 'c2', '+79250000165'],
 ];
 
+// Демо-абонементы: действующий, скоро окончание, истёкший, подписка, подписка с долгом (проход закрыт), расторгнутая
+async function seedMemberships(c: Db, t: string) {
+  const today = (await c.query(`select to_char((now() at time zone 'Europe/Moscow')::date, 'YYYY-MM-DD') as d`)).rows[0].d as string;
+  const ctx = { tenantId: t, userId: null as unknown as string };
+  const pid = async (name: string) => (await c.query('select id from persons where full_name = $1', [name])).rows[0].id as string;
+  const prod = async (name: string) => (await c.query('select id from products where name = $1 limit 1', [name])).rows[0].id as string;
+  // Сдвигает абонемент в прошлое на days дней вместе с графиком платежей
+  const shift = async (id: string, days: number) => {
+    await c.query('update memberships set starts_on = starts_on - $2::int, ends_on = ends_on - $2::int, next_charge_on = next_charge_on - $2::int where id = $1', [id, days]);
+    await c.query('update charges set due_on = due_on - $2::int where membership_id = $1', [id, days]);
+  };
+  const payAll = (id: string) => c.query(`update charges set status = 'paid', paid_at = now(), paid_method = 'card_terminal' where membership_id = $1 and due_on <= $2`, [id, today]);
+  const sell = async (person: string, product: string, installments = 1) => (await sellMembership(c, ctx, { personId: await pid(person), productId: await prod(product), installments })).id;
+
+  const ryabov = await sell('Павел Рябов', 'Годовой безлимит'); await shift(ryabov, 90); await payAll(ryabov);
+  const gromov = await sell('Алексей Громов', 'Полгода безлимит', 3); await shift(gromov, 177); await payAll(gromov);
+  const mironova = await sell('Елена Миронова', 'Месяц безлимит'); await shift(mironova, 90); await payAll(mironova);
+  const fedorov = await sell('Роман Фёдоров', 'Подписка «Безлимит»'); await shift(fedorov, 10); await payAll(fedorov);
+  const akhmetov = await sell('Тимур Ахметов', 'Подписка «Безлимит»'); await shift(akhmetov, 35); await payAll(akhmetov);
+  // Следующий период выставлен, но списание не прошло 5 дней назад
+  const due = addDays(today, -5);
+  await c.query(`insert into charges(tenant_id, club_id, membership_id, person_id, kind, title, due_on, amount_kop)
+    select tenant_id, club_id, id, person_id, 'subscription', product_name || ': следующий месяц', $2, amount_kop from memberships where id = $1`, [akhmetov, due]);
+  await c.query('update memberships set ends_on = $2, next_charge_on = $3 where id = $1', [akhmetov, addDays(addMonths(due, 1), -1), addMonths(due, 1)]);
+  const laptevaId = await sell('Ксения Лаптева', 'Подписка «Безлимит»'); await shift(laptevaId, 60); await payAll(laptevaId);
+  await c.query(`update memberships set status = 'cancelled', cancel_reason = 'Переезд', next_charge_on = null where id = $1`, [laptevaId]);
+  await c.query(`update persons set segment = s.seg from (values ('Павел Рябов','действующий'),('Алексей Громов','на продление'),('Елена Миронова','бывший'),
+    ('Роман Фёдоров','активный подписчик'),('Тимур Ахметов','долг по списанию'),('Ксения Лаптева','отписавшийся')) s(n, seg) where full_name = s.n`);
+}
+
 export async function seed(url = need('OWNER_DATABASE_URL'), quiet = false) {
   const password = process.env.SEED_PASSWORD || 'Fitnes-2026';
   const c = await connect(url);
@@ -57,6 +88,9 @@ export async function seed(url = need('OWNER_DATABASE_URL'), quiet = false) {
     await ensureLeadSources(c, tid);
     for (const cl of (await c.query('select id, sales_model from clubs where not exists (select 1 from pipelines p where p.club_id = clubs.id)')).rows) {
       await applyClubPreset(c, tid, cl.id, cl.sales_model);
+    }
+    for (const cl of (await c.query('select id, sales_model from clubs where not exists (select 1 from club_membership_settings s where s.club_id = clubs.id)')).rows) {
+      await applyMembershipPreset(c, tid, cl.id, cl.sales_model);
     }
     await c.query('commit');
     await c.end();
@@ -103,6 +137,7 @@ export async function seed(url = need('OWNER_DATABASE_URL'), quiet = false) {
   for (const [role, kind, kop, pct] of limits) {
     await c.query('insert into approval_limits(tenant_id, role_code, kind, max_amount_kop, max_percent) values ($1,$2,$3,$4,$5)', [t, role, kind, kop, pct]);
   }
+  await seedMemberships(c as unknown as Db, t);
   // Один лид с просроченным первым ответом, чтобы было видно контроль нормы
   await c.query(`update leads set created_at = now() - interval '20 minutes', first_response_due_at = now() - interval '15 minutes'
                  where id = (select id from leads order by created_at limit 1)`);

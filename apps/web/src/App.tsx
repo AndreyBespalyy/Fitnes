@@ -2,6 +2,7 @@ import { useEffect, useState, type FormEvent } from 'react';
 import { api, can, MODEL, MODEL_SHORT, type Club, type Me, type Person, type RoleDef, type Staff } from './api.ts';
 import { errText, toast as alertOk } from './ui.ts';
 import { BoardPage, LeadsPage, PersonCard, PipelinesAdmin, TasksPage } from './crm.tsx';
+import { TariffsPage } from './memberships.tsx';
 
 export function App() {
   const [me, setMe] = useState<Me | null | undefined>(undefined);
@@ -65,7 +66,7 @@ function ChangePassword({ me, forced, onDone, onLogout }: { me: Me; forced?: boo
   );
 }
 
-type Tab = 'leads' | 'board' | 'tasks' | 'home' | 'clubs' | 'pipelines' | 'staff' | 'password';
+type Tab = 'leads' | 'board' | 'tasks' | 'home' | 'clubs' | 'tariffs' | 'pipelines' | 'staff' | 'password';
 
 function Shell({ me, onLogout }: { me: Me; onLogout: () => void }) {
   const isAdmin = can(me, 'clubs.manage') || can(me, 'staff.manage');
@@ -86,6 +87,7 @@ function Shell({ me, onLogout }: { me: Me; onLogout: () => void }) {
     ['board', 'Сделки', can(me, 'crm.work')],
     ['home', 'Клиенты', can(me, 'persons.view')],
     ['clubs', 'Клубы', can(me, 'clubs.manage')],
+    ['tariffs', 'Тарифы', can(me, 'tariffs.manage') || can(me, 'memberships.sell')],
     ['pipelines', 'Воронки', can(me, 'pipelines.manage')],
     ['staff', 'Сотрудники', can(me, 'staff.view')],
     ['password', 'Пароль', true],
@@ -109,9 +111,10 @@ function Shell({ me, onLogout }: { me: Me; onLogout: () => void }) {
         {tab === 'tasks' && <TasksPage key={ver} me={me} clubId={clubId} openPerson={setPersonId} />}
         {tab === 'leads' && <LeadsPage key={ver} me={me} clubs={clubs} clubId={clubId} openPerson={setPersonId} />}
         {tab === 'board' && <BoardPage key={ver} clubs={clubs} clubId={clubId} openPerson={setPersonId} />}
+        {tab === 'tariffs' && <TariffsPage me={me} clubs={clubs} clubId={clubId} />}
         {tab === 'pipelines' && <PipelinesAdmin clubs={clubs} clubId={clubId} />}
         {tab === 'home' && <Home key={ver} me={me} clubs={clubs} clubId={clubId} openPerson={setPersonId} />}
-        {tab === 'clubs' && <Clubs clubs={clubs} reload={reloadClubs} />}
+        {tab === 'clubs' && <Clubs me={me} clubs={clubs} reload={reloadClubs} />}
         {tab === 'staff' && <StaffPage me={me} clubs={clubs} />}
         {tab === 'password' && <ChangePassword me={me} onDone={() => { alertOk('Пароль изменён'); setTab(firstTab); }} />}
       </main>
@@ -149,7 +152,7 @@ function Home({ me, clubs, clubId, openPerson }: { me: Me; clubs: Club[]; clubId
   );
 }
 
-function Clubs({ clubs, reload }: { clubs: Club[]; reload: () => void }) {
+function Clubs({ me, clubs, reload }: { me: Me; clubs: Club[]; reload: () => void }) {
   const [wiz, setWiz] = useState(false);
   const [err, setErr] = useState('');
   const changeModel = async (c: Club, model: string) => {
@@ -165,7 +168,7 @@ function Clubs({ clubs, reload }: { clubs: Club[]; reload: () => void }) {
     <>
       <div className="row between">
         <p className="muted" style={{ margin: 0, maxWidth: 640 }}>У каждого клуба своя модель продаж. От неё зависят категории плана, воронки, тарифы и показатели.</p>
-        <button className="btn pri" onClick={() => setWiz(true)}>+ Новый клуб</button>
+        {me.allClubs && <button className="btn pri" onClick={() => setWiz(true)}>+ Новый клуб</button>}
       </div>
       {err && <div className="err">{err}</div>}
       <div className="grid2">
@@ -284,7 +287,7 @@ function StaffPage({ me, clubs }: { me: Me; clubs: Club[] }) {
             <label className="f">ФИО<input value={fullName} onChange={(e) => setFullName(e.target.value)} placeholder="Иван Иванов" /></label>
             <label className="f">Логин (необязательно)<input value={login} onChange={(e) => setLogin(e.target.value)} placeholder="создастся сам" /></label>
             <label className="f">Роль<select className="f" value={role} onChange={(e) => setRole(e.target.value)}>
-              {roles.filter((r) => r.code !== 'owner' || can(me, '*')).map((r) => <option key={r.code} value={r.code}>{r.name}</option>)}</select></label>
+              {roles.filter((r) => (r.code !== 'owner' || can(me, '*')) && (!r.networkWide || me.allClubs)).map((r) => <option key={r.code} value={r.code}>{r.name}</option>)}</select></label>
             <label className="f">Клуб<select className="f" value={roleDef?.networkWide ? '' : clubId} disabled={roleDef?.networkWide} onChange={(e) => setClubId(e.target.value)}>
               {roleDef?.networkWide ? <option value="">Вся сеть</option> : clubs.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}</select></label>
             <button className="btn pri" disabled={!fullName.trim()}>Добавить</button>
