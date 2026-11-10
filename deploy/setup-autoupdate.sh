@@ -16,12 +16,14 @@ ssh-keyscan -t ed25519 github.com 2>/dev/null >> /root/.ssh/known_hosts
 command -v git >/dev/null || (apt-get update -qq && apt-get install -y -qq git)
 cd /opt/fitnes
 [ -d .git ] || (git init -q -b main && git remote add origin "$REPO")
+# Первую версию забираем сразу, чтобы скрипт автообновления оказался на месте (если ключ уже добавлен в GitHub)
+if git fetch -q origin main 2>/dev/null; then git reset -q --hard origin/main; else echo "GitHub пока не пускает: добавьте ключ ниже, таймер заберёт версию сам"; fi
 cat > /etc/systemd/system/fitnes-update.service <<EOT
 [Unit]
 Description=Fitnes: обновление с GitHub
 [Service]
 Type=oneshot
-ExecStart=/bin/bash /opt/fitnes/deploy/autoupdate.sh
+ExecStart=/bin/bash -c 'cd /opt/fitnes && if [ -f deploy/autoupdate.sh ]; then exec bash deploy/autoupdate.sh; fi; git fetch -q origin main && git reset -q --hard origin/main && cd deploy && docker compose up -d --build'
 StandardOutput=append:/var/log/fitnes-update.log
 StandardError=append:/var/log/fitnes-update.log
 EOT
