@@ -238,6 +238,22 @@ export async function unfreezeMembership(db: Db, ctx: Pick<Ctx, 'tenantId' | 'us
   return { returnedDays: unused };
 }
 
+/** Отметить начисление оплаченным: журнал платежей, операция по абонементу, чек. Общая для ресепшн, онлайн-оплаты и автосписания. */
+export async function payCharge(db: Db, ctx: { tenantId: string; userId: string | null }, chargeId: string, method: string) {
+  const c = (await db.query('select * from charges where id = $1 for update', [chargeId])).rows[0];
+  if (!c || c.status !== 'due') return null;
+  await db.query(`update charges set status = 'paid', paid_at = now(), paid_method = $2, paid_by = $3, autopay_error = null where id = $1`, [chargeId, method, ctx.userId]);
+  const cat = c.membership_id ? (await db.query('select sale_category from memberships where id = $1', [c.membership_id])).rows[0]?.sale_category : null;
+  await recordPayment(db, ctx as never, { clubId: c.club_id, direction: 'in', kind: 'charge', amountKop: Number(c.amount_kop), method, personId: c.person_id, chargeId, saleCategory: cat });
+  if (c.membership_id) {
+    await db.query(`insert into membership_operations(tenant_id, club_id, membership_id, kind, params, actor_id) values ($1,$2,$3,'charge_paid',$4,$5)`,
+      [ctx.tenantId, c.club_id, c.membership_id, JSON.stringify({ chargeId, method, amountKop: Number(c.amount_kop) }), ctx.userId]);
+  }
+  const receiptId = await receiptForCharge(db, ctx as never, chargeId, method);
+  await audit(db, ctx, 'charge.marked_paid', 'charge', chargeId, { status: 'due' }, { status: 'paid', method, receiptId });
+  return receiptId;
+}
+
 /* ---------- маршруты ---------- */
 const PRODUCT_SELECT = `select p.id, p.club_id as "clubId", p.kind, p.name, p.duration_days as "durationDays", p.visits_count as "visitsCount",
   p.validity_days as "validityDays", p.freeze_allowed as "freezeAllowed", p.installments_allowed as "installmentsAllowed", p.is_active as "isActive", p.sort,
@@ -429,18 +445,10 @@ export function membershipRoutes(app: FastifyInstance, pool: pg.Pool) {
     const { method } = (req.body ?? {}) as { method?: string };
     if (!['cash', 'card_terminal', 'sbp'].includes(method ?? '')) throw badRequest('Выберите способ оплаты');
     return withCtx(pool, ctx, async (db) => {
-      const c = (await db.query('select * from charges where id = $1', [id])).rows[0];
+      const c = (await db.query('select status from charges where id = $1', [id])).rows[0];
       if (!c) throw notFound('Платёж не найден');
       if (c.status !== 'due') throw badRequest('Платёж уже оплачен или отменён');
-      await db.query(`update charges set status = 'paid', paid_at = now(), paid_method = $2, paid_by = $3 where id = $1`, [id, method, ctx.userId]);
-      const cat = c.membership_id ? (await db.query('select sale_category from memberships where id = $1', [c.membership_id])).rows[0]?.sale_category : null;
-      await recordPayment(db, ctx, { clubId: c.club_id, direction: 'in', kind: 'charge', amountKop: Number(c.amount_kop), method: method!, personId: c.person_id, chargeId: id, saleCategory: cat });
-      if (c.membership_id) {
-        await db.query(`insert into membership_operations(tenant_id, club_id, membership_id, kind, params, actor_id) values ($1,$2,$3,'charge_paid',$4,$5)`,
-          [ctx.tenantId, c.club_id, c.membership_id, JSON.stringify({ chargeId: id, method, amountKop: Number(c.amount_kop) }), ctx.userId]);
-      }
-      const receiptId = await receiptForCharge(db, ctx, id, method!);
-      await audit(db, ctx, 'charge.marked_paid', 'charge', id, { status: 'due' }, { status: 'paid', method, receiptId });
+      const receiptId = await payCharge(db, ctx, id, method!);
       return { ok: true, receiptId };
     });
   });

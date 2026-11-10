@@ -71,6 +71,7 @@ export const PRODUCT_PRESETS: Record<'term' | 'subscription', ProductDef[]> = {
 export async function applyMembershipPreset(db: Q, tenantId: string, clubId: string, model: 'term' | 'subscription') {
   await db.query('insert into club_membership_settings(club_id, tenant_id) values ($1,$2) on conflict (club_id) do nothing', [clubId, tenantId]);
   await db.query('insert into club_access_settings(club_id, tenant_id) values ($1,$2) on conflict (club_id) do nothing', [clubId, tenantId]);
+  await db.query('insert into club_acquiring(club_id, tenant_id) values ($1,$2) on conflict (club_id) do nothing', [clubId, tenantId]);
   if ((await db.query('select 1 from products where club_id = $1 limit 1', [clubId])).rowCount) return;
   let sort = 0;
   for (const p of PRODUCT_PRESETS[model]) {

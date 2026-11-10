@@ -5,16 +5,29 @@
 import type { FastifyInstance } from 'fastify';
 import type pg from 'pg';
 import { createCipheriv, createDecipheriv, createHash, randomBytes } from 'node:crypto';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { requirePerm } from '../auth.ts';
 import { audit, withCtx, type Ctx, type Db } from '../db.ts';
 import { badRequest, notFound } from '../errors.ts';
 import { PERMISSIONS as P } from '../roles.ts';
 
 /* ---------- шифрование пароля облачной кассы ---------- */
+// Ключ шифрования секретов (пароль кассы, токены мессенджеров, сохранённые карты). Берётся из FISCAL_SECRET_KEY в .env;
+// если его нет — один раз создаётся случайный ключ в файле storage/secret.key (файл не терять: без него сохранённые секреты не расшифровать).
+let cachedKey: Buffer | null = null;
 function key() {
-  const k = process.env.FISCAL_SECRET_KEY;
-  if (!k || k.length < 16) throw badRequest('Не задан ключ шифрования FISCAL_SECRET_KEY в файле .env (строка не короче 16 символов). Без него пароль кассы не сохранить');
-  return createHash('sha256').update(k).digest();
+  if (cachedKey) return cachedKey;
+  let k = process.env.FISCAL_SECRET_KEY;
+  if (!k || k.length < 16) {
+    const dir = process.env.STORAGE_DIR ?? join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..', '..', 'storage');
+    const file = join(dir, 'secret.key');
+    if (!existsSync(file)) { mkdirSync(dir, { recursive: true }); writeFileSync(file, randomBytes(32).toString('hex'), { mode: 0o600 }); }
+    k = readFileSync(file, 'utf8').trim();
+  }
+  cachedKey = createHash('sha256').update(k).digest();
+  return cachedKey;
 }
 export function encrypt(text: string) {
   const iv = randomBytes(12);

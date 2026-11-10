@@ -18,10 +18,12 @@ import { financeRoutes } from './modules/finance.ts';
 import { importRoutes } from './modules/import.ts';
 import { messagingRoutes, startMessagingWorker } from './modules/messaging.ts';
 import { acsRoutes } from './modules/acs.ts';
+import { billingRoutes, startBillingWorker } from './modules/billing.ts';
+import { bankRoutes } from './modules/bank.ts';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-export async function buildApp(pool: pg.Pool, opts: { webDist?: string; secureCookie?: boolean; logger?: boolean; storageDir?: string; fiscalWorker?: boolean; messagingWorker?: boolean; fetch?: typeof fetch } = {}) {
+export async function buildApp(pool: pg.Pool, opts: { webDist?: string; secureCookie?: boolean; logger?: boolean; storageDir?: string; fiscalWorker?: boolean; messagingWorker?: boolean; billingWorker?: boolean; fetch?: typeof fetch } = {}) {
   const app = Fastify({ logger: opts.logger ?? false, trustProxy: true });
   await app.register(cookie);
 
@@ -63,8 +65,11 @@ export async function buildApp(pool: pg.Pool, opts: { webDist?: string; secureCo
   importRoutes(app, pool);
   messagingRoutes(app, pool, { fetch: opts.fetch });
   acsRoutes(app, pool);
+  billingRoutes(app, pool, { fetch: opts.fetch });
+  bankRoutes(app, pool);
   // Фоновая отправка чеков в облачную кассу (в тестах выключена, там вызывается напрямую)
   if (opts.messagingWorker) { const stop = startMessagingWorker(pool, opts.fetch); app.addHook('onClose', async () => stop()); }
+  if (opts.billingWorker) { const stop = startBillingWorker(pool, opts.fetch); app.addHook('onClose', async () => stop()); }
   if (opts.fiscalWorker) { const stop = startFiscalWorker(pool); app.addHook('onClose', async () => stop()); }
 
   if (opts.webDist && existsSync(opts.webDist)) {

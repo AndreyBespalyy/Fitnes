@@ -136,7 +136,7 @@ export async function handleInbound(db: Db, actor: Actor, ch: Channel, ev: Inbou
 }
 
 /* ---------- исходящие ---------- */
-async function queueMessage(db: Db, actor: Actor, conversationId: string, text: string, o: { auto?: boolean; templateId?: string | null; triggerId?: string | null } = {}) {
+export async function queueMessage(db: Db, actor: Actor, conversationId: string, text: string, o: { auto?: boolean; templateId?: string | null; triggerId?: string | null } = {}) {
   const c = (await db.query('select club_id from msg_conversations where id = $1', [conversationId])).rows[0];
   return (await db.query(`insert into msg_messages(tenant_id, club_id, conversation_id, direction, body, status, author_id, template_id, trigger_id, auto, next_attempt_at)
     values ($1,$2,$3,'out',$4,'queued',$5,$6,$7,$8,now()) returning id`,
@@ -207,7 +207,7 @@ async function candidates(db: Db, t: { event: string; days: number; club_id: str
 }
 
 /** Диалог для автосообщения: последний живой диалог клиента в клубе, иначе новый в WhatsApp по телефону. */
-async function conversationFor(db: Db, actor: Actor, personId: string, clubId: string, create: boolean) {
+export async function conversationFor(db: Db, actor: Actor, personId: string, clubId: string, create: boolean) {
   const c = (await db.query(`select c.id from msg_conversations c join msg_channels ch on ch.id = c.channel_id
     where c.person_id = $1 and c.club_id = $2 and ch.status = 'active' order by c.last_message_at desc nulls last limit 1`, [personId, clubId])).rows[0];
   if (c) return c.id as string;

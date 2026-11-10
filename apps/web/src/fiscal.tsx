@@ -1,6 +1,7 @@
 // Шаг 8. Раздел «Касса»: выбор кассы клуба (облачная или в клубе), банк эквайринга, инструкции, журнал чеков.
 // LocalKktAgent работает в браузере компьютера ресепшн и отправляет чеки на кассу АТОЛ через «Веб-сервер ККТ».
 import { Fragment, useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react';
+import { AcquiringForm } from './payments.tsx';
 import { api, can, type Club, type Me } from './api.ts';
 import { dt, errText, toast } from './ui.ts';
 import { rub } from './memberships.tsx';
@@ -16,7 +17,6 @@ type Job = { id: string; clubId: string; status: string; externalId: string | nu
 const TAX: Record<string, string> = { osn: 'ОСН (общая)', usn_income: 'УСН «Доходы»', usn_income_outcome: 'УСН «Доходы минус расходы»', esn: 'ЕСХН', patent: 'Патент' };
 const VAT: Record<string, string> = { none: 'Без НДС', vat0: 'НДС 0 %', vat5: 'НДС 5 %', vat7: 'НДС 7 %', vat10: 'НДС 10 %', vat20: 'НДС 20 %', vat22: 'НДС 22 %' };
 const METHOD: Record<string, string> = { full_prepayment: 'Полная предоплата', full_payment: 'Полный расчёт', advance: 'Аванс' };
-const BANKS: Record<string, string> = { none: 'Пока не выбран', sber: 'Сбер', tbank: 'Т-Банк', yookassa: 'ЮKassa', other: 'Другой банк' };
 const STATUS: Record<string, [string, string]> = { pending: ['ждёт отправки', 'warn'], sent: ['отправлен в кассу', 'acc'], done: ['пробит', 'ok'], failed: ['ошибка', 'bad'] };
 const PAY: Record<string, string> = { cash: 'наличные', card_terminal: 'карта', sbp: 'СБП' };
 
@@ -61,6 +61,7 @@ export function FiscalPage({ me, clubs, clubId }: { me: Me; clubs: Club[]; clubI
         {clubId === 'all' && <select aria-label="Клуб" value={club} onChange={(e) => setClub(e.target.value)} style={{ width: 'auto' }}>{clubs.map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}</select>}
       </div>
       <FiscalForm key={`f${club}`} club={c} manage={can(me, 'fiscal.manage')} />
+      {can(me, 'fiscal.manage') && <AcquiringForm key={`a${club}`} club={c} manage />}
       <Receipts key={`r${club}`} me={me} club={c} />
     </>
   );
@@ -121,12 +122,6 @@ function FiscalForm({ club, manage }: { club: Club; manage: boolean }) {
             <option value="atol_local">Касса АТОЛ, автоматически</option><option value="manual">Любая касса, вручную (вписать номер ФД)</option></select></label>
           {s.provider !== 'manual' && <label className="f">Адрес веб-сервера кассы на компьютере ресепшн<input value={s.localUrl} disabled={ro} onChange={(e) => set('localUrl', e.target.value)} /></label>}
         </div>)}
-      <div className="item" style={{ display: 'grid', gap: 6 }}>
-        <b>Банк для оплаты картой и СБП</b>
-        <label className="f" style={{ maxWidth: 320 }}><select value={s.acquiringProvider} disabled={ro} onChange={(e) => set('acquiringProvider', e.target.value)}>
-          {Object.entries(BANKS).map(([k, v]) => <option key={k} value={k}>{v}</option>)}</select></label>
-        <span className="small">Банк подключим к запуску. До этого оплату картой принимают на терминале банка в клубе и отмечают в карточке клиента.</span>
-      </div>
       <div className="row">
         {manage && <button className="btn pri">Сохранить</button>}
         {s.mode === 'cloud' && manage && <button type="button" className="btn" onClick={testCloud}>Проверить связь</button>}

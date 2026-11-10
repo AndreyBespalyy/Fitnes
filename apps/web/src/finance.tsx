@@ -4,6 +4,7 @@ import { useEffect, useState, type FormEvent } from 'react';
 import { api, can, type Club, type Me } from './api.ts';
 import { dt, errText, toast } from './ui.ts';
 import { rub } from './memberships.tsx';
+import { BankReconciliation, OnlinePayments } from './payments.tsx';
 
 type Shift = { id: string; status: string; openedAt: string; closedAt: string | null; openingCashKop: number; expectedCashKop: number | null; countedCashKop: number | null;
   note: string | null; openedBy: string; closedBy: string | null; cashMovementKop: number };
@@ -32,6 +33,8 @@ export function FinancePage({ me, clubs, clubId, openPerson }: { me: Me; clubs: 
     ['cashflow', 'ДДС и план-факт', can(me, 'finance.view')],
     ['debts', 'Долги', can(me, 'finance.view')],
     ['payments', 'Журнал платежей', can(me, 'finance.view')],
+    ['online', 'Онлайн-оплаты', can(me, 'finance.view')],
+    ['bank', 'Сверка с банком', can(me, 'finance.view')],
   ];
   const allowed = views.filter((v) => v[2]);
   const [view, setView] = useState(allowed[0]?.[0] ?? 'shift');
@@ -49,6 +52,8 @@ export function FinancePage({ me, clubs, clubId, openPerson }: { me: Me; clubs: 
       {view === 'cashflow' && <CashflowView key={club} me={me} club={c} />}
       {view === 'debts' && <Debts key={club} club={c} openPerson={openPerson} />}
       {view === 'payments' && <Payments key={club} club={c} />}
+      {view === 'online' && <OnlinePayments key={club} club={c} openPerson={openPerson} />}
+      {view === 'bank' && <BankReconciliation key={club} me={me} club={c} />}
     </>
   );
 }

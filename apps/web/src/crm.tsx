@@ -4,6 +4,7 @@ import { dt, errText, fromLocal, localInput, toast } from './ui.ts';
 import { MembershipsBlock } from './memberships.tsx';
 import { PersonChats } from './chat.tsx';
 import { PersonPasses } from './access.tsx';
+import { PersonCards } from './payments.tsx';
 
 type Stage = { id: string; name: string; kind: 'open' | 'won' | 'lost'; openCount?: number };
 type Pipeline = { id: string; clubId: string; name: string; purpose: string; isDefaultForLeads: boolean; isActive: boolean; stages: Stage[] };
@@ -243,8 +244,9 @@ export function PersonCard({ me, id, onClose }: { me: Me; id: string; onClose: (
               <input type="checkbox" style={{ width: 20, height: 20 }} checked={card.person.autopayEnabled} disabled={!can(me, 'memberships.manage')}
                 onChange={(e) => act(() => api('POST', `/api/persons/${card.person.id}/autopay`, { enabled: e.target.checked }), e.target.checked ? 'Автосписание включено' : 'Автосписание выключено')} />
               <span><b>Списывать подписку автоматически с привязанной карты</b><br />
-                <span className="small">Отметьте, только если клиент согласен на автосписание{card.person.autopayChangedAt ? ` (изменено ${dt(card.person.autopayChangedAt)})` : ''}. Списания начнутся после подключения банка.</span></span>
+                <span className="small">Отметьте, только если клиент согласен на автосписание{card.person.autopayChangedAt ? ` (изменено ${dt(card.person.autopayChangedAt)})` : ''}. Карта сохранится, когда клиент оплатит подписку по ссылке. Дальше деньги будут списываться в день оплаты.</span></span>
             </label>)}
+          {can(me, 'memberships.view') && <PersonCards me={me} personId={card.person.id} autopayEnabled={card.person.autopayEnabled} />}
           {can(me, 'messages.work') && <PersonChats me={me} personId={card.person.id} homeClubId={card.person.homeClubId}
             marketingConsent={card.person.marketingConsent} optOut={card.person.messagingOptOut} reload={reload} />}
           <MembershipsBlock me={me} personId={card.person.id} homeClubId={card.person.homeClubId} />

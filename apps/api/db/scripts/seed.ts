@@ -8,6 +8,8 @@ import { addDays, addMonths, sellMembership } from '../../src/modules/membership
 import { createLead } from '../../src/modules/crm.ts';
 import { handleInbound } from '../../src/modules/messaging.ts';
 import { decide, recordEvent } from '../../src/modules/acs.ts';
+import { applyState, payLink } from '../../src/modules/billing.ts';
+import { encrypt } from '../../src/modules/fiscal.ts';
 import { createHash } from 'node:crypto';
 import type { Db } from '../../src/db.ts';
 
@@ -177,6 +179,7 @@ export async function seed(url = need('OWNER_DATABASE_URL'), quiet = false) {
   await seedMemberships(c as unknown as Db, t);
   await seedMessaging(c as unknown as Db, t, clubs);
   await seedAccess(c as unknown as Db, t, clubs);
+  await seedBilling(c as unknown as Db, t, clubs);
   // Один лид с просроченным первым ответом, чтобы было видно контроль нормы
   await c.query(`update leads set created_at = now() - interval '20 minutes', first_response_due_at = now() - interval '15 minutes'
                  where id = (select id from leads order by created_at limit 1)`);
@@ -256,6 +259,32 @@ async function seedAccess(c: Db, t: string, clubs: Record<string, string>) {
   await ev('c2', '200002', 'in', 60);
   await ev('c2', '200001', 'in', 40);
   await ev('c2', '900002', 'in', 130);
+}
+
+// Шаг 12. Онлайн-оплаты прошлых дней (для сверки с выпиской) и сохранённые карты для автосписания подписки
+async function seedBilling(c: Db, t: string, clubs: Record<string, string>) {
+  const actor = { tenantId: t, userId: null };
+  const noFetch = (async () => { throw new Error('нет сети'); }) as unknown as typeof fetch;
+  const guest = (await c.query(`select id from products where club_id = $1 and kind = 'guest'`, [clubs.c1])).rows[0].id;
+  const yudina = (await c.query(`select id from persons where full_name = 'Светлана Юдина'`)).rows[0].id;
+  for (const [daysAgo, sbp] of [[1, false], [2, true], [2, false], [3, false]] as const) {
+    const m = await sellMembership(c, { tenantId: t, userId: null as unknown as string }, { personId: yudina, productId: guest });
+    const ch = (await c.query(`select id from charges where membership_id = $1`, [m.id])).rows[0].id;
+    const link = await payLink(c, noFetch, actor, ch, 'http://localhost:3000');
+    const op = (await c.query('select * from online_payments where id = $1', [link.id])).rows[0];
+    await applyState(c, op, { status: 'succeeded', method: sbp ? 'sbp' : 'card' }, actor);
+    const at = `now() - interval '${daysAgo} days'`;
+    await c.query(`update payments set created_at = ${at} where charge_id = $1`, [ch]);
+    await c.query(`update online_payments set created_at = ${at}, paid_at = ${at} where id = $1`, [link.id]);
+    await c.query(`update charges set paid_at = ${at} where id = $1`, [ch]);
+  }
+  // Карты для автосписания: у Фёдорова пройдёт, у Ахметова «недостаточно средств»
+  for (const [name, last4] of [['Роман Фёдоров', '4242'], ['Тимур Ахметов', '9995']]) {
+    const p = (await c.query('select id from persons where full_name = $1', [name])).rows[0].id;
+    await c.query('update persons set autopay_enabled = true, autopay_changed_at = now() where id = $1', [p]);
+    await c.query(`insert into person_payment_methods(tenant_id, club_id, person_id, provider, live, token_enc, title) values ($1,$2,$3,'test',false,$4,$5)`,
+      [t, clubs.c2, p, encrypt(`tok-seed-${last4}`), `Карта •••• ${last4}`]);
+  }
 }
 
 if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) await seed();

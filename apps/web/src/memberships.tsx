@@ -1,5 +1,6 @@
 // Шаг 6. Раздел «Тарифы» (настройки клуба, тарифы и цены) и абонементы в карточке клиента.
 import { Fragment, useEffect, useState, type FormEvent } from 'react';
+import { PayLinkButton } from './payments.tsx';
 import { api, can, type Club, type Me } from './api.ts';
 import { errText, toast } from './ui.ts';
 import { ContractLine, type ContractBrief } from './contracts.tsx';
@@ -23,7 +24,7 @@ const STATE: Record<string, [string, string]> = {
   active: ['действует', 'ok'], debt_grace: ['долг', 'warn'], debt_blocked: ['проход закрыт: долг', 'bad'], frozen: ['заморожен', 'acc'],
   unsigned: ['проход закрыт: нет подписи', 'bad'], not_started: ['ещё не начался', ''], expired: ['закончился', ''], used_up: ['посещения закончились', ''], cancelled: ['расторгнут', 'bad'],
 };
-const PAY: Record<string, string> = { cash: 'наличные', card_terminal: 'карта (терминал)', sbp: 'СБП' };
+const PAY: Record<string, string> = { online: 'онлайн',  cash: 'наличные', card_terminal: 'карта (терминал)', sbp: 'СБП' };
 export const rub = (kop: number | null | undefined) => (kop === null || kop === undefined ? '—' : `${(kop / 100).toLocaleString('ru-RU')} ₽`);
 const d = (s: string | null) => (s ? s.split('-').reverse().join('.') : '—');
 const toKop = (s: string) => Math.round(Number(s.replace(',', '.').replace(/\s/g, '')) * 100);
@@ -243,7 +244,8 @@ export function MembershipsBlock({ me, personId, homeClubId }: { me: Me; personI
                     : c.status === 'cancelled' ? <span className="chip">отменён</span>
                     : <span className="row"><span className={`chip ${c.overdue ? 'bad' : 'warn'}`}>{c.overdue ? 'просрочен' : 'к оплате'}</span>
                       {canManage && <><button className="btn sm" onClick={() => act(() => api('POST', `/api/charges/${c.id}/mark-paid`, { method: 'card_terminal' }), 'Оплата картой отмечена')}>Картой</button>
-                        <button className="btn sm" onClick={() => act(() => api('POST', `/api/charges/${c.id}/mark-paid`, { method: 'cash' }), 'Оплата наличными отмечена')}>Наличными</button></>}</span>}
+                        <button className="btn sm" onClick={() => act(() => api('POST', `/api/charges/${c.id}/mark-paid`, { method: 'cash' }), 'Оплата наличными отмечена')}>Наличными</button></>}
+                      {can(me, 'memberships.sell') && <PayLinkButton chargeId={c.id} />}</span>}
                 </div>))}</div>)}
             {m.contract && <ContractLine me={me} c={m.contract} reload={reload} />}
             {m.status === 'active' && (
