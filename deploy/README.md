@@ -26,3 +26,13 @@
     ssh -i C:\Users\Admin\.ssh\project2_vps -o IdentitiesOnly=yes root@144.31.107.204 "tar -xzf /root/fitnes.tar.gz -C /opt/fitnes && rm /root/fitnes.tar.gz && cd /opt/fitnes/deploy && docker compose up -d --build"
 
 На сервере не запускайте db:reset и повторный db:seed: это сотрёт или задвоит данные.
+
+## Автообновление с GitHub
+
+Один раз (на рабочем компьютере, PowerShell):
+
+    cd C:\Users\Admin\Desktop\Fitnes; git pull
+    Get-Content deploy\setup-autoupdate.sh -Raw | ssh -i C:\Users\Admin\.ssh\project2_vps -o IdentitiesOnly=yes root@144.31.107.204 "tr -d '\r' | bash"
+
+Скрипт покажет открытый ключ: его добавляют в репозиторий GitHub → Settings → Deploy keys (только чтение).
+Дальше сервер каждые 5 минут проверяет ветку main и сам обновляется. Журнал: `/var/log/fitnes-update.log`.
