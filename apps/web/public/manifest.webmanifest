@@ -1,0 +1,20 @@
+{
+  "name": "Клубная ОС",
+  "short_name": "Клубная ОС",
+  "description": "Рабочее место сотрудника фитнес-клуба: план дня, задачи, клиенты, переписка",
+  "lang": "ru",
+  "start_url": "/?source=app",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#13232A",
+  "theme_color": "#13232A",
+  "icons": [
+    { "src": "/icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any maskable" },
+    { "src": "/icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable" }
+  ],
+  "shortcuts": [
+    { "name": "Кому звонить", "url": "/?tab=hot", "icons": [{ "src": "/icons/icon-192.png", "sizes": "192x192" }] },
+    { "name": "Задачи", "url": "/?tab=tasks", "icons": [{ "src": "/icons/icon-192.png", "sizes": "192x192" }] }
+  ]
+}

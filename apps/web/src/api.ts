@@ -8,12 +8,79 @@ export type Person = { id: string; fullName: string; segment: string; clubId: st
 
 export class ApiError extends Error { constructor(public status: number, public code: string, message: string) { super(message); } }
 
+/* ---------- Связь: признак «без связи», сохранённые данные и очередь действий (FR-MOB-04) ---------- */
+export type NetState = { offline: boolean; savedAt: string | null; queued: number; failed: { label: string; message: string }[] };
+const net: NetState = { offline: false, savedAt: null, queued: 0, failed: [] };
+const listeners = new Set<(s: NetState) => void>();
+const emit = () => listeners.forEach((l) => l({ ...net }));
+export const netState = () => ({ ...net });
+export function onNet(l: (s: NetState) => void) { listeners.add(l); return () => { listeners.delete(l); }; }
+
+// Действия, которые можно отправить позже: отметка о выполнении задачи и новая задача
+const QUEUEABLE: [RegExp, string][] = [[/^\/api\/tasks\/[^/]+\/complete$/, 'Задача выполнена'], [/^\/api\/tasks$/, 'Новая задача'], [/^\/api\/meetings\/[^/]+\/status$/, 'Итог встречи']];
+type Queued = { id: string; method: string; url: string; body: unknown; label: string; at: string };
+const QKEY = 'klub.queue';
+const readQ = (): Queued[] => { try { return JSON.parse(localStorage.getItem(QKEY) || '[]'); } catch { return []; } };
+const writeQ = (q: Queued[]) => { try { localStorage.setItem(QKEY, JSON.stringify(q)); } catch { /* хранилище недоступно */ } net.queued = q.length; emit(); };
+net.queued = readQ().length;
+
+function setOffline(offline: boolean, savedAt: string | null = null) {
+  if (net.offline === offline && net.savedAt === savedAt) return;
+  net.offline = offline; net.savedAt = savedAt; emit();
+  if (!offline) void flushQueue();
+}
+
+let flushing = false;
+export async function flushQueue() {
+  if (flushing) return; flushing = true;
+  try {
+    let q = readQ();
+    while (q.length) {
+      const item = q[0];
+      let res: Response;
+      try {
+        res = await fetch(item.url, { method: item.method, credentials: 'same-origin', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(item.body) });
+      } catch { setOffline(true, net.savedAt); return; }
+      if (!res.ok && res.status !== 401) {
+        const d = await res.json().catch(() => ({}));
+        net.failed = [...net.failed, { label: item.label, message: d.message ?? 'Сервер не принял действие' }];
+      }
+      if (res.status === 401) return; // войдите заново: очередь сохранится
+      q = readQ().filter((x) => x.id !== item.id); writeQ(q);
+    }
+  } finally { flushing = false; }
+}
+export const clearFailed = () => { net.failed = []; emit(); };
+export function clearDeviceData() {
+  writeQ([]);
+  navigator.serviceWorker?.controller?.postMessage('clear');
+}
+if (typeof window !== 'undefined') {
+  window.addEventListener('online', () => setOffline(false));
+  window.addEventListener('offline', () => setOffline(true, net.savedAt));
+}
+
 export async function api<T>(method: string, url: string, body?: unknown): Promise<T> {
-  const res = await fetch(url, {
-    method, credentials: 'same-origin',
-    headers: body === undefined ? {} : { 'Content-Type': 'application/json' },
-    body: body === undefined ? undefined : JSON.stringify(body),
-  });
+  const path = url.split('?')[0];
+  const q = method === 'POST' ? QUEUEABLE.find(([r]) => r.test(path)) : undefined;
+  let res: Response;
+  try {
+    if (q && typeof navigator !== 'undefined' && navigator.onLine === false) throw new TypeError('offline');
+    res = await fetch(url, {
+      method, credentials: 'same-origin',
+      headers: body === undefined ? {} : { 'Content-Type': 'application/json' },
+      body: body === undefined ? undefined : JSON.stringify(body),
+    });
+  } catch {
+    setOffline(true, net.savedAt);
+    if (q) {
+      writeQ([...readQ(), { id: `${Date.now()}-${Math.random()}`, method, url, body, label: q[1], at: new Date().toISOString() }]);
+      return { ok: true, queued: true } as T;
+    }
+    throw new ApiError(0, 'offline', 'Нет связи с сервером');
+  }
+  if (res.headers.get('X-Offline')) setOffline(true, res.headers.get('X-Saved-At'));
+  else setOffline(false);
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new ApiError(res.status, data.error ?? 'error', data.message ?? 'Ошибка связи с сервером');
   return data as T;

@@ -161,3 +161,21 @@ a.btn{text-decoration:none;color:inherit}
 @media (max-width:600px){.tr-line{grid-template-columns:1fr;gap:0}}
 .hot-meter{display:block;height:4px;border-radius:2px;background:var(--line);position:relative;overflow:hidden}
 .hot-meter i{position:absolute;left:0;top:0;bottom:0;background:var(--accent)}
+
+/* Шаг 16: мобильное рабочее место */
+.netbar{display:flex;flex-wrap:wrap;gap:6px 12px;align-items:center;padding:8px 12px;border-radius:var(--r);background:var(--warm-soft);color:var(--ink);font-size:13px;border:1px solid color-mix(in srgb,var(--warm) 40%,transparent)}
+.netbar.off{background:var(--bad-soft);border-color:color-mix(in srgb,var(--bad) 40%,transparent)}
+.netbar .bad{color:var(--bad)}
+.bottom-nav{display:none}
+@media (max-width:640px){
+  .wrap{padding-bottom:calc(84px + env(safe-area-inset-bottom))}
+  .main-tabs{display:none}
+  .main-tabs.open{display:grid;grid-template-columns:1fr 1fr;gap:4px;background:var(--surface);border:1px solid var(--line);border-radius:var(--r);padding:8px}
+  .main-tabs.open button{text-align:left;padding:10px 12px}
+  .bottom-nav{display:flex;position:fixed;left:0;right:0;bottom:0;z-index:30;background:var(--surface);border-top:1px solid var(--line);padding:4px 4px calc(4px + env(safe-area-inset-bottom))}
+  .bottom-nav button{flex:1;display:flex;flex-direction:column;align-items:center;gap:2px;border:0;background:transparent;color:var(--muted);font:600 11px var(--f);padding:6px 2px;border-radius:8px;cursor:pointer;min-height:48px}
+  .bottom-nav button span{font-size:19px;line-height:1}
+  .bottom-nav button[aria-pressed="true"]{color:var(--accent);background:var(--accent-soft)}
+  .top .sp>span{display:none}
+  .toast{bottom:calc(84px + env(safe-area-inset-bottom));z-index:40}
+}

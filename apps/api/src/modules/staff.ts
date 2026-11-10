@@ -100,6 +100,32 @@ export function staffRoutes(app: FastifyInstance, pool: pg.Pool) {
     }
   };
 
+  // Устройства сотрудника и удалённое завершение сеансов (увольнение, потерянный телефон): FR-MOB-06
+  app.get('/api/staff/:id/sessions', async (req) => {
+    const ctx = requirePerm(req, P.staffManage);
+    const { id } = req.params as { id: string };
+    return withCtx(pool, ctx, async (db) => {
+      await loadUser(db, id);
+      await guardTarget(db, ctx, id);
+      return (await db.query(`select s.id, s.device, s.created_at as "createdAt", coalesce(s.last_seen_at, s.created_at) as "lastSeenAt",
+          exists (select 1 from push_subscriptions p where p.session_id = s.id) as push
+        from sessions s where s.user_id = $1 and s.revoked_at is null and s.expires_at > now() order by coalesce(s.last_seen_at, s.created_at) desc`, [id])).rows;
+    });
+  });
+
+  app.post('/api/staff/:id/sessions/revoke', async (req) => {
+    const ctx = requirePerm(req, P.staffManage);
+    const { id } = req.params as { id: string };
+    return withCtx(pool, ctx, async (db) => {
+      await loadUser(db, id);
+      await guardTarget(db, ctx, id);
+      const n = (await db.query('update sessions set revoked_at = now() where user_id = $1 and revoked_at is null and expires_at > now()', [id])).rowCount ?? 0;
+      await db.query('delete from push_subscriptions where user_id = $1', [id]);
+      await audit(db, ctx, 'staff.sessions_revoked', 'user', id, null, { sessions: n });
+      return { revoked: n };
+    });
+  });
+
   app.post('/api/staff/:id/block', async (req) => {
     const ctx = requirePerm(req, P.staffManage);
     const { id } = req.params as { id: string };
@@ -108,6 +134,7 @@ export function staffRoutes(app: FastifyInstance, pool: pg.Pool) {
       await guardTarget(db, ctx, id);
       await db.query(`update users set status = 'blocked', updated_at = now() where id = $1`, [id]);
       await db.query('update sessions set revoked_at = now() where user_id = $1 and revoked_at is null', [id]);
+      await db.query('delete from push_subscriptions where user_id = $1', [id]);
       const after = await loadUser(db, id);
       await audit(db, ctx, 'staff.blocked', 'user', id, { status: before.status }, { status: after.status });
       return after;

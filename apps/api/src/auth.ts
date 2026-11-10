@@ -36,6 +36,7 @@ export async function loadCtx(pool: pg.Pool, token: string | undefined, ip?: str
     const roles = [...new Set(rows.map((r) => r.role_code as string))];
     const allClubs = rows.some((r) => r.club_id === null);
     const clubIds = [...new Set(rows.filter((r) => r.club_id).map((r) => r.club_id as string))];
+    await db.query(`update sessions set last_seen_at = now() where id = $1 and (last_seen_at is null or last_seen_at < now() - interval '5 minutes')`, [s.session_id]);
     // Скользящее продление сессии для веб-кабинета (12 часов без активности)
     if (!roles.some((r) => MOBILE_ROLES.has(r))) {
       await db.query(
@@ -122,7 +123,10 @@ export function authRoutes(app: FastifyInstance, pool: pg.Pool, opts: { secureCo
 
   app.post('/api/auth/logout', async (req, reply) => {
     if (req.ctx) {
-      await withCtx(pool, req.ctx, (db) => db.query('update sessions set revoked_at = now() where id = $1', [req.ctx!.sessionId]));
+      await withCtx(pool, req.ctx, async (db) => {
+        await db.query('update sessions set revoked_at = now() where id = $1', [req.ctx!.sessionId]);
+        await db.query('delete from push_subscriptions where session_id = $1', [req.ctx!.sessionId]);
+      });
     }
     reply.clearCookie(COOKIE, { path: '/' });
     return { ok: true };

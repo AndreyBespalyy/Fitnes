@@ -2,7 +2,7 @@ import { CallsPage } from './calls.tsx';
 import { HotPage } from './hot.tsx';
 import { DashPage } from './dash.tsx';
 import { useEffect, useState, type FormEvent } from 'react';
-import { api, can, MODEL, MODEL_SHORT, type Club, type Me, type Person, type RoleDef, type Staff } from './api.ts';
+import { api, ApiError, can, clearDeviceData, MODEL, MODEL_SHORT, type Club, type Me, type Person, type RoleDef, type Staff } from './api.ts';
 import { errText, toast as alertOk } from './ui.ts';
 import { BoardPage, LeadsPage, PersonCard, PipelinesAdmin, TasksPage } from './crm.tsx';
 import { TariffsPage } from './memberships.tsx';
@@ -12,10 +12,14 @@ import { FinancePage } from './finance.tsx';
 import { ImportPage } from './importer.tsx';
 import { AccessPage } from './access.tsx';
 import { ChatsPage, MessagingAdmin } from './chat.tsx';
+import { OfflineBar, ProfilePage, registerServiceWorker, StaffSessions } from './mobile.tsx';
 
 export function App() {
   const [me, setMe] = useState<Me | null | undefined>(undefined);
-  useEffect(() => { api<Me>('GET', '/api/auth/me').then(setMe).catch(() => setMe(null)); }, []);
+  const [noNet, setNoNet] = useState(false);
+  const loadMe = () => { setNoNet(false); api<Me>('GET', '/api/auth/me').then(setMe).catch((x) => (x instanceof ApiError && x.code === 'offline' ? setNoNet(true) : setMe(null))); };
+  useEffect(loadMe, []);
+  if (noNet) return <div className="login"><div className="card" style={{ display: 'grid', gap: 10 }}><b>Нет связи с сервером</b><span className="small muted">Проверьте интернет на телефоне и попробуйте снова.</span><button className="btn pri" onClick={loadMe}>Повторить</button></div></div>;
   if (me === undefined) return <div className="login"><span className="muted">Загрузка…</span></div>;
   if (me === null) return <Login onDone={setMe} />;
   if (me.mustChangePassword) return <ChangePassword me={me} forced onDone={() => setMe({ ...me, mustChangePassword: false })} onLogout={() => setMe(null)} />;
@@ -29,7 +33,7 @@ function Login({ onDone }: { onDone: (m: Me) => void }) {
   const [busy, setBusy] = useState(false);
   const submit = async (e: FormEvent) => {
     e.preventDefault(); setErr(''); setBusy(true);
-    try { onDone(await api<Me>('POST', '/api/auth/login', { login, password })); } catch (x) { setErr(errText(x)); } finally { setBusy(false); }
+    try { const m = await api<Me>('POST', '/api/auth/login', { login, password }); clearDeviceData(); onDone(m); } catch (x) { setErr(errText(x)); } finally { setBusy(false); }
   };
   return (
     <div className="login">
@@ -75,12 +79,20 @@ function ChangePassword({ me, forced, onDone, onLogout }: { me: Me; forced?: boo
   );
 }
 
-type Tab = 'dash' | 'hot' | 'calls' | 'leads' | 'board' | 'tasks' | 'home' | 'clubs' | 'tariffs' | 'contracts' | 'site' | 'fiscal' | 'finance' | 'import' | 'chats' | 'access' | 'messaging' | 'pipelines' | 'staff' | 'password';
+type Tab = 'dash' | 'hot' | 'calls' | 'leads' | 'board' | 'tasks' | 'home' | 'clubs' | 'tariffs' | 'contracts' | 'site' | 'fiscal' | 'finance' | 'import' | 'chats' | 'access' | 'messaging' | 'pipelines' | 'staff' | 'profile';
 
 function Shell({ me, onLogout }: { me: Me; onLogout: () => void }) {
   const isAdmin = can(me, 'clubs.manage') || can(me, 'staff.manage');
   const firstTab: Tab = can(me, 'dash.view') || can(me, 'crm.work') ? 'dash' : can(me, 'crm.work') ? 'tasks' : can(me, 'leads.create') ? 'leads' : isAdmin ? 'clubs' : 'home';
-  const [tab, setTab] = useState<Tab>(firstTab);
+  const urlTab = new URLSearchParams(location.search).get('tab') as Tab | null;
+  const [tab, setTabState] = useState<Tab>(urlTab ?? firstTab);
+  const [more, setMore] = useState(false);
+  const setTab = (t: Tab) => { setTabState(t); setMore(false); window.scrollTo(0, 0); };
+  // Нажали на уведомление — открываем нужный раздел
+  useEffect(() => {
+    registerServiceWorker((url) => { const t = new URL(url, location.origin).searchParams.get('tab') as Tab | null; if (t) setTab(t); });
+    if (urlTab) history.replaceState(null, '', '/');
+  }, []);
   const [personId, setPersonId] = useState<string | null>(null);
   const [ver, setVer] = useState(0);
   const [clubs, setClubs] = useState<Club[]>([]);
@@ -88,7 +100,7 @@ function Shell({ me, onLogout }: { me: Me; onLogout: () => void }) {
   const reloadClubs = () => api<Club[]>('GET', '/api/clubs').then(setClubs).catch(() => setClubs([]));
   useEffect(() => { reloadClubs(); }, []);
   useEffect(() => { if (!me.allClubs && clubs.length && clubId === 'all') setClubId(clubs[0].id); }, [clubs]);
-  const logout = async () => { await api('POST', '/api/auth/logout').catch(() => {}); onLogout(); };
+  const logout = async () => { await api('POST', '/api/auth/logout').catch(() => {}); clearDeviceData(); onLogout(); };
   const roleNames = me.roles.map((r) => r.name).join(', ');
   const tabs: [Tab, string, boolean][] = [
     ['dash', 'Рабочий стол', can(me, 'dash.view') || can(me, 'crm.work')],
@@ -110,8 +122,14 @@ function Shell({ me, onLogout }: { me: Me; onLogout: () => void }) {
     ['import', 'Перенос из 1С', can(me, 'import.manage')],
     ['pipelines', 'Воронки', can(me, 'pipelines.manage')],
     ['staff', 'Сотрудники', can(me, 'staff.view')],
-    ['password', 'Пароль', true],
+    ['profile', 'Профиль', true],
   ];
+  const visible = tabs.filter((t) => t[2]);
+  // Нижняя панель на телефоне: главные разделы роли под большим пальцем, остальное — в «Ещё»
+  const PRIMARY: Tab[] = ['dash', 'hot', 'tasks', 'chats', 'home', 'access', 'finance'];
+  const bottom = PRIMARY.filter((k) => visible.some((v) => v[0] === k)).slice(0, 4);
+  const short: Partial<Record<Tab, string>> = { dash: 'Главная', hot: 'Звонить', tasks: 'Задачи', chats: 'Чаты', home: 'Клиенты', access: 'Проходы', finance: 'Финансы' };
+  const icon: Partial<Record<Tab, string>> = { dash: '◧', hot: '☎', tasks: '✓', chats: '✉', home: '☺', access: '⇥', finance: '₽' };
   return (
     <>
       <header className="top">
@@ -125,8 +143,9 @@ function Shell({ me, onLogout }: { me: Me; onLogout: () => void }) {
         <div className="sp"><LocalKktAgent me={me} clubId={clubId} /><span>{me.full_name} · {roleNames}</span><button onClick={logout}>Выйти</button></div>
       </header>
       <main className="wrap">
-        <div className="tabs" role="group" aria-label="Разделы">
-          {tabs.filter((t) => t[2]).map(([k, t]) => <button key={k} aria-pressed={tab === k} onClick={() => setTab(k)}>{t}</button>)}
+        <OfflineBar />
+        <div className={`tabs main-tabs ${more ? 'open' : ''}`} role="group" aria-label="Разделы">
+          {visible.map(([k, t]) => <button key={k} aria-pressed={tab === k} onClick={() => setTab(k)}>{t}</button>)}
         </div>
         {tab === 'dash' && <DashPage me={me} clubs={clubs} clubId={clubId} />}
         {tab === 'hot' && <HotPage me={me} clubs={clubs} clubId={clubId} openPerson={setPersonId} />}
@@ -147,8 +166,12 @@ function Shell({ me, onLogout }: { me: Me; onLogout: () => void }) {
         {tab === 'home' && <Home key={ver} me={me} clubs={clubs} clubId={clubId} openPerson={setPersonId} />}
         {tab === 'clubs' && <Clubs me={me} clubs={clubs} reload={reloadClubs} />}
         {tab === 'staff' && <StaffPage me={me} clubs={clubs} />}
-        {tab === 'password' && <ChangePassword me={me} onDone={() => { alertOk('Пароль изменён'); setTab(firstTab); }} />}
+        {tab === 'profile' && <ProfilePage me={me} passwordForm={<ChangePassword me={me} onDone={() => { alertOk('Пароль изменён'); setTab(firstTab); }} />} />}
       </main>
+      <nav className="bottom-nav" aria-label="Главные разделы">
+        {bottom.map((k) => <button key={k} aria-pressed={tab === k && !more} onClick={() => setTab(k)}><span aria-hidden="true">{icon[k]}</span>{short[k]}</button>)}
+        <button aria-pressed={more || !bottom.includes(tab)} onClick={() => { setMore(!more); window.scrollTo(0, 0); }}><span aria-hidden="true">☰</span>Ещё</button>
+      </nav>
       {personId && <PersonCard me={me} id={personId} onClose={() => { setPersonId(null); setVer((v) => v + 1); }} />}
     </>
   );
@@ -280,6 +303,7 @@ function StaffPage({ me, clubs }: { me: Me; clubs: Club[] }) {
   const [clubId, setClubId] = useState('');
   const [err, setErr] = useState('');
   const [issued, setIssued] = useState<{ name: string; login: string; password: string } | null>(null);
+  const [sess, setSess] = useState<Staff | null>(null);
   const reload = () => api<Staff[]>('GET', '/api/staff').then(setStaff).catch((x) => setErr(errText(x)));
   useEffect(() => { reload(); api<RoleDef[]>('GET', '/api/roles').then(setRoles).catch(() => {}); }, []);
   useEffect(() => { if (!clubId && clubs[0]) setClubId(clubs[0].id); }, [clubs]);
@@ -326,6 +350,7 @@ function StaffPage({ me, clubs }: { me: Me; clubs: Club[] }) {
         </form>
       )}
       {err && <div className="err">{err}</div>}
+      {sess && <StaffSessions userId={sess.id} name={sess.fullName} onClose={() => setSess(null)} />}
       <div className="card"><div className="tbl"><table>
         <thead><tr><th>Сотрудник</th><th>Логин</th><th>Роль</th><th>Клуб</th><th>Статус</th>{manage && <th />}</tr></thead>
         <tbody>{staff.map((s) => (
@@ -336,6 +361,7 @@ function StaffPage({ me, clubs }: { me: Me; clubs: Club[] }) {
             <td>{s.status === 'active' ? <span className="chip ok">{s.mustChangePassword ? 'ждёт смены пароля' : 'активен'}</span> : <span className="chip bad">заблокирован</span>}</td>
             {manage && <td className="r">{s.id !== me.id && !s.assignments.some((a) => a.role === 'owner') && (
               <span className="row" style={{ justifyContent: 'flex-end' }}>
+                {s.status === 'active' && <button className="btn sm" onClick={() => setSess(s)}>Устройства</button>}
                 <button className="btn sm" onClick={() => act(s, 'reset-password')}>Новый пароль</button>
                 <button className="btn sm" onClick={() => act(s, s.status === 'active' ? 'block' : 'unblock')}>{s.status === 'active' ? 'Заблокировать' : 'Вернуть'}</button>
               </span>)}</td>}

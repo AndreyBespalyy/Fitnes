@@ -23,11 +23,12 @@ import { bankRoutes } from './modules/bank.ts';
 import { dashRoutes } from './modules/dash.ts';
 import { aiRoutes, startAiWorker } from './modules/ai.ts';
 import { aiSalesRoutes, startScoringWorker } from './modules/aiSales.ts';
+import { mobileRoutes, startPushWorker } from './modules/mobile.ts';
 import { aiConfigFromEnv, type AiConfig } from './lib/aiClient.ts';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-export async function buildApp(pool: pg.Pool, opts: { webDist?: string; secureCookie?: boolean; logger?: boolean; storageDir?: string; fiscalWorker?: boolean; messagingWorker?: boolean; billingWorker?: boolean; aiWorker?: boolean; scoringWorker?: boolean; ai?: AiConfig | null; fetch?: typeof fetch } = {}) {
+export async function buildApp(pool: pg.Pool, opts: { webDist?: string; secureCookie?: boolean; logger?: boolean; storageDir?: string; fiscalWorker?: boolean; messagingWorker?: boolean; billingWorker?: boolean; aiWorker?: boolean; scoringWorker?: boolean; pushWorker?: boolean; ai?: AiConfig | null; fetch?: typeof fetch } = {}) {
   const app = Fastify({ logger: opts.logger ?? false, trustProxy: true });
   await app.register(cookie);
 
@@ -76,15 +77,26 @@ export async function buildApp(pool: pg.Pool, opts: { webDist?: string; secureCo
   const ai = opts.ai !== undefined ? opts.ai : aiConfigFromEnv(opts.fetch ?? fetch);
   aiRoutes(app, pool, storage, ai);
   aiSalesRoutes(app, pool);
+  mobileRoutes(app, pool, { fetch: opts.fetch });
   // Фоновая отправка чеков в облачную кассу (в тестах выключена, там вызывается напрямую)
   if (opts.messagingWorker) { const stop = startMessagingWorker(pool, opts.fetch); app.addHook('onClose', async () => stop()); }
   if (opts.billingWorker) { const stop = startBillingWorker(pool, opts.fetch); app.addHook('onClose', async () => stop()); }
+  if (opts.pushWorker) { const stop = startPushWorker(pool, opts.fetch ?? fetch); app.addHook('onClose', async () => stop()); }
   if (opts.scoringWorker) { const stop = startScoringWorker(pool); app.addHook('onClose', async () => stop()); }
   if (opts.aiWorker) { const stop = startAiWorker(pool, ai, storage); app.addHook('onClose', async () => stop()); }
   if (opts.fiscalWorker) { const stop = startFiscalWorker(pool); app.addHook('onClose', async () => stop()); }
 
   if (opts.webDist && existsSync(opts.webDist)) {
-    await app.register(fstatic, { root: opts.webDist });
+    // Служебный файл приложения (sw.js), манифест и index.html не кэшируются, чтобы обновления доходили до телефонов сразу
+    await app.register(fstatic, {
+      root: opts.webDist,
+      cacheControl: false,
+      setHeaders: (res, path) => {
+        if (/[\\/]assets[\\/]/.test(path)) res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+        else res.setHeader('Cache-Control', 'no-cache');
+        if (path.endsWith('sw.js')) res.setHeader('Service-Worker-Allowed', '/');
+      },
+    });
     app.setNotFoundHandler((req, reply) => {
       if (req.url.startsWith('/api/')) return reply.code(404).send({ error: 'not_found', message: 'Не найдено' });
       return reply.sendFile('index.html');

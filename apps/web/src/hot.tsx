@@ -1,4 +1,5 @@
 // Шаг 15. ИИ-помощник продаж: план дня, горячий список с предложением, теневой режим.
+import { DialButton } from './mobile.tsx';
 import { useEffect, useState } from 'react';
 import { api, can, type Club, type Me } from './api.ts';
 import { dt, errText, toast } from './ui.ts';
@@ -51,7 +52,7 @@ function HotItem({ r, openPerson, reload, showOwner }: { r: HotRow; openPerson: 
       {r.reasons.length > 0 && <Reasons r={r.reasons} />}
       {r.offer?.text && <div className="small"><b>Предложение:</b> {r.offer.text}</div>}
       <div className="small muted">{r.phone ?? 'телефона нет'}{r.lastContactAt ? ` · последний контакт ${dt(r.lastContactAt)}` : ' · ещё не общались'}{r.nextTaskAt ? ` · задача на ${dt(r.nextTaskAt)}` : ''}{showOwner ? ` · ${r.ownerName ?? 'общий список клуба'}` : ''}</div>
-      <div className="row">{r.segment !== 'excluded' && <Take row={r} onDone={reload} />}<button className="btn sm" onClick={() => openPerson(r.personId)}>Карточка</button></div>
+      <div className="row">{r.segment !== 'excluded' && <Take row={r} onDone={reload} />}{r.phone && r.segment !== 'excluded' && <DialButton personId={r.personId} />}<button className="btn sm" onClick={() => openPerson(r.personId)}>Карточка</button></div>
     </div>
   );
 }
