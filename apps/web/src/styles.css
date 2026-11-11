@@ -238,3 +238,4 @@ a.btn{text-decoration:none;color:inherit}
 .fc{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:8px;align-items:end}
 .fc-day{display:grid;gap:2px;justify-items:center;text-align:center}
 .fc-bar{width:70%;max-width:44px;background:var(--accent);border-radius:4px 4px 0 0}
+.heat.coh td,.heat.coh th{min-width:64px;padding:4px 6px;font-size:12px}
