@@ -9,6 +9,7 @@ import { verifyPassword } from '../passwords.ts';
 import { PERMISSIONS as P } from '../roles.ts';
 import { receiptForRefund } from './fiscal.ts';
 import { addDays, clubToday, daysBetween } from './memberships.ts';
+import { applyDiscountDecision, discountLimit } from './promos.ts';
 
 type Actor = Pick<Ctx, 'tenantId' | 'userId' | 'ip'> & Partial<Pick<Ctx, 'permissions' | 'roles'>>;
 const rubs = (kop: number) => `${(kop / 100).toLocaleString('ru-RU')} ₽`;
@@ -42,6 +43,13 @@ async function limitOf(db: Db, userId: string, clubId: string, kind: string): Pr
   if (roles.some((r) => (r.permissions as string[]).includes('*'))) return null;
   const lim = (await db.query(`select max(max_amount_kop) as m from approval_limits where kind = $1 and role_code = any($2)`, [kind, roles.map((r) => r.role_code)])).rows[0].m;
   return lim === null ? 0 : Number(lim);
+}
+
+/** Может ли сотрудник утвердить: для скидки сравнивается процент, для возврата и расхода — сумма. */
+async function withinLimit(db: Db, userId: string, clubId: string, kind: string, amountKop: number, percent: unknown) {
+  if (kind === 'discount') { const l = await discountLimit(db, userId, clubId); return l === null || l >= Number(percent ?? 0); }
+  const lim = await limitOf(db, userId, clubId, kind);
+  return lim === null || lim >= amountKop;
 }
 
 /** Создаёт согласование. Если сумма в пределах лимита самого сотрудника, оно утверждается сразу. */
@@ -102,6 +110,7 @@ async function executeRefund(db: Db, ctx: Actor, refundId: string) {
 }
 
 async function applyDecision(db: Db, ctx: Actor, ap: { kind: string; object_id: string }, approved: boolean) {
+  if (ap.kind === 'discount') await applyDiscountDecision(db, ap.object_id, approved);
   if (ap.kind === 'refund') {
     if (approved) { await db.query(`update refunds set status = 'approved' where id = $1`, [ap.object_id]); await executeRefund(db, ctx, ap.object_id); }
     else await db.query(`update refunds set status = 'rejected' where id = $1`, [ap.object_id]);
@@ -178,15 +187,14 @@ export function financeRoutes(app: FastifyInstance, pool: pg.Pool) {
     const { status, clubId } = req.query as { status?: string; clubId?: string };
     return withCtx(pool, ctx, async (db) => {
       const rows = (await db.query(`select a.id, a.club_id as "clubId", c.name as "clubName", a.kind, a.amount_kop::bigint as "amountKop", a.summary, a.status, a.auto,
-          a.requested_at as "requestedAt", ur.full_name as "requestedBy", a.requested_by as "requestedById", ud.full_name as "decidedBy", a.decided_at as "decidedAt", a.decision_comment as "comment"
+          a.requested_at as "requestedAt", ur.full_name as "requestedBy", a.requested_by as "requestedById", ud.full_name as "decidedBy", a.decided_at as "decidedAt", a.decision_comment as "comment", a.percent::float as percent
         from approvals a join clubs c on c.id = a.club_id left join users ur on ur.id = a.requested_by left join users ud on ud.id = a.decided_by
         where ($1::text is null or a.status = $1) and ($2::uuid is null or a.club_id = $2) order by a.requested_at desc limit 100`, [status || null, clubId || null])).rows;
       const out = [];
       for (const r of rows) {
         let canDecide = false;
         if (r.status === 'pending' && can(ctx, P.approvalsDecide) && r.requestedById !== ctx.userId) {
-          const lim = await limitOf(db, ctx.userId, r.clubId, r.kind);
-          canDecide = lim === null || lim >= Number(r.amountKop);
+          canDecide = await withinLimit(db, ctx.userId, r.clubId, r.kind, Number(r.amountKop), r.percent);
         }
         out.push({ ...r, amountKop: Number(r.amountKop), canDecide });
       }
@@ -209,7 +217,9 @@ export function financeRoutes(app: FastifyInstance, pool: pg.Pool) {
       if (!ap) throw notFound('Согласование не найдено');
       if (ap.status !== 'pending') throw badRequest('По этому запросу уже принято решение');
       if (ap.requested_by === ctx.userId) throw forbidden('Свой запрос утверждает другой сотрудник');
-      const lim = await limitOf(db, ctx.userId, ap.club_id, ap.kind);
+      if (ap.kind === 'discount' && !(await withinLimit(db, ctx.userId, ap.club_id, ap.kind, 0, ap.percent)))
+        throw forbidden(`Скидка ${Number(ap.percent)} % больше вашего лимита. Решение принимает собственник`);
+      const lim = ap.kind === 'discount' ? null : await limitOf(db, ctx.userId, ap.club_id, ap.kind);
       if (lim !== null && lim < Number(ap.amount_kop)) throw forbidden(`Сумма ${rubs(Number(ap.amount_kop))} больше вашего лимита на ${KIND_NAME[ap.kind]} (${rubs(lim)}). Решение принимает собственник`);
       const approved = decision === 'approve';
       await db.query(`update approvals set status = $2, decided_by = $3, decided_at = now(), decision_comment = $4 where id = $1`, [id, approved ? 'approved' : 'rejected', ctx.userId, comment?.trim() || null]);

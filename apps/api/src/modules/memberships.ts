@@ -8,6 +8,7 @@ import { PERMISSIONS as P } from '../roles.ts';
 import { contractsByMembership, createContract } from './contracts.ts';
 import { receiptForCharge } from './fiscal.ts';
 import { recordPayment } from './finance.ts';
+import { resolveDiscount, type DiscountInput } from './promos.ts';
 
 /* ---------- даты (строки YYYY-MM-DD, без часовых сдвигов) ---------- */
 const D = (s: string) => new Date(`${s}T00:00:00Z`);
@@ -111,7 +112,7 @@ export async function personMemberships(db: Db, personId: string) {
 }
 
 /* ---------- продажа и продление ---------- */
-export type SaleInput = { personId?: string; productId?: string; startsOn?: string; installments?: number; renewFromId?: string; confirmDuplicate?: boolean };
+export type SaleInput = { personId?: string; productId?: string; startsOn?: string; installments?: number; renewFromId?: string; confirmDuplicate?: boolean } & DiscountInput;
 
 async function currentPrice(db: Db, productId: string) {
   return (await db.query('select id, amount_kop from price_versions where product_id = $1 and valid_from <= now() order by valid_from desc limit 1', [productId])).rows[0];
@@ -167,7 +168,13 @@ export async function sellMembership(db: Db, ctx: Pick<Ctx, 'tenantId' | 'userId
     if (!s.installmentsEnabled || !prod.installments_allowed) throw badRequest('Для этого тарифа рассрочка не предусмотрена');
     if (n > s.installmentsMaxPayments) throw badRequest(`Рассрочка не больше ${s.installmentsMaxPayments} платежей`);
   }
-  const amount = Number(price.amount_kop);
+  // Категория продажи для плана: подписка, продление, возобновление (уже был клиентом) или новая продажа
+  const before = (await db.query(`select count(*)::int as n from memberships where person_id = $1 and club_id = $2`, [b.personId, prod.club_id])).rows[0].n;
+  const category = prod.kind === 'subscription' ? 'subscription' : renewedFrom ? 'renewal' : before > 0 ? 'return' : 'new';
+  // Скидка: промокод, ручная в пределах лимита продавца или согласованная. Цена по тарифу сохраняется для отчёта по акциям
+  const listPrice = Number(price.amount_kop);
+  const disc = await resolveDiscount(db, ctx, b, { personId: b.personId!, productId: prod.id, clubId: prod.club_id, category, amountKop: listPrice, today });
+  const amount = listPrice - disc.discountKop;
   let endsOn: string | null = null;
   let visits: number | null = null;
   let nextCharge: string | null = null;
@@ -178,15 +185,13 @@ export async function sellMembership(db: Db, ctx: Pick<Ctx, 'tenantId' | 'userId
   }
   if (prod.kind === 'subscription') { endsOn = addDays(addMonths(startsOn, 1), -1); nextCharge = addMonths(startsOn, 1); }
 
-  // Категория продажи для плана: подписка, продление, возобновление (уже был клиентом) или новая продажа
-  const before = (await db.query(`select count(*)::int as n from memberships where person_id = $1 and club_id = $2`, [b.personId, prod.club_id])).rows[0].n;
-  const category = prod.kind === 'subscription' ? 'subscription' : renewedFrom ? 'renewal' : before > 0 ? 'return' : 'new';
   const id = (await db.query(
     `insert into memberships(tenant_id, club_id, person_id, product_id, price_version_id, kind, product_name, amount_kop, starts_on, ends_on, visits_left,
-       installments, next_charge_on, renewed_from_id, created_by, sale_category, network_access, access_from, access_to)
-       values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19) returning id`,
+       installments, next_charge_on, renewed_from_id, created_by, sale_category, network_access, access_from, access_to,
+       list_price_kop, discount_kop, promo_id, discount_request_id)
+       values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23) returning id`,
     [ctx.tenantId, prod.club_id, b.personId, prod.id, price.id, prod.kind, prod.name, amount, startsOn, endsOn, visits, n, nextCharge, renewedFrom, ctx.userId, category,
-      prod.network_access ?? false, prod.access_from ?? null, prod.access_to ?? null])).rows[0].id;
+      prod.network_access ?? false, prod.access_from ?? null, prod.access_to ?? null, listPrice, disc.discountKop, disc.promoId, disc.requestId])).rows[0].id;
 
   // График платежей: первый платёж в день продажи, остальные помесячно
   const part = Math.floor(amount / n);
@@ -198,11 +203,11 @@ export async function sellMembership(db: Db, ctx: Pick<Ctx, 'tenantId' | 'userId
       [ctx.tenantId, prod.club_id, id, b.personId, kind, title, i === 0 ? today : addMonths(today, i), sum]);
   }
   await db.query('insert into membership_operations(tenant_id, club_id, membership_id, kind, params, actor_id) values ($1,$2,$3,$4,$5,$6)',
-    [ctx.tenantId, prod.club_id, id, renewedFrom ? 'renewal' : 'sale', JSON.stringify({ productId: prod.id, priceVersionId: price.id, amountKop: amount, installments: n, startsOn, renewedFrom }), ctx.userId]);
+    [ctx.tenantId, prod.club_id, id, renewedFrom ? 'renewal' : 'sale', JSON.stringify({ productId: prod.id, priceVersionId: price.id, amountKop: amount, listPriceKop: listPrice, discountKop: disc.discountKop, discount: disc.label, installments: n, startsOn, renewedFrom }), ctx.userId]);
   const contract = await createContract(db, ctx, id);
   await db.query(`update persons set segment = case when $2 = 'subscription' then 'активный подписчик' else 'действующий' end, updated_at = now() where id = $1`, [b.personId, prod.kind]);
   if (lockedOffer) await db.query(`update renewal_offers set status = 'used', used_membership_id = $2 where id = $1`, [lockedOffer, id]);
-  await audit(db, ctx, renewedFrom ? 'membership.renewed' : 'membership.sold', 'membership', id, null, { productId: prod.id, amountKop: amount, installments: n, startsOn, endsOn, renewalOffer: lockedOffer });
+  await audit(db, ctx, renewedFrom ? 'membership.renewed' : 'membership.sold', 'membership', id, null, { productId: prod.id, amountKop: amount, listPriceKop: listPrice, discountKop: disc.discountKop, discount: disc.label, promoId: disc.promoId, installments: n, startsOn, endsOn, renewalOffer: lockedOffer });
   return { id, startsOn, endsOn, contractId: contract.id, contractNumber: contract.number };
 }
 
@@ -423,7 +428,8 @@ export function membershipRoutes(app: FastifyInstance, pool: pg.Pool) {
     const b = (req.body ?? {}) as SaleInput;
     const res = await withCtx(pool, ctx, async (db) => {
       const m = await loadMembership(db, id);
-      return sellMembership(db, ctx, { personId: m.person_id, productId: b.productId ?? m.product_id, installments: b.installments, renewFromId: id });
+      return sellMembership(db, ctx, { personId: m.person_id, productId: b.productId ?? m.product_id, installments: b.installments, renewFromId: id,
+        promoCode: b.promoCode, promoId: b.promoId, discountPercent: b.discountPercent, discountRequestId: b.discountRequestId });
     });
     reply.code(201);
     return res;

@@ -5,6 +5,7 @@ import { api, can, type Club, type Me } from './api.ts';
 import { errText, toast } from './ui.ts';
 import { ContractLine, type ContractBrief } from './contracts.tsx';
 import { RefundForm } from './finance.tsx';
+import { PromosBlock, SaleDiscount, type SaleDiscountValue } from './promos.tsx';
 
 export type Settings = {
   freezeEnabled: boolean; freezeMaxDaysPerYear: number; freezeMaxTimesPerYear: number; freezeMinDays: number; freezePaid: boolean; freezePriceKop: number;
@@ -48,6 +49,7 @@ export function TariffsPage({ me, clubs, clubId }: { me: Me; clubs: Club[]; club
       </div>
       <SettingsForm key={`s${club}`} club={c} manage={manage} />
       <Products key={`p${club}`} club={c} manage={manage} />
+      <PromosBlock key={`a${club}`} club={c} manage={manage} />
     </>
   );
 }
@@ -185,6 +187,7 @@ export function MembershipsBlock({ me, personId, homeClubId }: { me: Me; personI
   const [productId, setProductId] = useState('');
   const [inst, setInst] = useState(1);
   const [maxInst, setMaxInst] = useState(1);
+  const [discount, setDiscount] = useState<SaleDiscountValue>({});
   const [freeze, setFreeze] = useState<{ id: string; days: number; startsOn: string } | null>(null);
   const [cancel, setCancel] = useState<{ id: string; reason: string } | null>(null);
   const [refund, setRefund] = useState<string | null>(null);
@@ -221,8 +224,9 @@ export function MembershipsBlock({ me, personId, homeClubId }: { me: Me; personI
           {prod?.installmentsAllowed && maxInst > 1 && (
             <label className="f">Оплата<select value={inst} onChange={(e) => setInst(Number(e.target.value))}>
               {Array.from({ length: maxInst }, (_, i) => i + 1).map((n) => <option key={n} value={n}>{n === 1 ? 'Сразу полностью' : `Рассрочка: ${n} ${n < 5 ? 'платежа' : 'платежей'} по ${rub(Math.floor((prod.priceKop ?? 0) / n))}`}</option>)}</select></label>)}
+          <SaleDiscount key={productId} personId={personId} product={prod} clubId={prod?.clubId} onChange={setDiscount} />
           <div className="row">
-            <button className="btn pri sm" disabled={!productId} onClick={() => act(() => api('POST', '/api/memberships', { personId, productId, installments: inst }), `Продано: ${prod?.name}. Платёж ждёт оплаты`)}>Оформить</button>
+            <button className="btn pri sm" disabled={!productId} onClick={() => act(() => api('POST', '/api/memberships', { personId, productId, installments: inst, ...discount }), `Продано: ${prod?.name}. Платёж ждёт оплаты`)}>Оформить</button>
             <button className="btn sm" onClick={() => setSell(false)}>Отмена</button>
           </div>
         </div>)}

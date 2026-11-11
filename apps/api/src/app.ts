@@ -31,6 +31,7 @@ import { onboardingRoutes } from './modules/onboarding.ts';
 import { scheduleRoutes, startScheduleWorker } from './modules/schedule.ts';
 import { retentionRoutes, startRetentionWorker } from './modules/retention.ts';
 import { startSurveyWorker, surveyRoutes } from './modules/surveys.ts';
+import { promoRoutes } from './modules/promos.ts';
 import { staffBotRoutes } from './modules/staffBot.ts';
 import { morningRoutes, startStaffBotWorker } from './modules/morning.ts';
 import { mobileRoutes, startPushWorker } from './modules/mobile.ts';
@@ -115,6 +116,7 @@ export async function buildApp(pool: pg.Pool, opts: { webDist?: string; secureCo
   scheduleRoutes(app, pool, { fetch: opts.fetch });
   retentionRoutes(app, pool, { fetch: opts.fetch });
   surveyRoutes(app, pool);
+  promoRoutes(app, pool);
   staffBotRoutes(app, pool, { fetch: opts.fetch });
   morningRoutes(app, pool, { fetch: opts.fetch });
   // Фоновая отправка чеков в облачную кассу (в тестах выключена, там вызывается напрямую)
