@@ -3,8 +3,9 @@
 import { useEffect, useState } from 'react';
 import { api, type Club, type Me } from './api.ts';
 import { errText, toast } from './ui.ts';
+import { RulesDiff, RulesEditor, RulesJournal, type Rule } from './rulesEditor.tsx';
 
-type Field = { path: string; section: string; label: string; type: 'int' | 'num' | 'bool' | 'text' | 'checklist' | 'money'; min?: number; max?: number; unit?: string; nullable?: boolean; hint?: string };
+type Field = { path: string; section: string; label: string; type: 'int' | 'num' | 'bool' | 'text' | 'checklist' | 'money' | 'rules'; min?: number; max?: number; unit?: string; nullable?: boolean; hint?: string };
 type Item = { id: string; text: string; weight: number };
 type Version = { id: string; number: number; status: string; source: string; title: string; createdAt: string; createdBy: string | null; approvedAt: string | null; approvedBy: string | null;
   publishedAt: string | null; publishedBy: string | null; aiRequest: string | null; checksOk: boolean | null; checkedCurrent: boolean | null };
@@ -97,6 +98,7 @@ export function ConfigPage({ me, clubs, clubId }: { me: Me; clubs: Club[]; clubI
           {changes.length > 0 && <button className="btn sm" onClick={() => { setEdits({}); setBt(null); }}>Сбросить правки</button>}
         </div>
         {bt && <BacktestList items={bt} empty="Для этих изменений проверка на истории не нужна." />}
+        {sec === 'rules' && <RulesJournal clubId={club.id} />}
       </div>
 
       <div className="card" style={{ display: 'grid', gap: 8 }}>
@@ -127,6 +129,7 @@ export function ConfigPage({ me, clubs, clubId }: { me: Me; clubs: Club[]; clubI
 
 function FieldEdit({ f, live, value, changed, onChange }: { f: Field; live: unknown; value: unknown; changed: boolean; onChange: (v: unknown) => void }) {
   const lab = <span>{f.label}{changed && <span className="small muted"> · было {show(f, live)}</span>}</span>;
+  if (f.type === 'rules') return <RulesEditor value={(value as Rule[]) ?? []} changed={changed} onChange={onChange} />;
   if (f.type === 'checklist') return <Checklist items={(value as Item[]) ?? []} changed={changed} onChange={onChange} />;
   if (f.type === 'bool') return <label className="row" style={{ gap: 8, fontWeight: changed ? 600 : undefined }}><input type="checkbox" style={{ width: 'auto' }} checked={!!value} onChange={(e) => onChange(e.target.checked)} />{lab}</label>;
   if (f.type === 'text') return <label className="f">{lab}<textarea rows={2} value={String(value ?? '')} onChange={(e) => onChange(e.target.value)} /></label>;
@@ -204,8 +207,8 @@ function VersionView({ id, fields, onClose, onChanged, onOpen }: { id: string; f
       <div style={{ overflowX: 'auto' }}>
         <table className="tbl"><thead><tr><th>Настройка</th><th>Было</th><th>Станет</th></tr></thead>
           <tbody>{v.diff.map((d) => (
-            <tr key={d.path}><td>{d.label}</td><td className="num muted">{fieldOf(d.path)?.type === 'checklist' ? <ItemsList items={d.from as Item[]} /> : show(fieldOf(d.path), d.from)}</td>
-              <td className="num"><b>{fieldOf(d.path)?.type === 'checklist' ? <ItemsList items={d.to as Item[]} /> : show(fieldOf(d.path), d.to)}</b></td></tr>))}
+            <tr key={d.path}><td>{d.label}</td><td className="num muted">{fieldOf(d.path)?.type === 'rules' ? <RulesDiff from={null} to={d.from as Rule[]} /> : fieldOf(d.path)?.type === 'checklist' ? <ItemsList items={d.from as Item[]} /> : show(fieldOf(d.path), d.from)}</td>
+              <td className="num"><b>{fieldOf(d.path)?.type === 'rules' ? <RulesDiff from={d.from as Rule[]} to={d.to as Rule[]} /> : fieldOf(d.path)?.type === 'checklist' ? <ItemsList items={d.to as Item[]} /> : show(fieldOf(d.path), d.to)}</b></td></tr>))}
             {!v.diff.length && <tr><td colSpan={3} className="small muted">Изменений нет</td></tr>}</tbody></table>
       </div>
       {v.checks && (

@@ -4,6 +4,7 @@
 // Досрочное продление: за N дней до конца абонемента клиенту предлагают продлиться по текущей цене, цена держится до конца абонемента.
 import { processLoyalty } from './loyalty.ts';
 import { pnlAlerts } from './pnl.ts';
+import { processRules } from './rules.ts';
 import type { FastifyInstance } from 'fastify';
 import type pg from 'pg';
 import { requirePerm } from '../auth.ts';
@@ -187,6 +188,8 @@ export async function processRetention(pool: pg.Pool, f: Fetch | null) {
         await processOnlineOrders(db, f, actor, c.id);
         // Предложения уходят только в рабочее время клуба
         if (c.h >= Math.max(11, c.wf) && c.h < c.wt) { await earlyRenewals(db, f, actor, c.id, c.today); await churnPlays(db, f, actor, c.id); }
+        // Правила «если — то» управляющего: тоже только в рабочее время
+        if (c.h >= c.wf && c.h < c.wt) await processRules(db, f, actor, c.id, c.today);
       }).catch((e) => console.error('Удержание:', (e as Error).message));
       await withCtx(pool, sys, (db) => processLoyalty(db, tenantId, c.id)).catch((e) => console.error('Баллы:', (e as Error).message));
       // Сигнал собственнику о прибыли — по закрытым месяцам, со 2-го по 5-е число в 9 утра (повторно не шлём)

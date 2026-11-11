@@ -1,6 +1,7 @@
 // Шаг 18, часть 2. Настройки клуба как версии (FR-CFG-03/05/06/08/09/12; AT08–AT10, AT39).
 // Черновик → проверка (данные, права, не поменялось ли рабочее, проверка на истории) → утверждение → публикация → откат.
 // ИИ-помощник только готовит черновик: рабочие настройки меняет человек, утвердив конкретное содержимое.
+import { backtestRule, normRules, readRules, validateRules, writeRules, type Rule } from './rules.ts';
 import { createHash } from 'node:crypto';
 import type { FastifyInstance } from 'fastify';
 import type pg from 'pg';
@@ -13,7 +14,7 @@ import { DEFAULT_NORMS, KPI } from './dash.ts';
 import { candidates } from './messaging.ts';
 
 /* ---------- что настраивается ---------- */
-type FieldType = 'int' | 'num' | 'bool' | 'text' | 'checklist' | 'money';
+type FieldType = 'int' | 'num' | 'bool' | 'text' | 'checklist' | 'money' | 'rules';
 export type Field = { path: string; section: string; label: string; type: FieldType; min?: number; max?: number; unit?: string; nullable?: boolean; hint?: string };
 export type ChecklistItem = { id: string; text: string; weight: number };
 
@@ -24,6 +25,7 @@ export const SECTIONS: { id: string; title: string; perm: string }[] = [
   { id: 'messaging', title: 'Сообщения клиентам', perm: P.messagesManage },
   { id: 'ai', title: 'Звонки и ИИ', perm: P.planManage },
   { id: 'sales', title: 'Стандарт продаж: чек-лист разговора', perm: P.planManage },
+  { id: 'rules', title: 'Правила «если — то»', perm: P.retentionManage },
 ];
 
 export const EVENT_NAMES: Record<string, { name: string; days: string }> = {
@@ -84,6 +86,7 @@ export function fieldsFor(events: string[]): Field[] {
   }
   f.push({ path: 'ai.fillControlHours', section: 'ai', label: 'Итог звонка проверить через', type: 'int', min: 1, max: 72, unit: 'ч' });
   f.push({ path: 'sales.items', section: 'sales', label: 'Пункты чек-листа разговора', type: 'checklist' });
+  f.push({ path: 'rules.list', section: 'rules', label: 'Правила «если — то»', type: 'rules' });
   return f;
 }
 
@@ -116,6 +119,7 @@ export async function readLive(db: Db, clubId: string): Promise<ConfigDoc> {
     },
     ai: { fillControlHours: ai?.fill_control_hours ?? 2 },
     sales: { items: (std?.items as ChecklistItem[]) ?? DEFAULT_CHECKLIST },
+    rules: { list: await readRules(db, clubId) },
   };
 }
 
@@ -150,6 +154,7 @@ export function coerce(f: Field, v: unknown): unknown {
   if (f.type === 'bool') { if (typeof v === 'boolean') return v; if (v === 'true' || v === 1) return true; if (v === 'false' || v === 0) return false; throw badRequest(`${f.label}: да или нет`); }
   if (f.type === 'text') { if (typeof v !== 'string') throw badRequest(`${f.label}: нужен текст`); return v.trim(); }
   if (f.type === 'checklist') return normChecklist(v);
+  if (f.type === 'rules') return normRules(v);
   if ((v === null || v === '') && f.nullable) return null;
   const n = typeof v === 'string' ? Number(v.replace(',', '.').replace(/\s/g, '')) : Number(v);
   if (!Number.isFinite(n)) throw badRequest(`${f.label}: нужно число`);
@@ -170,6 +175,7 @@ export function validateDoc(doc: ConfigDoc, fields: Field[]): string[] {
   const errs: string[] = []; const fl = flatten(doc);
   for (const f of fields) {
     const v = fl[f.path];
+    if (f.type === 'rules') { const list = getPath(doc, f.path); if (list !== undefined) errs.push(...validateRules(Array.isArray(list) ? (list as Rule[]) : [])); continue; }
     if (f.type === 'checklist') {
       const items = getPath(doc, f.path) as ChecklistItem[];
       if (!Array.isArray(items) || !items.length || items.length > 20) { errs.push('Чек-лист разговора: от 1 до 20 пунктов'); continue; }
@@ -220,6 +226,8 @@ async function applyPaths(db: Db, ctx: Ctx, clubId: string, doc: ConfigDoc, path
     } else if (p === 'ai.fillControlHours') {
       await db.query(`insert into ai_settings(club_id, tenant_id, fill_control_hours, updated_by) values ($1,$2,$3,$4)
         on conflict (club_id) do update set fill_control_hours = excluded.fill_control_hours, updated_by = excluded.updated_by, updated_at = now()`, [clubId, ctx.tenantId, v(p), ctx.userId]);
+    } else if (p === 'rules.list') {
+      await writeRules(db, ctx, clubId, v(p) as Rule[], versionId);
     } else if (p === 'sales.items') {
       const no = Number((await db.query('select coalesce(max(version_no), 0) + 1 as n from sales_standards where club_id = $1', [clubId])).rows[0].n);
       await db.query('insert into sales_standards(tenant_id, club_id, version_no, items, config_version_id, created_by) values ($1,$2,$3,$4,$5,$6)',
@@ -301,6 +309,20 @@ export async function runBacktests(db: Db, clubId: string, base: ConfigDoc, next
       from leads where club_id = $1 and created_at > now() - interval '30 days'`, [clubId, nv, ov])).rows[0];
     out.push({ path: 'club.firstResponseMinutes', title: 'Срок первого ответа',
       summary: `За 30 дней ${r.total} заявок: с новым сроком ${nv} мин просроченными были бы ${r.late_new}.`, before: `С действующим сроком ${ov} мин: ${r.late_old}.` });
+  }
+  if (diff.some((d) => d.path === 'rules.list')) {
+    const was = new Map(((getPath(base, 'rules.list') as Rule[]) ?? []).map((r) => [r.id, stable(r)]));
+    const list = ((getPath(next, 'rules.list') as Rule[]) ?? []);
+    for (const r of list) {
+      if (was.get(r.id) === stable(r)) continue;
+      if (!r.enabled) { out.push({ path: `rules.${r.id}`, title: `Правило «${r.name}»`, summary: 'Будет выключено: новых запусков не будет, начатые цепочки остановятся.' }); continue; }
+      if (validateRules([r]).length) continue;
+      const b = await backtestRule(db, clubId, r, today);
+      out.push({ path: `rules.${r.id}`, title: `Правило «${r.name}»`,
+        summary: `Если бы правило действовало последние 30 дней: сработало бы ${b.fires} раз у ${b.persons} клиентов — ${b.messages} сообщ., ${b.tasks} задач${b.blocked ? `; ${b.blocked} клиентов без согласия или отписались — им сообщения не уйдут` : ''}. Сразу после публикации подойдут ${b.now} клиентов.`,
+        before: was.has(r.id) ? 'Правило уже действовало, меняется его содержание.' : 'Новое правило.', sample: b.sample });
+    }
+    for (const id of was.keys()) if (!list.some((r) => r.id === id)) out.push({ path: `rules.${id}`, title: 'Правило удалено', summary: 'Начатые по нему цепочки остановятся.' });
   }
   if (diff.some((d) => d.path === 'kpi.lightGreen' || d.path === 'kpi.lightYellow')) {
     out.push({ path: 'kpi.light', title: 'Светофор плана', summary: `Зелёный от ${getPath(next, 'kpi.lightGreen')} %, жёлтый от ${getPath(next, 'kpi.lightYellow')} % темпа плана. Прошлые месяцы не пересчитываются.` });
