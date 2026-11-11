@@ -31,6 +31,8 @@ import { onboardingRoutes } from './modules/onboarding.ts';
 import { scheduleRoutes, startScheduleWorker } from './modules/schedule.ts';
 import { retentionRoutes, startRetentionWorker } from './modules/retention.ts';
 import { startSurveyWorker, surveyRoutes } from './modules/surveys.ts';
+import { staffBotRoutes } from './modules/staffBot.ts';
+import { morningRoutes, startStaffBotWorker } from './modules/morning.ts';
 import { mobileRoutes, startPushWorker } from './modules/mobile.ts';
 import { privacyRoutes } from './modules/privacy.ts';
 import { pdRoutes } from './modules/pd.ts';
@@ -39,7 +41,7 @@ import { aiConfigFromEnv, type AiConfig } from './lib/aiClient.ts';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-export async function buildApp(pool: pg.Pool, opts: { webDist?: string; secureCookie?: boolean; logger?: boolean; storageDir?: string; fiscalWorker?: boolean; messagingWorker?: boolean; billingWorker?: boolean; aiWorker?: boolean; scoringWorker?: boolean; pushWorker?: boolean; insightsWorker?: boolean; scheduleWorker?: boolean; retentionWorker?: boolean; monitorWorker?: boolean; surveyWorker?: boolean; ai?: AiConfig | null; fetch?: typeof fetch } = {}) {
+export async function buildApp(pool: pg.Pool, opts: { webDist?: string; secureCookie?: boolean; logger?: boolean; storageDir?: string; fiscalWorker?: boolean; messagingWorker?: boolean; billingWorker?: boolean; aiWorker?: boolean; scoringWorker?: boolean; pushWorker?: boolean; insightsWorker?: boolean; scheduleWorker?: boolean; retentionWorker?: boolean; surveyWorker?: boolean; monitorWorker?: boolean; staffBotWorker?: boolean; ai?: AiConfig | null; fetch?: typeof fetch } = {}) {
   const app = Fastify({ logger: opts.logger ?? false, trustProxy: true });
   await app.register(cookie);
 
@@ -119,6 +121,8 @@ export async function buildApp(pool: pg.Pool, opts: { webDist?: string; secureCo
   scheduleRoutes(app, pool, { fetch: opts.fetch });
   retentionRoutes(app, pool, { fetch: opts.fetch });
   surveyRoutes(app, pool);
+  staffBotRoutes(app, pool, { fetch: opts.fetch });
+  morningRoutes(app, pool, { fetch: opts.fetch });
   privacyRoutes(app, pool);
   pdRoutes(app, pool);
   // Состояние системы: BACKUP_DIR — папка резервных копий сервера (подключается к контейнеру только для чтения)
@@ -129,6 +133,7 @@ export async function buildApp(pool: pg.Pool, opts: { webDist?: string; secureCo
   if (opts.messagingWorker) { const stop = startMessagingWorker(pool, opts.fetch); app.addHook('onClose', async () => stop()); }
   if (opts.billingWorker) { const stop = startBillingWorker(pool, opts.fetch); app.addHook('onClose', async () => stop()); }
   if (opts.scheduleWorker) { const stop = startScheduleWorker(pool, opts.fetch ?? fetch); app.addHook('onClose', async () => stop()); }
+  if (opts.staffBotWorker) { const stop = startStaffBotWorker(pool, opts.fetch ?? fetch); app.addHook('onClose', async () => stop()); }
   if (opts.surveyWorker) { const stop = startSurveyWorker(pool, opts.fetch ?? fetch); app.addHook('onClose', async () => stop()); }
   if (opts.retentionWorker) { const stop = startRetentionWorker(pool, opts.fetch ?? fetch); app.addHook('onClose', async () => stop()); }
   if (opts.pushWorker) { const stop = startPushWorker(pool, opts.fetch ?? fetch); app.addHook('onClose', async () => stop()); }
