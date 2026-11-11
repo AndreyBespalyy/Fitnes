@@ -11,6 +11,7 @@ import { recordPayment } from './finance.ts';
 import { resolveDiscount, type DiscountInput } from './promos.ts';
 import { onReferralPurchase, referralDiscount } from './referrals.ts';
 import { resolvePayer, type PayerInput } from './familyCorp.ts';
+import { creditTrainerOffer } from './trainer.ts';
 
 /* ---------- даты (строки YYYY-MM-DD, без часовых сдвигов) ---------- */
 const D = (s: string) => new Date(`${s}T00:00:00Z`);
@@ -214,6 +215,7 @@ export async function sellMembership(db: Db, ctx: Pick<Ctx, 'tenantId' | 'userId
   await db.query('insert into membership_operations(tenant_id, club_id, membership_id, kind, params, actor_id) values ($1,$2,$3,$4,$5,$6)',
     [ctx.tenantId, prod.club_id, id, renewedFrom ? 'renewal' : 'sale', JSON.stringify({ productId: prod.id, priceVersionId: price.id, amountKop: amount, listPriceKop: listPrice, discountKop: disc.discountKop, discount: disc.label, installments: n, startsOn, renewedFrom }), ctx.userId]);
   await onReferralPurchase(db, ctx, { personId: b.personId!, clubId: prod.club_id, membershipId: id, category, amountKop: amount, discountKop: disc.discountKop });
+  await creditTrainerOffer(db, b.personId!, prod.club_id, id, prod.kind);
   const contract = await createContract(db, ctx, id);
   await db.query(`update persons set segment = case when $2 = 'subscription' then 'активный подписчик' else 'действующий' end, updated_at = now() where id = $1`, [b.personId, prod.kind]);
   if (lockedOffer) await db.query(`update renewal_offers set status = 'used', used_membership_id = $2 where id = $1`, [lockedOffer, id]);
