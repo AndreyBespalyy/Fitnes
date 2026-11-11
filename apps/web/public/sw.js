@@ -4,7 +4,7 @@
 // Данные удаляются с устройства при выходе из системы.
 const SHELL = 'shell-v2';
 const API = 'api-v1';
-const NO_CACHE = [/^\/api\/auth\/(?!me$)/, /^\/api\/push\//, /\/audio$/, /\/pdf$/, /\/file/, /export/, /\/api\/me\/sessions/, /\/api\/health/];
+const NO_CACHE = [/^\/api\/auth\/(?!me$)/, /^\/api\/push\//, /\/audio$/, /\/pdf$/, /\/file/, /export/, /\/api\/me\/sessions/, /\/api\/health/, /^\/api\/team\//];
 
 self.addEventListener('install', (e) => {
   // Сохраняем страницу и её файлы, чтобы приложение открывалось без связи
@@ -32,6 +32,8 @@ self.addEventListener('fetch', (e) => {
   const req = e.request;
   const url = new URL(req.url);
   if (url.origin !== self.location.origin || req.method !== 'GET') return;
+  // Мессенджер (/team/) — отдельное приложение со своим служебным файлом
+  if (url.pathname === '/team' || url.pathname.startsWith('/team/') || url.pathname.startsWith('/m/')) return;
 
   // Данные: сначала сервер, при отсутствии связи — сохранённая копия с пометкой времени
   if (url.pathname.startsWith('/api/')) {
