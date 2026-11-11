@@ -98,6 +98,15 @@ test('новый лид и напоминание о задаче приходя
   sent.length = 0;
   await processPush(t.pool, vapid, fakeFetch);
   assert.equal(sent.filter((s) => s.url === d.sub.endpoint).length, 0);
+  // Уведомление CRM (колокольчик) тоже приходит push-ом и открывает нужный экран
+  await sql(`insert into staff_notifications(tenant_id, club_id, user_id, kind, title, body, link)
+    select tenant_id, $1, id, 'renewals', 'Окно продлений: 3', 'Не звонили 2', '{"tab":"sales","p":{"view":"renewals"}}' from users where login = 'm.volkova'`, [c1]);
+  sent.length = 0;
+  await processPush(t.pool, vapid, fakeFetch);
+  const crm = sent.filter((s) => s.url === d.sub.endpoint).map((s) => decrypt(d, s.body));
+  assert.equal(crm.length, 1, JSON.stringify(crm));
+  assert.equal(crm[0].title, 'Окно продлений: 3');
+  assert.equal(crm[0].url, '/?tab=sales&view=renewals');
 });
 
 test('настройки: можно отключить уведомления о задачах', async () => {
