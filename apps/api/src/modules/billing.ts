@@ -203,8 +203,8 @@ export function startBillingWorker(pool: pg.Pool, f: Fetch = fetch, everyMs = 60
 }
 
 /* ---------- страницы для клиента ---------- */
-const esc = (s: string) => s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]!));
-function page(title: string, body: string) {
+export const esc = (s: string) => s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]!));
+export function page(title: string, body: string) {
   return `<!doctype html><html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${esc(title)}</title>
 <style>:root{--bg:#f4f6f7;--card:#fff;--fg:#13232a;--mut:#5f6f75;--ok:#15803d;--bad:#b91c1c;--line:#dde3e5;--acc:#0f766e}
 @media (prefers-color-scheme:dark){:root{--bg:#0f1517;--card:#172024;--fg:#e6eef0;--mut:#9fb0b5;--line:#2a373b;--ok:#4ade80;--bad:#f87171;--acc:#2dd4bf}}
@@ -364,7 +364,7 @@ export function billingRoutes(app: FastifyInstance, pool: pg.Pool, opts: { fetch
     if (!t) return null;
     return withCtx(pool, sysCtx(t.tenant_id), async (db) => {
       await checkOp(db, f, id, { tenantId: t.tenant_id, userId: null });
-      const op = (await db.query(`select o.*, c.name as club_name from online_payments o join clubs c on c.id = o.club_id where o.id = $1`, [id])).rows[0];
+      const op = (await db.query(`select o.*, c.name as club_name, (select x.id from online_orders x where x.online_payment_id = o.id) as order_id from online_payments o join clubs c on c.id = o.club_id where o.id = $1`, [id])).rows[0];
       const acq = (await db.query('select sbp_enabled from club_acquiring where club_id = $1', [op.club_id])).rows[0];
       return { ...op, tenant: t.tenant_id as string, sbp: acq?.sbp_enabled ?? true };
     });
@@ -376,10 +376,12 @@ export function billingRoutes(app: FastifyInstance, pool: pg.Pool, opts: { fetch
     reply.type('text/html; charset=utf-8');
     if (!op) return reply.code(404).send(page('Ссылка не найдена', '<div class="c"><h1>Ссылка не найдена</h1><p class="m">Попросите клуб прислать новую ссылку на оплату.</p></div>'));
     const head = `<div class="m">${esc(op.club_name)}</div><h1>${esc(op.description.replace(`${op.club_name}: `, ''))}</h1><div class="sum">${rubText(Number(op.amount_kop))}</div>`;
+    // Покупка онлайн: после оплаты клиент попадает на страницу заказа с QR-кодом для прохода
+    if (op.order_id && ['succeeded', 'failed', 'cancelled', 'expired'].includes(op.status)) return reply.redirect(`/buy/order/${op.order_id}`, 303);
     if (op.status === 'succeeded') return page('Оплачено', `<div class="c">${head}<h1 class="ok">Оплата прошла</h1><p class="m">Спасибо! Чек придёт на телефон или почту, указанные в клубе.${op.payment_method_id ? ' Карта сохранена для автосписания подписки.' : ''}</p></div>`);
     if (op.status === 'expired') return page('Ссылка устарела', `<div class="c">${head}<h1 class="bad">Ссылка устарела</h1><p class="m">Попросите клуб прислать новую ссылку.</p></div>`);
     if (op.status === 'failed' || op.status === 'cancelled') return page('Оплата не прошла', `<div class="c">${head}<h1 class="bad">Оплата не прошла</h1><p class="m">${esc(op.error ?? '')} Попросите клуб прислать новую ссылку или оплатите на ресепшн.</p></div>`);
-    if (op.purpose !== 'link') return reply.code(404).send(page('Ссылка не найдена', '<div class="c"><h1>Ссылка не найдена</h1></div>'));
+    if (op.purpose !== 'link' && op.purpose !== 'buy') return reply.code(404).send(page('Ссылка не найдена', '<div class="c"><h1>Ссылка не найдена</h1></div>'));
     if (op.provider !== 'test') {
       if ((req.query as { back?: string }).back) return page('Проверяем оплату', `<div class="c">${head}<h1>Проверяем оплату…</h1><p class="m">Банк ещё не подтвердил оплату. Страница обновится сама.</p></div><script>setTimeout(()=>location.reload(),4000)</script>`);
       if (op.confirmation_url) return reply.redirect(op.confirmation_url);

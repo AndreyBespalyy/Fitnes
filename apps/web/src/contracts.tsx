@@ -1,5 +1,6 @@
 // Шаг 7. Раздел «Договоры» (юрлицо и PDF клуба), договор в карточке клиента: печать, скан, подпись на планшете.
 // Плюс раздел «Сайт»: предложения клуба для выгрузки на сайт.
+import { OnlineBuyBlock } from './onlineBuy.tsx';
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { api, can, type Club, type Me } from './api.ts';
 import { errText, toast } from './ui.ts';
@@ -122,7 +123,7 @@ export function ContractLine({ me, c, reload }: { me: Me; c: ContractBrief; relo
     setErr('');
     try { await api('POST', `/api/contracts/${c.id}/scan`, await readFile(f)); toast(`Скан договора № ${c.number} загружен, договор подписан`); reload(); } catch (x) { setErr(errText(x)); }
   };
-  const label = c.status === 'signed' ? (c.signMethod === 'tablet' ? 'подписан на планшете' : c.scanFileId ? 'подписан, скан в системе' : 'подписан на бумаге') : c.status === 'cancelled' ? 'расторгнут' : 'ждёт подписи';
+  const label = c.status === 'signed' ? (c.signMethod === 'tablet' ? 'подписан на планшете' : c.signMethod === 'online_offer' ? 'заключён онлайн (оферта принята и оплачена)' : c.scanFileId ? 'подписан, скан в системе' : 'подписан на бумаге') : c.status === 'cancelled' ? 'расторгнут' : 'ждёт подписи';
   return (
     <div className="row between small" style={{ borderTop: '1px dashed var(--line)', paddingTop: 6 }}>
       <span>Договор № {c.number} от {d(c.date)} · <span className={`chip ${c.status === 'signed' ? 'ok' : c.status === 'cancelled' ? '' : 'warn'}`}>{label}</span>
@@ -256,7 +257,7 @@ type Offer = { id: string; clubId: string; clubName: string; productId: string |
 const toKop = (s: string) => (s.trim() === '' ? null : Math.round(Number(s.replace(',', '.').replace(/\s/g, '')) * 100));
 const EMPTY = { title: '', description: '', price: '', oldPrice: '', priceNote: '', validFrom: '', validTo: '', productId: '' };
 
-export function SitePage({ me, clubs, clubId }: { me: Me; clubs: Club[]; clubId: string }) {
+export function SitePage({ me, clubs, clubId, openPerson }: { me: Me; clubs: Club[]; clubId: string; openPerson?: (id: string) => void }) {
   const [club, setClub] = useState(clubId !== 'all' ? clubId : clubs[0]?.id ?? '');
   useEffect(() => { if (clubId !== 'all') setClub(clubId); }, [clubId]);
   const [offers, setOffers] = useState<Offer[]>([]);
@@ -296,6 +297,7 @@ export function SitePage({ me, clubs, clubId }: { me: Me; clubs: Club[]; clubId:
         Сейчас на сайт выгружается: <b>{published}</b>. Сайта пока нет: когда он появится, он будет забирать предложения по адресу <code>/api/public/v1/offers</code>{' '}
         с ключом источника «Сайт» (тот же ключ, что для заявок, его выдаёт администратор в разделе «Воронки»). Снятые и просроченные предложения пропадают с сайта сами.
       </div>
+      {club && <OnlineBuyBlock club={club} openPerson={openPerson} />}
       {err && <div className="err">{err}</div>}
       <div className="offers">{offers.map((o) => (
         <div key={o.id} className="card offer">

@@ -101,3 +101,17 @@ test('настройки: выключенная программа не даё�
   await req('PUT', '/api/referrals/settings', 'o.smirnov', { clubId: centr, enabled: false });
   assert.match((await req('GET', `/r/${code}`, null)).body, /Приглашение не найдено/);
 });
+
+test('страница приглашения работает обычной формой, без скриптов', async () => {
+  await req('PUT', '/api/referrals/settings', 'o.smirnov', { clubId: centr, enabled: true });
+  const amb = await client(); await sell(amb, 'Месяц безлимит');
+  const r = (await req('GET', `/api/persons/${amb}/referral`, 'a.bespalyy')).json();
+  const page = await req('GET', `/r/${r.code}`, null);
+  assert.doesNotMatch(page.body, /<script/); // встроенные скрипты запрещены настройками безопасности: форма работает без них
+  const formPost = (o: Record<string, string>) => t.app.inject({ method: 'POST', url: `/r/${r.code}`, payload: new URLSearchParams(o).toString(), headers: { 'content-type': 'application/x-www-form-urlencoded' } });
+  const noConsent = await formPost({ name: 'Анна Форма', phone: '+79006668888' });
+  assert.equal(noConsent.statusCode, 400);
+  assert.match(noConsent.body, /согласие/);
+  assert.match(noConsent.body, /value="Анна Форма"/);
+  assert.match((await formPost({ name: 'Анна Форма', phone: '+79006668888', consent: '1' })).body, /Спасибо!/);
+});

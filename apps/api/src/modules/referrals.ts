@@ -95,27 +95,19 @@ export async function onReferralPurchase(db: Db, actor: Actor, a: { personId: st
 
 /* ---------- публичная страница приглашения ---------- */
 const esc = (s: string) => s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]!));
-function invitePage(code: string, v: { firstName: string; clubName: string; percent: number } | null) {
-  const body = v
-    ? `<h1>${esc(v.firstName || 'Ваш друг')} приглашает вас в ${esc(v.clubName)}</h1>
+function invitePage(code: string, v: { firstName: string; clubName: string; percent: number } | null, st: { done?: boolean; err?: string; name?: string; phone?: string } = {}) {
+  // Обычная HTML-форма без скриптов: встроенные скрипты запрещены настройками безопасности сайта
+  const body = !v ? '<h1>Приглашение не найдено</h1><p>Проверьте ссылку или спросите её у друга ещё раз.</p>'
+    : st.done ? `<h1>Спасибо!</h1><p>Менеджер ${esc(v.clubName)} скоро свяжется с вами.</p>`
+    : `<h1>${esc(v.firstName || 'Ваш друг')} приглашает вас в ${esc(v.clubName)}</h1>
       ${v.percent ? `<p>По этому приглашению скидка <b>${v.percent} %</b> на первый абонемент.</p>` : ''}
       <p>Оставьте имя и телефон — менеджер клуба позвонит и запишет на первое посещение.</p>
-      <form id="f">
-        <label>Имя<input name="name" required maxlength="100" autocomplete="name"></label>
-        <label>Телефон<input name="phone" required inputmode="tel" autocomplete="tel" placeholder="+7 900 000-00-00"></label>
-        <label class="c"><input type="checkbox" name="consent" required> Согласен на обработку персональных данных для связи со мной</label>
-        <button>Отправить</button><p id="m" role="status"></p>
-      </form>
-      <script>
-        document.getElementById('f').onsubmit = async (e) => {
-          e.preventDefault(); const f = e.target; const m = document.getElementById('m'); m.textContent = 'Отправляем…';
-          const r = await fetch('/api/public/v1/ref/${esc(code)}', { method: 'POST', headers: { 'content-type': 'application/json' },
-            body: JSON.stringify({ name: f.name.value, phone: f.phone.value, consent: f.consent.checked }) }).catch(() => null);
-          const j = r ? await r.json().catch(() => ({})) : {};
-          if (r && r.ok) { f.innerHTML = '<p><b>Спасибо!</b> Менеджер клуба скоро свяжется с вами.</p>'; } else { m.textContent = j.message || 'Не получилось отправить. Попробуйте ещё раз'; }
-        };
-      </script>`
-    : '<h1>Приглашение не найдено</h1><p>Проверьте ссылку или спросите её у друга ещё раз.</p>';
+      <form method="post" action="/r/${esc(code)}">
+        <label>Имя<input name="name" required maxlength="100" autocomplete="name" value="${esc(st.name ?? '')}"></label>
+        <label>Телефон<input name="phone" required inputmode="tel" autocomplete="tel" placeholder="+7 900 000-00-00" value="${esc(st.phone ?? '')}"></label>
+        <label class="c"><input type="checkbox" name="consent" value="1" required> Согласен на обработку персональных данных для связи со мной</label>
+        <button>Отправить</button>${st.err ? `<p id="m" role="alert">${esc(st.err)}</p>` : ''}
+      </form>`;
   return `<!doctype html><html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Приглашение в клуб</title>
 <style>body{font-family:system-ui,-apple-system,"Segoe UI",sans-serif;background:#f3f6f5;color:#142320;margin:0;padding:24px 16px}main{max-width:460px;margin:0 auto;background:#fff;border:1px solid #d8e2df;border-radius:14px;padding:24px}
 h1{font-size:22px;margin:0 0 12px}label{display:grid;gap:4px;margin:12px 0;font-size:14px}label.c{display:flex;gap:8px;align-items:flex-start}input{font:inherit;padding:10px;border:1px solid #c5d3cf;border-radius:8px}
@@ -140,9 +132,7 @@ export function referralRoutes(app: FastifyInstance, pool: pg.Pool) {
     return invitePage(code.toUpperCase(), r && s?.enabled ? { firstName: r.first_name, clubName: r.club_name, percent: s.friendPercent } : null);
   });
 
-  app.post('/api/public/v1/ref/:code', async (req, reply) => {
-    const { code } = req.params as { code: string };
-    const b = (req.body ?? {}) as { name?: string; phone?: string; consent?: boolean };
+  const submit = async (req: FastifyRequest, code: string, b: { name?: string; phone?: string; consent?: boolean | string }) => {
     if (limited(req.ip)) throw new HttpError(429, 'Слишком много заявок. Попробуйте позже', 'rate_limited');
     if (!b.consent) throw badRequest('Нужно согласие на обработку персональных данных');
     if (!b.name?.trim() || !b.phone?.trim()) throw badRequest('Укажите имя и телефон');
@@ -159,8 +149,29 @@ export function referralRoutes(app: FastifyInstance, pool: pg.Pool) {
         if (!(e instanceof HttpError) || e.status !== 400) throw e;
       });
     });
+  };
+
+  app.post('/api/public/v1/ref/:code', async (req, reply) => {
+    const { code } = req.params as { code: string };
+    await submit(req, code, (req.body ?? {}) as { name?: string; phone?: string; consent?: boolean });
     reply.code(201);
     return { ok: true };
+  });
+
+  app.post('/r/:code', async (req, reply) => {
+    const { code } = req.params as { code: string };
+    const b = (req.body ?? {}) as { name?: string; phone?: string; consent?: string };
+    const r = await lookup(code);
+    const s = r ? await withCtx(pool, { tenantId: r.tenant_id, allClubs: true, clubIds: [] }, (db) => referralSettings(db, r.club_id)) : null;
+    const v = r && s?.enabled ? { firstName: r.first_name, clubName: r.club_name, percent: s.friendPercent } : null;
+    reply.type('text/html; charset=utf-8').header('cache-control', 'no-store').header('x-robots-tag', 'noindex');
+    try {
+      await submit(req, code, b);
+      return invitePage(code.toUpperCase(), v, { done: true });
+    } catch (e) {
+      if (e instanceof HttpError && e.status < 500) return reply.code(e.status).send(invitePage(code.toUpperCase(), v, { err: e.message, name: b.name, phone: b.phone }));
+      throw e;
+    }
   });
 
   // Код и ссылка клиента, кого он привёл

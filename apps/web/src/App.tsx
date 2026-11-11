@@ -182,7 +182,7 @@ function Shell({ me, onLogout }: { me: Me; onLogout: () => void }) {
         {tab === 'access' && <AccessPage me={me} clubs={clubs} clubId={clubId} openPerson={setPersonId} />}
         {tab === 'messaging' && <MessagingAdmin me={me} clubs={clubs} clubId={clubId} />}
         {tab === 'import' && <ImportPage clubs={clubs} clubId={clubId} />}
-        {tab === 'site' && <SitePage me={me} clubs={clubs} clubId={clubId} />}
+        {tab === 'site' && <SitePage me={me} clubs={clubs} clubId={clubId} openPerson={setPersonId} />}
         {tab === 'pipelines' && <PipelinesAdmin clubs={clubs} clubId={clubId} />}
         {tab === 'home' && <Home key={ver} me={me} clubs={clubs} clubId={clubId} openPerson={setPersonId} />}
         {tab === 'clubs' && <Clubs me={me} clubs={clubs} reload={reloadClubs} />}
