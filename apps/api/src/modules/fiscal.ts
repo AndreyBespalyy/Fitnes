@@ -56,7 +56,7 @@ export async function getFiscal(db: Db, clubId: string): Promise<FiscalSettings>
 }
 
 /* ---------- чек ---------- */
-type Generic = { items: { name: string; priceKop: number; quantity: number; sumKop: number }[]; totalKop: number; payment: 'cash' | 'electronic';
+type Generic = { items: { name: string; priceKop: number; quantity: number; sumKop: number; commodity?: boolean }[]; totalKop: number; payment: 'cash' | 'electronic';
   client: { email: string | null; phone: string | null; name: string | null } };
 const rub = (kop: number) => Math.round(kop) / 100;
 const LOCAL_TAX: Record<string, string> = { osn: 'osn', usn_income: 'usnIncome', usn_income_outcome: 'usnIncomeOutcome', esn: 'esn', patent: 'patent' };
@@ -75,7 +75,7 @@ export function atolOnlinePayload(r: Generic, s: FiscalSettings, externalId: str
       client: { ...client, ...(r.client.name ? { name: r.client.name } : {}) },
       company: { email: s.companyEmail, sno: s.taxation, inn: s.inn, payment_address: s.paymentAddress },
       items: r.items.map((i) => ({ name: i.name.slice(0, 128), price: rub(i.priceKop), quantity: i.quantity, sum: rub(i.sumKop), measure: 0,
-        payment_method: s.paymentMethod, payment_object: 4, vat: { type: s.vat } })),
+        payment_method: s.paymentMethod, payment_object: i.commodity ? 1 : 4, vat: { type: s.vat } })),
       payments: [{ type: r.payment === 'cash' ? 0 : 1, sum: rub(r.totalKop) }],
       total: rub(r.totalKop),
     },
@@ -87,7 +87,7 @@ export function atolLocalPayload(r: Generic, s: FiscalSettings, operatorName: st
     type: kind === 'sell_refund' ? 'sellReturn' : 'sell', taxationType: LOCAL_TAX[s.taxation], operator: { name: operatorName },
     ...(r.client.email || r.client.phone ? { clientInfo: { emailOrPhone: r.client.email ?? r.client.phone } } : {}),
     items: r.items.map((i) => ({ type: 'position', name: i.name.slice(0, 128), price: rub(i.priceKop), quantity: i.quantity, amount: rub(i.sumKop),
-      paymentMethod: LOCAL_METHOD[s.paymentMethod], paymentObject: 'service', tax: { type: s.vat } })),
+      paymentMethod: LOCAL_METHOD[s.paymentMethod], paymentObject: i.commodity ? 'commodity' : 'service', tax: { type: s.vat } })),
     payments: [{ type: r.payment === 'cash' ? 'cash' : 'electronically', sum: rub(r.totalKop) }],
     total: rub(r.totalKop),
   };
@@ -151,6 +151,26 @@ async function insertReceipt(db: Db, ctx: Pick<Ctx, 'tenantId' | 'userId'>, src:
 /** Чек прихода после оплаты. Если касса клуба не подключена, чек не создаётся. */
 export async function receiptForCharge(db: Db, ctx: Pick<Ctx, 'tenantId' | 'userId'>, chargeId: string, method: string) {
   return insertReceipt(db, ctx, await chargeSource(db, chargeId, method), 'sell', { chargeId });
+}
+/** Чек на продажу товаров и услуг ресепшна: несколько позиций, товар — «товар», услуга — «услуга». null, если касса не подключена. */
+export async function receiptForGoods(db: Db, ctx: Pick<Ctx, 'tenantId' | 'userId'>, a: { clubId: string; personId: string | null; saleId: string; method: string;
+  items: { name: string; priceKop: number; quantity: number; sumKop: number; commodity: boolean }[] }) {
+  const s = await getFiscal(db, a.clubId);
+  if (s.mode === 'none') return null;
+  const id = (await db.query('select gen_random_uuid() as id')).rows[0].id as string;
+  const total = a.items.reduce((x, i) => x + i.sumKop, 0);
+  const p = a.personId ? (await db.query('select full_name from persons where id = $1', [a.personId])).rows[0] : null;
+  const contacts = a.personId ? (await db.query(`select type, value from person_contacts where person_id = $1 order by is_primary desc`, [a.personId])).rows : [];
+  const g: Generic = { items: a.items, totalKop: total, payment: a.method === 'cash' ? 'cash' : 'electronic',
+    client: { email: contacts.find((x) => x.type === 'email')?.value ?? null, phone: contacts.find((x) => x.type === 'phone')?.value ?? null, name: p?.full_name ?? null } };
+  const operator = ctx.userId ? (await db.query('select full_name from users where id = $1', [ctx.userId])).rows[0]?.full_name ?? 'Кассир' : 'Кассир';
+  const miss = checkReady(s);
+  await db.query(
+    `insert into receipts(id, tenant_id, club_id, goods_sale_id, person_id, kind, mode, provider, status, amount_kop, payload, error, created_by)
+     values ($1,$2,$3,$4,$5,'sell',$6,$7,$8,$9,$10,$11,$12)`,
+    [id, ctx.tenantId, a.clubId, a.saleId, a.personId, s.mode, s.mode === 'cloud' ? 'atol_online' : s.provider === 'manual' ? 'manual' : 'atol_local', miss.length ? 'failed' : 'pending', total,
+      JSON.stringify(s.mode === 'cloud' ? atolOnlinePayload(g, s, id) : atolLocalPayload(g, s, operator, 'sell')), miss.length ? `Касса настроена не полностью: ${miss.join(', ')}` : null, ctx.userId]);
+  return id;
 }
 /** Чек возврата прихода после выплаты возврата клиенту. */
 export async function receiptForRefund(db: Db, ctx: Pick<Ctx, 'tenantId' | 'userId'>, refundId: string) {

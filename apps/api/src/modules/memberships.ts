@@ -274,7 +274,8 @@ export async function payCharge(db: Db, ctx: { tenantId: string; userId: string 
   const c = (await db.query('select * from charges where id = $1 for update', [chargeId])).rows[0];
   if (!c || c.status !== 'due') return null;
   await db.query(`update charges set status = 'paid', paid_at = now(), paid_method = $2, paid_by = $3, autopay_error = null where id = $1`, [chargeId, method, ctx.userId]);
-  const cat = c.membership_id ? (await db.query('select sale_category from memberships where id = $1', [c.membership_id])).rows[0]?.sale_category : null;
+  const cat = c.membership_id ? (await db.query('select sale_category from memberships where id = $1', [c.membership_id])).rows[0]?.sale_category : c.kind === 'goods' ? 'goods' : null;
+  if (c.kind === 'goods') await db.query(`update goods_sales set status = 'paid', method = $2 where charge_id = $1 and status = 'on_account'`, [chargeId, method]);
   await recordPayment(db, ctx as never, { clubId: c.club_id, direction: 'in', kind: 'charge', amountKop: Number(c.amount_kop), method, personId: c.person_id, chargeId, saleCategory: cat });
   if (c.membership_id) {
     await db.query(`insert into membership_operations(tenant_id, club_id, membership_id, kind, params, actor_id) values ($1,$2,$3,'charge_paid',$4,$5)`,

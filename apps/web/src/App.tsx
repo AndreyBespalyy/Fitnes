@@ -9,6 +9,7 @@ import { api, ApiError, can, clearDeviceData, setNavIntent, type Go, MODEL, MODE
 import { errText, toast as alertOk } from './ui.ts';
 import { BoardPage, LeadsPage, PersonCard, PipelinesAdmin, TasksPage } from './crm.tsx';
 import { TariffsPage } from './memberships.tsx';
+import { ShopPage } from './shop.tsx';
 import { ContractsAdminPage, SitePage } from './contracts.tsx';
 import { FiscalPage, LocalKktAgent } from './fiscal.tsx';
 import { FinancePage } from './finance.tsx';
@@ -85,7 +86,7 @@ function ChangePassword({ me, forced, onDone, onLogout }: { me: Me; forced?: boo
   );
 }
 
-type Tab = 'dash' | 'hot' | 'calls' | 'leads' | 'board' | 'tasks' | 'home' | 'clubs' | 'tariffs' | 'contracts' | 'site' | 'fiscal' | 'finance' | 'import' | 'chats' | 'access' | 'messaging' | 'pipelines' | 'staff' | 'stafftime' | 'config' | 'reviews' | 'onboarding' | 'help' | 'schedule' | 'retention' | 'profile';
+type Tab = 'dash' | 'hot' | 'calls' | 'leads' | 'board' | 'tasks' | 'home' | 'clubs' | 'tariffs' | 'contracts' | 'site' | 'fiscal' | 'finance' | 'import' | 'chats' | 'access' | 'messaging' | 'pipelines' | 'staff' | 'stafftime' | 'config' | 'reviews' | 'onboarding' | 'help' | 'schedule' | 'retention' | 'shop' | 'profile';
 
 function Shell({ me, onLogout }: { me: Me; onLogout: () => void }) {
   const firstTab: Tab = 'dash';
@@ -126,6 +127,7 @@ function Shell({ me, onLogout }: { me: Me; onLogout: () => void }) {
     ['access', 'Проходы', can(me, 'acs.work') || can(me, 'acs.manage')],
     ['clubs', 'Клубы', can(me, 'clubs.manage')],
     ['tariffs', 'Тарифы', can(me, 'tariffs.manage') || can(me, 'memberships.sell')],
+    ['shop', 'Товары', can(me, 'tariffs.manage') || can(me, 'memberships.sell') || can(me, 'shifts.work')],
     ['contracts', 'Договоры', can(me, 'contracts.manage')],
     ['site', 'Сайт', can(me, 'site.manage')],
     ['finance', 'Финансы', can(me, 'finance.view') || can(me, 'shifts.work') || can(me, 'approvals.decide')],
@@ -172,6 +174,7 @@ function Shell({ me, onLogout }: { me: Me; onLogout: () => void }) {
         {tab === 'leads' && <LeadsPage key={ver} me={me} clubs={clubs} clubId={clubId} openPerson={setPersonId} />}
         {tab === 'board' && <BoardPage key={ver} clubs={clubs} clubId={clubId} openPerson={setPersonId} />}
         {tab === 'tariffs' && <TariffsPage me={me} clubs={clubs} clubId={clubId} />}
+        {tab === 'shop' && <ShopPage me={me} clubs={clubs} clubId={clubId} openPerson={setPersonId} />}
         {tab === 'contracts' && <ContractsAdminPage me={me} clubs={clubs} clubId={clubId} />}
         {tab === 'finance' && <FinancePage me={me} clubs={clubs} clubId={clubId} openPerson={setPersonId} />}
         {tab === 'fiscal' && <FiscalPage me={me} clubs={clubs} clubId={clubId} />}
