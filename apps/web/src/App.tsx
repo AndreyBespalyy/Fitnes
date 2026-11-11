@@ -13,6 +13,7 @@ import { ShopPage } from './shop.tsx';
 import { CompaniesPage } from './familyCorp.tsx';
 import { TrainerPage } from './trainer.tsx';
 import { DeskPage } from './desk.tsx';
+import { LoadPage } from './load.tsx';
 import { ContractsAdminPage, SitePage } from './contracts.tsx';
 import { FiscalPage, LocalKktAgent } from './fiscal.tsx';
 import { FinancePage } from './finance.tsx';
@@ -89,7 +90,7 @@ function ChangePassword({ me, forced, onDone, onLogout }: { me: Me; forced?: boo
   );
 }
 
-type Tab = 'dash' | 'hot' | 'calls' | 'leads' | 'board' | 'tasks' | 'home' | 'clubs' | 'tariffs' | 'contracts' | 'site' | 'fiscal' | 'finance' | 'import' | 'chats' | 'access' | 'messaging' | 'pipelines' | 'staff' | 'stafftime' | 'config' | 'reviews' | 'onboarding' | 'help' | 'schedule' | 'retention' | 'shop' | 'corp' | 'trainer' | 'desk' | 'profile';
+type Tab = 'dash' | 'hot' | 'calls' | 'leads' | 'board' | 'tasks' | 'home' | 'clubs' | 'tariffs' | 'contracts' | 'site' | 'fiscal' | 'finance' | 'import' | 'chats' | 'access' | 'messaging' | 'pipelines' | 'staff' | 'stafftime' | 'config' | 'reviews' | 'onboarding' | 'help' | 'schedule' | 'retention' | 'shop' | 'corp' | 'trainer' | 'desk' | 'load' | 'profile';
 
 function Shell({ me, onLogout }: { me: Me; onLogout: () => void }) {
   const firstTab: Tab = 'dash';
@@ -136,6 +137,7 @@ function Shell({ me, onLogout }: { me: Me; onLogout: () => void }) {
     ['corp', 'Компании', can(me, 'tariffs.manage') || can(me, 'finance.work') || can(me, 'crm.view_all') || can(me, 'memberships.sell')],
     ['contracts', 'Договоры', can(me, 'contracts.manage')],
     ['site', 'Сайт', can(me, 'site.manage')],
+    ['load', 'Загрузка', can(me, 'dash.view') || can(me, 'schedule.manage')],
     ['finance', 'Финансы', can(me, 'finance.view') || can(me, 'shifts.work') || can(me, 'approvals.decide')],
     ['fiscal', 'Касса', can(me, 'fiscal.manage') || can(me, 'memberships.manage')],
     ['messaging', 'Сообщения', can(me, 'messages.manage')],
@@ -188,6 +190,7 @@ function Shell({ me, onLogout }: { me: Me; onLogout: () => void }) {
         {tab === 'access' && <AccessPage me={me} clubs={clubs} clubId={clubId} openPerson={setPersonId} />}
         {tab === 'messaging' && <MessagingAdmin me={me} clubs={clubs} clubId={clubId} />}
         {tab === 'import' && <ImportPage clubs={clubs} clubId={clubId} />}
+        {tab === 'load' && <LoadPage me={me} clubs={clubs} clubId={clubId} />}
         {tab === 'desk' && <DeskPage me={me} clubs={clubs} clubId={clubId} openPerson={setPersonId} />}
         {tab === 'trainer' && <TrainerPage me={me} clubs={clubs} clubId={clubId} openPerson={setPersonId} />}
         {tab === 'corp' && <CompaniesPage me={me} clubs={clubs} clubId={clubId} openPerson={setPersonId} />}
