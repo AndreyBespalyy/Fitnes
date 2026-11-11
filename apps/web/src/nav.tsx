@@ -65,9 +65,9 @@ export const NavIcon = ({ k }: { k: string }) => (
 export function SideNav({ items, tab, setTab, open, brand, club }: { items: Item[]; tab: string; setTab: (t: string) => void; open: boolean; brand: ReactNode; club: ReactNode }) {
   const groups = GROUPS.map(([g, title]) => [title, items.filter(([k]) => (GROUP[k] ?? 'other') === g)] as const).filter(([, l]) => l.length);
   const foot = items.filter(([k]) => GROUP[k] === 'foot');
-  const btn = ([k, t]: Item) => <button key={k} className="nv" aria-current={tab === k ? 'page' : undefined} onClick={() => setTab(k)}><NavIcon k={k} /><span>{t}</span></button>;
+  const btn = ([k, t]: Item) => <button key={k} className="nv" aria-pressed={tab === k} onClick={() => setTab(k)}><NavIcon k={k} /><span>{t}</span></button>;
   return (
-    <aside className={`side ${open ? 'open' : ''}`} aria-label="Разделы">
+    <aside className={`side main-tabs ${open ? 'open' : ''}`} aria-label="Разделы">
       {brand}
       {club}
       <nav className="side-groups">
