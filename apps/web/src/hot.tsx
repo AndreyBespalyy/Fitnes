@@ -1,7 +1,7 @@
 // Шаг 15. ИИ-помощник продаж: план дня, горячий список с предложением, теневой режим.
 import { DialButton } from './mobile.tsx';
 import { useEffect, useState } from 'react';
-import { api, can, type Club, type Me } from './api.ts';
+import { api, can, type Club, type Me, navParams } from './api.ts';
 import { dt, errText, toast } from './ui.ts';
 import { rub } from './memberships.tsx';
 
@@ -16,7 +16,7 @@ const KINDS: [string, string][] = [['', 'Все задачи'], ['purchase', 'П
 
 export function HotPage({ me, clubs, clubId, openPerson }: { me: Me; clubs: Club[]; clubId: string; openPerson: (id: string) => void }) {
   const tabs: [string, string, boolean][] = [['day', 'План дня', true], ['list', 'Горячий список', true], ['shadow', 'Теневой режим', can(me, 'ai.review')]];
-  const [tab, setTab] = useState('day');
+  const [tab, setTab] = useState(() => (tabs.some((t) => t[0] === navParams('hot').tab && t[2]) ? navParams('hot').tab : 'day'));
   const club = clubId !== 'all' ? clubId : clubs[0]?.id ?? '';
   return (
     <>

@@ -1,7 +1,7 @@
 // Шаг 8 (финансы). Раздел «Финансы»: смена, согласования, расходы, ДДС, план-факт, долги, журнал платежей.
 // Плюс форма возврата в карточке клиента.
 import { useEffect, useState, type FormEvent } from 'react';
-import { api, can, type Club, type Me } from './api.ts';
+import { api, can, type Club, type Me, navParams } from './api.ts';
 import { dt, errText, toast } from './ui.ts';
 import { rub } from './memberships.tsx';
 import { BankReconciliation, OnlinePayments } from './payments.tsx';
@@ -37,7 +37,7 @@ export function FinancePage({ me, clubs, clubId, openPerson }: { me: Me; clubs: 
     ['bank', 'Сверка с банком', can(me, 'finance.view')],
   ];
   const allowed = views.filter((v) => v[2]);
-  const [view, setView] = useState(allowed[0]?.[0] ?? 'shift');
+  const [view, setView] = useState(() => { const v = navParams('finance').view; return allowed.some((a) => a[0] === v) ? v : allowed[0]?.[0] ?? 'shift'; });
   const c = clubs.find((x) => x.id === club);
   if (!c) return <p className="muted">Клубов нет.</p>;
   return (

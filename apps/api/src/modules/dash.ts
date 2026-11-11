@@ -10,6 +10,7 @@ import { PERMISSIONS as P } from '../roles.ts';
 import { toCsv, toXlsx, type Cell, type Table } from '../lib/xlsx.ts';
 import { daysBetween } from './memberships.ts';
 import { npsReport } from './surveys.ts';
+import { ROLE_PANELS, rolePanel } from './dashRoles.ts';
 
 export const CATS = ['new', 'renewal', 'return', 'subscription'] as const;
 export const CAT_NAME: Record<string, string> = { new: 'Новые клиенты', renewal: 'Продления', return: 'Возобновление бывших', subscription: 'Подписки' };
@@ -71,15 +72,25 @@ export const WIDGETS: W[] = [
   { id: 'kpi', title: 'KPI сотрудников', description: 'Звонки, сообщения, встречи, продажи, отказы, задачи и первый ответ в сравнении с нормой', perm: P.dashView },
   { id: 'risks', title: 'Отклонения и риски', description: 'Пропущенные первые ответы, просроченные задачи, долги, неудачные автосписания, уходящие клиенты', perm: P.dashView },
   { id: 'nps', title: 'Индекс лояльности', description: 'Оценки клиентов после визита: индекс по клубам и сотрудникам, низкие оценки и что по ним сделано', perm: P.dashView },
+  { id: 'club_today', title: 'Клуб сегодня', description: 'Посещения, занятия и запись, лиды, продажи, согласования, сообщения и кассовые смены за сегодня', perm: P.dashView },
+  { id: 'retention', title: 'Удержание клиентов', description: 'Кто заканчивает без продления, досрочное продление, кампании возврата, индекс лояльности, недовольные клиенты', perm: P.retentionManage },
+  { id: 'my_day', title: 'Мой день', description: 'Мои просроченные и сегодняшние задачи, лиды без ответа, встречи, сделки и сообщения', perm: P.crmWork },
+  { id: 'desk_day', title: 'Ресепшн сегодня', description: 'Посещения, занятия, кассовая смена, кому предложить продление, должники, пришедшие сегодня', perm: P.acsWork },
+  { id: 'fin_day', title: 'Финансы сегодня', description: 'Поступления и расходы, долги, неудачные автосписания, согласования, кассовые смены, сверка с банком', perm: P.financeView },
+  { id: 'trainer_day', title: 'Мои занятия', description: 'Занятия сегодня и на неделю, кого записано, неотмеченные посещения, проведено за месяц', perm: P.scheduleBook },
+  { id: 'system', title: 'Система', description: 'Клубы, подключение, сотрудники без роли и с временным паролем, обращения в поддержку, перенос из 1С', perm: P.clubsManage, network: true },
   { id: 'my_plan', title: 'Мой план', description: 'Личный план на месяц и на сегодня, факт, процент, дефицит по категориям', perm: P.crmWork },
   { id: 'my_kpi', title: 'Мои показатели', description: 'Мои звонки, встречи, продажи и задачи за сегодня в сравнении с нормой', perm: P.crmWork },
 ];
 const ROLE_DEFAULTS: Record<string, string[]> = {
-  owner: ['day', 'clubs', 'plan', 'risks', 'nps', 'funnel_sources'],
-  gm: ['day', 'plan', 'team', 'risks', 'nps', 'kpi'],
-  rop: ['team', 'funnel_managers', 'funnel_sources', 'kpi', 'my_plan'],
-  manager: ['my_plan', 'my_kpi'],
-  fin: ['day', 'plan', 'risks'],
+  owner: ['day', 'clubs', 'plan', 'retention', 'risks', 'nps', 'funnel_sources', 'system'],
+  gm: ['club_today', 'day', 'plan', 'risks', 'retention', 'team', 'nps', 'kpi'],
+  rop: ['team', 'my_day', 'retention', 'funnel_managers', 'funnel_sources', 'kpi', 'my_plan'],
+  manager: ['my_day', 'my_plan', 'my_kpi'],
+  desk: ['desk_day'],
+  fin: ['fin_day', 'day', 'plan', 'risks'],
+  trainer: ['trainer_day'],
+  admin: ['system'],
 };
 const available = (ctx: Ctx) => WIDGETS.filter((w) => can(ctx, w.perm) && (!w.network || ctx.allClubs));
 
@@ -332,6 +343,7 @@ export async function widgetData(db: Db, ctx: Ctx, id: string, q: Q) {
     return { ...base, from: p.from, to: p.to, days: p.days, metrics: KPI, rows };
   }
 
+  if ((ROLE_PANELS as readonly string[]).includes(id)) return { ...base, ...(await rolePanel(db, ctx, id, clubs)) };
   if (id === 'nps') {
     const p = period(q, t);
     const per = await Promise.all(clubs.map(async (c) => ({ clubId: c.id, name: c.name, ...(await npsReport(db, [c.id], p.from, p.to)) })));
@@ -356,12 +368,12 @@ export async function widgetData(db: Db, ctx: Ctx, id: string, q: Q) {
       return { clubId: c.id, name: c.name, ...r, debtsKop: Number(r.debtsKop), noVisits: r.hasVisits ? r.noVisits : null };
     }));
     const items = [
-      { id: 'missedResponse', title: 'Лиды без первого ответа сверх нормы', hint: 'Откройте «Лиды»: просроченные выделены красным' },
-      { id: 'overdueTasks', title: 'Просроченные задачи', hint: '«Задачи» → фильтр «просрочено»' },
-      { id: 'debtsCount', title: 'Просроченные платежи клиентов', hint: '«Финансы» → «Долги»', money: 'debtsKop' },
-      { id: 'autopayFailed', title: 'Неудачные автосписания подписки', hint: 'Причина в карточке клиента; отправьте ссылку на оплату' },
-      { id: 'endingSoon', title: 'Абонементы заканчиваются в ближайшие 14 дней, продления нет', hint: 'Кандидаты в план продлений' },
-      { id: 'noVisits', title: 'Действующие клиенты не ходят 14+ дней', hint: 'Риск ухода: позвонить, пригласить на тренировку' },
+      { id: 'missedResponse', title: 'Лиды без первого ответа сверх нормы', hint: 'Откройте «Лиды»: просроченные выделены красным', go: { tab: 'leads', p: { filter: 'noresponse' } } },
+      { id: 'overdueTasks', title: 'Просроченные задачи', hint: '«Задачи» → фильтр «просрочено»', go: { tab: 'tasks', p: { scope: 'all' } } },
+      { id: 'debtsCount', title: 'Просроченные платежи клиентов', hint: '«Финансы» → «Долги»', money: 'debtsKop', go: { tab: 'finance', p: { view: 'debts' } } },
+      { id: 'autopayFailed', title: 'Неудачные автосписания подписки', hint: 'Причина в карточке клиента; отправьте ссылку на оплату', go: { tab: 'finance', p: { view: 'online' } } },
+      { id: 'endingSoon', title: 'Абонементы заканчиваются в ближайшие 14 дней, продления нет', hint: 'Кандидаты в план продлений', go: { tab: 'hot', p: { tab: 'list' } } },
+      { id: 'noVisits', title: 'Действующие клиенты не ходят 14+ дней', hint: 'Риск ухода: позвонить, пригласить на тренировку', go: { tab: 'hot', p: { tab: 'list' } } },
     ].map((it) => {
       const vals = per.map((p) => (p as unknown as Record<string, number | null>)[it.id]);
       const value = vals.every((v) => v === null) ? null : vals.reduce((a: number, v) => a + (v ?? 0), 0);
@@ -397,6 +409,9 @@ export function widgetTable(d: any): Table {
   if (d.widget === 'risks') return { title, columns: ['Показатель', 'Значение', 'Сумма, ₽', 'Что делать'],
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     rows: d.items.map((i: any) => [i.title, i.value, rub(i.moneyKop), i.hint]) };
+  if (d.tiles) return { title, columns: ['Показатель', 'Значение', 'Пояснение'],
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    rows: [...d.tiles.map((x: any) => [x.label, x.value, x.sub ?? '']), ...d.lists.flatMap((l: any) => l.rows.map((r: any) => [`${l.title}: ${r.text}`, r.right ?? '', r.sub ?? '']))] };
   if (d.widget === 'nps') return { title: `${title} ${d.from} — ${d.to}`, columns: ['Срез', 'Индекс', 'Оценок'],
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     rows: [['Итого', d.total.index, d.total.n], ...d.clubs.map((c: any) => [c.name, c.index, c.n]), ...d.byStaff.map((x: any) => [`Продавал: ${x.name}`, x.index, x.n])] };

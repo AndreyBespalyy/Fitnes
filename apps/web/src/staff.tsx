@@ -1,6 +1,6 @@
 // Шаг 18. Персонал: график и замены, табель, зарплата и ведомость; «Моё» — свой график, табель и расчёт.
 import { useEffect, useState, type FormEvent } from 'react';
-import { api, can, type Club, type Me } from './api.ts';
+import { api, can, type Club, type Me, navParams } from './api.ts';
 import { errText, toast } from './ui.ts';
 import { rub } from './memberships.tsx';
 
@@ -27,7 +27,7 @@ const thisMonth = () => new Date().toISOString().slice(0, 7);
 export function StaffTimePage({ me, clubs, clubId }: { me: Me; clubs: Club[]; clubId: string }) {
   const manage = can(me, 'staff.schedule'); const pay = can(me, 'payroll.manage');
   const tabs: [string, string, boolean][] = [['my', 'Моё', true], ['schedule', 'График', manage || can(me, 'staff.view')], ['timesheet', 'Табель', manage || pay], ['payroll', 'Зарплата', pay]];
-  const [tab, setTab] = useState(manage ? 'schedule' : 'my');
+  const [tab, setTab] = useState(() => (tabs.some((t) => t[0] === navParams('stafftime').tab && t[2]) ? navParams('stafftime').tab : manage ? 'schedule' : 'my'));
   const club = clubs.find((c) => c.id === clubId) ?? (clubs.length === 1 ? clubs[0] : null);
   return (
     <div style={{ display: 'grid', gap: 12 }}>

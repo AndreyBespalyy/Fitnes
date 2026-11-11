@@ -2,7 +2,7 @@
 // план продаж по клубу и менеджерам, нормы KPI, отчёт по продажам, словарь метрик, выгрузки.
 import { PlanDrill } from './insights.tsx';
 import { Fragment, useEffect, useState } from 'react';
-import { api, can, type Club, type Me } from './api.ts';
+import { api, can, type Club, type Go, type Me } from './api.ts';
 import { errText, toast } from './ui.ts';
 import { rub } from './memberships.tsx';
 
@@ -11,7 +11,7 @@ type Metric = { id: string; name: string; definition: string; formula: string; s
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Any = any;
 
-const ROLE_NAME: Record<string, string> = { owner: 'Собственник', gm: 'Управляющий', rop: 'Руководитель ОП', manager: 'Менеджер ОП', fin: 'Финансист' };
+const ROLE_NAME: Record<string, string> = { owner: 'Собственник', gm: 'Управляющий', rop: 'Руководитель ОП', manager: 'Менеджер ОП', fin: 'Финансист', desk: 'Администратор ресепшн', trainer: 'Тренер', admin: 'Администратор системы' };
 const LIGHT: Record<string, [string, string]> = { green: ['в темпе', 'ok'], yellow: ['отстаёт', 'warn'], red: ['сильно отстаёт', 'bad'], none: ['план не задан', ''] };
 const pctText = (v: number | null | undefined) => (v === null || v === undefined ? 'нет данных' : `${v.toLocaleString('ru-RU')} %`);
 const num = (v: number | null | undefined) => (v === null || v === undefined ? 'нет данных' : v.toLocaleString('ru-RU'));
@@ -21,7 +21,9 @@ const monthName = (m: string) => new Date(`${m}-01T12:00:00`).toLocaleDateString
 const todayIso = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; };
 const addD = (s: string, n: number) => { const d = new Date(`${s}T12:00:00`); d.setDate(d.getDate() + n); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; };
 
-export function DashPage({ me, clubs, clubId, openPerson }: { me: Me; clubs: Club[]; clubId: string; openPerson: (id: string) => void }) {
+export function DashPage({ me, clubs, clubId, openPerson, go: goTo, canGo, pickClub }: { me: Me; clubs: Club[]; clubId: string; openPerson: (id: string) => void; go: (g: Go) => void; canGo: (tab: string) => boolean; pickClub: (id: string) => void }) {
+  // Переход только в разделы, доступные роли; иначе окно не кликабельно
+  const nav = (g: Go) => (canGo(g.tab) ? () => goTo(g) : undefined);
   const [drill, setDrill] = useState<{ category: string | null; userId: string | null; month: string; clubId: string } | null>(null);
   const [layout, setLayout] = useState<Layout | null>(null);
   const [view, setView] = useState<'desk' | 'edit' | 'plan' | 'norms' | 'sales' | 'metrics'>('desk');
@@ -49,7 +51,7 @@ export function DashPage({ me, clubs, clubId, openPerson }: { me: Me; clubs: Clu
         <div className="tabs" role="group" aria-label="Рабочий стол">
           {tabs.filter((t) => t[2]).map(([k, t]) => <button key={k} aria-pressed={view === k} onClick={() => setView(k)}>{t}</button>)}
         </div>
-        {view === 'desk' && <div className="row small" style={{ gap: 6, flexWrap: 'wrap' }}>
+        {view === 'desk' && (dashView || can(me, 'crm.work')) && <div className="row small" style={{ gap: 6, flexWrap: 'wrap' }}>
           <label className="row">Месяц плана <input type="month" value={month} onChange={(e) => e.target.value && setMonth(e.target.value)} style={{ width: 'auto' }} /></label>
           <label className="row">Период <select value="" onChange={(e) => {
             const t = todayIso(); const v = e.target.value;
@@ -61,7 +63,7 @@ export function DashPage({ me, clubs, clubId, openPerson }: { me: Me; clubs: Clu
         </div>}
       </div>
       {drill && <PlanDrill clubId={drill.clubId} month={drill.month} category={drill.category} userId={drill.userId} onClose={() => setDrill(null)} openPerson={openPerson} />}
-      {view === 'desk' && (layout.widgets.length ? layout.widgets.map((w) => <Widget key={`${w}-${clubId}`} id={w} q={q} tick={tick} metrics={metrics} openPerson={openPerson}
+      {view === 'desk' && (layout.widgets.length ? layout.widgets.map((w) => <Widget key={`${w}-${clubId}`} id={w} q={q} tick={tick} metrics={metrics} openPerson={openPerson} nav={nav} pickClub={pickClub}
         onDrill={(x) => { const c = club?.id ?? (clubs.length === 1 ? clubs[0].id : null); if (!c) { toast('Выберите клуб вверху страницы, чтобы раскрыть цифру до клиентов'); return; } setDrill({ ...x, month, clubId: c }); }}
         title={layout.available.find((a) => a.id === w)?.title ?? w} />)
         : <div className="card"><p>На рабочем столе пока нет виджетов. Нажмите «Настроить» и выберите нужные.</p></div>)}
@@ -77,7 +79,8 @@ const SelectClub = () => <div className="card"><p>Выберите клуб в �
 
 /* ---------- обёртка виджета ---------- */
 type DrillFn = (x: { category: string | null; userId: string | null }) => void;
-function Widget({ id, q, tick, title, metrics, onDrill, openPerson }: { id: string; q: string; tick: number; title: string; metrics: Metric[]; onDrill: DrillFn; openPerson?: (id: string) => void }) {
+type Nav = { nav: (g: Go) => (() => void) | undefined; pickClub: (id: string) => void };
+function Widget({ id, q, tick, title, metrics, onDrill, openPerson, nav, pickClub }: { id: string; q: string; tick: number; title: string; metrics: Metric[]; onDrill: DrillFn; openPerson?: (id: string) => void } & Nav) {
   const [d, setD] = useState<Any>(null);
   const [err, setErr] = useState('');
   useEffect(() => { api<Any>('GET', `/api/dash/widget/${id}?${q}`).then((x) => { setD(x); setErr(''); }).catch((e) => setErr(errText(e))); }, [id, q, tick]);
@@ -93,7 +96,7 @@ function Widget({ id, q, tick, title, metrics, onDrill, openPerson }: { id: stri
       </div>
       {err && <p className="err">{err}</p>}
       {!d && !err && <p className="muted">Загрузка…</p>}
-      {d && <WidgetBody d={d} metrics={metrics} onDrill={onDrill} openPerson={openPerson} />}
+      {d && <WidgetBody d={d} metrics={metrics} onDrill={onDrill} openPerson={openPerson} nav={nav} pickClub={pickClub} />}
     </section>
   );
 }
@@ -101,36 +104,39 @@ const Hint = ({ id, metrics }: { id: string; metrics: Metric[] }) => {
   const m = metrics.find((x) => x.id === id);
   return m ? <span className="hint" tabIndex={0} title={`${m.definition}. Формула: ${m.formula}. Источник: ${m.source}. Обновление: ${m.delay}`}>?</span> : null;
 };
-const Kpi = ({ label, value, sub, metric, metrics, tone }: { label: string; value: string; sub?: string; metric?: string; metrics: Metric[]; tone?: string }) => (
-  <div className="card kpi-c"><span className="lbl">{label} {metric && <Hint id={metric} metrics={metrics} />}</span><b className={`num ${tone ?? ''}`}>{value}</b>{sub && <span className="small muted">{sub}</span>}</div>
+/** Нажатие мышью или Enter/пробел с клавиатуры */
+const clickable = (fn?: () => void) => (fn ? { role: 'button', tabIndex: 0, onClick: fn, onKeyDown: (e: React.KeyboardEvent) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); fn(); } } } : {});
+const Kpi = ({ label, value, sub, metric, metrics, tone, onClick }: { label: string; value: string; sub?: string; metric?: string; metrics: Metric[]; tone?: string; onClick?: () => void }) => (
+  <div className={`card kpi-c ${onClick ? 'click' : ''}`} {...clickable(onClick)}><span className="lbl">{label} {metric && <Hint id={metric} metrics={metrics} />}</span><b className={`num ${tone ?? ''}`}>{value}</b>{sub && <span className="small muted">{sub}</span>}{onClick && <span className="go" aria-hidden>›</span>}</div>
 );
 const Bar = ({ v }: { v: number | null }) => <div className="meter" aria-hidden><i style={{ width: `${Math.min(100, Math.max(0, v ?? 0))}%` }} /></div>;
 const Light = ({ l }: { l: string }) => <span className={`chip ${LIGHT[l]?.[1] ?? ''}`}>{LIGHT[l]?.[0] ?? l}</span>;
 
-function WidgetBody({ d, metrics, onDrill, openPerson }: { d: Any; metrics: Metric[]; onDrill: DrillFn; openPerson?: (id: string) => void }) {
+function WidgetBody({ d, metrics, onDrill, openPerson, nav, pickClub }: { d: Any; metrics: Metric[]; onDrill: DrillFn; openPerson?: (id: string) => void } & Nav) {
+  if (d.tiles) return <Panel d={d} nav={nav} openPerson={openPerson} />;
   if (d.widget === 'day') {
     const m = d.monthPlan;
     return <>
       <div className="kpis">
-        <Kpi label="Продажи сегодня" value={rub(d.day.salesKop)} sub={`${d.day.salesCount} шт.`} metric="sales" metrics={metrics} />
-        <Kpi label="Поступления" value={rub(d.day.inflowKop)} metric="inflow" metrics={metrics} />
-        <Kpi label="Расходы" value={rub(d.day.expensesKop)} metric="expenses" metrics={metrics} />
-        <Kpi label="Лиды сегодня" value={num(d.day.leads)} sub={`встреч на сегодня: ${d.day.meetings}`} metric="leads" metrics={metrics} />
-        <Kpi label="Посещения" value={num(d.day.visits)} metric="visits" metrics={metrics} />
-        <Kpi label="Конверсия месяца" value={pctText(d.day.conversion)} metric="conversion" metrics={metrics} />
+        <Kpi label="Продажи сегодня" value={rub(d.day.salesKop)} sub={`${d.day.salesCount} шт.`} metric="sales" metrics={metrics} onClick={nav({ tab: 'finance', p: { view: 'payments' } })} />
+        <Kpi label="Поступления" value={rub(d.day.inflowKop)} metric="inflow" metrics={metrics} onClick={nav({ tab: 'finance', p: { view: 'payments' } })} />
+        <Kpi label="Расходы" value={rub(d.day.expensesKop)} metric="expenses" metrics={metrics} onClick={nav({ tab: 'finance', p: { view: 'expenses' } })} />
+        <Kpi label="Лиды сегодня" value={num(d.day.leads)} sub={`встреч на сегодня: ${d.day.meetings}`} metric="leads" metrics={metrics} onClick={nav({ tab: 'leads' })} />
+        <Kpi label="Посещения" value={num(d.day.visits)} metric="visits" metrics={metrics} onClick={nav({ tab: 'access', p: { view: 'report' } })} />
+        <Kpi label="Конверсия месяца" value={pctText(d.day.conversion)} metric="conversion" metrics={metrics} onClick={nav({ tab: 'board' })} />
       </div>
       <div className="kpis">
-        <Kpi label={`План на ${monthName(d.month)}`} value={m.planKop === null ? 'план не задан' : rub(m.planKop)} metric="plan" metrics={metrics} />
-        <Kpi label="Факт" value={rub(m.factKop)} sub={pctText(m.percent)} metric="percent" metrics={metrics} />
-        <Kpi label="Прогноз" value={rub(m.forecastKop)} sub={m.deficitKop ? `не хватит ${rub(m.deficitKop)}` : m.planKop ? 'план будет выполнен' : undefined} metric="forecast" metrics={metrics} tone={m.deficitKop ? 'bad' : ''} />
-        <Kpi label="Нужно сегодня" value={m.dayPlanKop === null ? '—' : rub(m.dayPlanKop)} metric="day_plan" metrics={metrics} />
-        <Kpi label="Долги клиентов" value={rub(d.day.debtsKop)} metric="debts" metrics={metrics} tone={d.day.debtsKop ? 'bad' : ''} />
+        <Kpi label={`План на ${monthName(d.month)}`} value={m.planKop === null ? 'план не задан' : rub(m.planKop)} metric="plan" metrics={metrics} onClick={() => onDrill({ category: null, userId: null })} />
+        <Kpi label="Факт" value={rub(m.factKop)} sub={pctText(m.percent)} metric="percent" metrics={metrics} onClick={() => onDrill({ category: null, userId: null })} />
+        <Kpi label="Прогноз" value={rub(m.forecastKop)} sub={m.deficitKop ? `не хватит ${rub(m.deficitKop)}` : m.planKop ? 'план будет выполнен' : undefined} metric="forecast" metrics={metrics} tone={m.deficitKop ? 'bad' : ''} onClick={nav({ tab: 'reviews', p: { tab: 'forecast' } })} />
+        <Kpi label="Нужно сегодня" value={m.dayPlanKop === null ? '—' : rub(m.dayPlanKop)} metric="day_plan" metrics={metrics} onClick={nav({ tab: 'hot', p: { tab: 'day' } })} />
+        <Kpi label="Долги клиентов" value={rub(d.day.debtsKop)} metric="debts" metrics={metrics} tone={d.day.debtsKop ? 'bad' : ''} onClick={nav({ tab: 'finance', p: { view: 'debts' } })} />
       </div>
     </>;
   }
   if (d.widget === 'clubs') return (
     <div className="tbl"><table><thead><tr><th>Клуб</th><th>Продажи сегодня</th><th>Лиды</th><th className="hide-narrow">Посещения</th><th>Факт месяца</th><th>План</th><th>Прогноз</th><th className="hide-narrow">Конверсия</th><th className="hide-narrow">Долги</th></tr></thead>
-      <tbody>{d.perClub.map((c: Any) => <tr key={c.clubId}><td><b>{c.name}</b></td><td className="num">{rub(c.salesKop)}</td><td className="num">{c.leads}</td><td className="num hide-narrow">{num(c.visits)}</td>
+      <tbody>{d.perClub.map((c: Any) => <tr key={c.clubId}><td><button className="btn sm" title="Открыть рабочий стол клуба" onClick={() => pickClub(c.clubId)}><b>{c.name}</b></button></td><td className="num">{rub(c.salesKop)}</td><td className="num">{c.leads}</td><td className="num hide-narrow">{num(c.visits)}</td>
         <td className="num">{rub(c.factKop)}<Bar v={c.percent} /></td><td className="num">{c.planKop === null ? 'не задан' : `${rub(c.planKop)} · ${pctText(c.percent)}`}</td>
         <td className={`num ${c.deficitKop ? 'bad' : ''}`}>{rub(c.forecastKop)}</td><td className="num hide-narrow">{pctText(c.conversion)}</td><td className="num hide-narrow">{rub(c.debtsKop)}</td></tr>)}</tbody></table></div>
   );
@@ -161,7 +167,7 @@ function WidgetBody({ d, metrics, onDrill, openPerson }: { d: Any; metrics: Metr
         {d.rows.length === 0 && <tr><td colSpan={9} className="muted">В отделе продаж нет сотрудников</td></tr>}</tbody></table></div>
   );
   if (d.widget === 'funnel_sources' || d.widget === 'funnel_managers') {
-    const Row = ({ r, total }: { r: Any; total?: boolean }) => <tr className={total ? 'total' : ''}><td>{total ? <b>{r.name}</b> : r.name}</td><td className="num">{r.leads}</td>
+    const Row = ({ r, total }: { r: Any; total?: boolean }) => <tr className={total ? 'total' : ''}><td>{total ? <b>{r.name}</b> : <button className="btn sm" onClick={nav(d.widget === 'funnel_sources' ? { tab: 'leads' } : { tab: 'reviews', p: { tab: 'team' } })}>{r.name}</button>}</td><td className="num">{r.leads}</td>
       <td className="num">{r.contacted} <span className="small muted">{pctText(r.contactedPct)}</span></td><td className="num">{r.meetingSet} <span className="small muted">{pctText(r.meetingSetPct)}</span></td>
       <td className="num">{r.meetingDone} <span className="small muted">{pctText(r.meetingDonePct)}</span></td><td className="num"><b>{r.bought}</b> <span className="small muted">{pctText(r.boughtPct)}</span><Bar v={r.boughtPct} /></td></tr>;
     return <>
@@ -175,12 +181,12 @@ function WidgetBody({ d, metrics, onDrill, openPerson }: { d: Any; metrics: Metr
       const r = d.rows[0];
       return <><p className="small muted" style={{ margin: 0 }}>{d.from === d.to ? `За ${d2(d.from)}` : `${d2(d.from)} — ${d2(d.to)}`}. Норма — на рабочий день, её задаёт клуб.</p>
         <div className="kpis">{r.metrics.map((m: Any) => <Kpi key={m.id} label={m.name} value={num(m.value)} sub={m.norm === null ? undefined : `норма ${m.norm}`} metric={m.id} metrics={metrics}
-          tone={m.status === 'red' ? 'bad' : m.status === 'green' ? 'ok' : ''} />)}</div></>;
+          tone={m.status === 'red' ? 'bad' : m.status === 'green' ? 'ok' : ''} onClick={nav(KPI_GO[m.id] ?? { tab: 'reviews', p: { tab: 'my' } })} />)}</div></>;
     }
     return <>
       <p className="small muted" style={{ margin: 0 }}>{d2(d.from)} — {d2(d.to)} ({d.days} дн.). Под значением — норма за период. Звонки до подключения телефонии — выполненные задачи «позвонить».</p>
       <div className="tbl"><table><thead><tr><th>Сотрудник</th>{d.metrics.map((m: Any) => <th key={m.id}>{m.name} <Hint id={m.id} metrics={metrics} /></th>)}</tr></thead>
-        <tbody>{d.rows.map((r: Any) => <tr key={r.userId}><td><b>{r.name}</b>{d.clubs.length > 1 && <div className="small muted">{r.club}</div>}</td>
+        <tbody>{d.rows.map((r: Any) => <tr key={r.userId}><td><button className="btn sm" title="Обзор сотрудника" onClick={nav({ tab: 'reviews', p: { tab: 'team', user: r.userId } })}><b>{r.name}</b></button>{d.clubs.length > 1 && <div className="small muted">{r.club}</div>}</td>
           {r.metrics.map((m: Any) => <td key={m.id} className={`num kpi-${m.status}`}>{num(m.value)}{m.norm !== null && <div className="small muted">{m.norm}</div>}</td>)}</tr>)}</tbody></table></div>
     </>;
   }
@@ -207,12 +213,38 @@ function WidgetBody({ d, metrics, onDrill, openPerson }: { d: Any; metrics: Metr
   }
   if (d.widget === 'risks') return (
     <div className="risk-list">{d.items.map((i: Any) => (
-      <div key={i.id} className={`item row between ${i.value ? 'risk-on' : ''}`} style={{ gap: 8 }}>
+      <div key={i.id} className={`item row between ${i.go && nav(i.go) ? 'click' : ''} ${i.value ? 'risk-on' : ''}`} style={{ gap: 8 }} {...clickable(i.go ? nav(i.go) : undefined)}>
         <span><b>{i.title}</b><div className="small muted">{i.hint}{d.clubs.length > 1 && i.value ? ` · ${i.perClub.filter((p: Any) => p.value).map((p: Any) => `${p.name}: ${p.value}`).join(', ')}` : ''}</div></span>
         <b className={`num ${i.value ? 'bad' : 'ok'}`} style={{ fontSize: 20 }}>{num(i.value)}{i.moneyKop ? <div className="small">{rub(i.moneyKop)}</div> : null}</b>
       </div>))}</div>
   );
   return null;
+}
+
+const KPI_GO: Record<string, Go> = { calls: { tab: 'calls' }, messages: { tab: 'chats', p: { filter: 'mine' } }, meetings_set: { tab: 'board' }, meetings_done: { tab: 'board' },
+  sales: { tab: 'board' }, refusals: { tab: 'board' }, tasks_done: { tab: 'tasks' }, tasks_overdue: { tab: 'tasks' }, first_response: { tab: 'leads', p: { filter: 'noresponse' } } };
+
+/* ---------- окна ролей: плитки и списки, всё кликабельно ---------- */
+function Panel({ d, nav, openPerson }: { d: Any; nav: Nav['nav']; openPerson?: (id: string) => void }) {
+  return (
+    <div style={{ display: 'grid', gap: 10 }}>
+      <div className="kpis">{d.tiles.map((x: Any) => (
+        <div key={x.label} className={`card kpi-c ${x.go && nav(x.go) ? 'click' : ''}`} {...clickable(x.go ? nav(x.go) : undefined)}>
+          <span className="lbl">{x.label}</span><b className={`num ${x.tone === 'ok' ? '' : x.tone ?? ''}`}>{typeof x.value === 'number' ? x.value.toLocaleString('ru-RU') : x.value}</b>
+          {x.sub && <span className="small muted">{x.sub}</span>}{x.go && nav(x.go) && <span className="go" aria-hidden>›</span>}
+        </div>))}</div>
+      {d.lists.map((l: Any) => (
+        <div key={l.title} style={{ display: 'grid', gap: 4 }}>
+          <div className="row between"><b className="small">{l.title}</b>{l.more && <button className="btn sm" onClick={nav(l.more)}>Все ›</button>}</div>
+          {l.rows.map((r: Any, i: number) => (
+            <div key={i} className={`item row between ${r.personId || (r.go && nav(r.go)) ? 'click' : ''}`} style={{ gap: 8 }} {...clickable(r.personId ? () => openPerson?.(r.personId) : r.go ? nav(r.go) : undefined)}>
+              <span><b>{r.text}</b>{r.sub && <div className="small muted">{r.sub}</div>}</span>
+              {r.right && <span className={`small num ${r.tone === 'ok' ? '' : r.tone ?? ''}`} style={{ whiteSpace: 'nowrap' }}>{r.right}</span>}
+            </div>))}
+          {!l.rows.length && <p className="small muted" style={{ margin: 0 }}>{l.empty}</p>}
+        </div>))}
+    </div>
+  );
 }
 
 /* ---------- настройка рабочего стола ---------- */
