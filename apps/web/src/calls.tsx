@@ -3,6 +3,7 @@ import { CallEvaluation } from './insights.tsx';
 import { useEffect, useState, type FormEvent } from 'react';
 import { api, can, type Club, type Me, type Staff } from './api.ts';
 import { dt, errText, toast } from './ui.ts';
+import { ExportButton } from './privacy.tsx';
 
 type CallRow = {
   id: string; clubId: string; startedAt: string; direction: 'in' | 'out'; durationSec: number | null; phone: string | null; personId: string | null; personName: string | null;
@@ -323,7 +324,7 @@ function Quality({ clubs, clubId }: { clubs: Club[]; clubId: string }) {
   return (
     <>
       <div className="row"><label className="f">С<input type="date" value={from} onChange={(e) => setFrom(e.target.value)} /></label><label className="f">По<input type="date" value={to} onChange={(e) => setTo(e.target.value)} /></label>
-        <a className="btn sm" href={`/api/ai/summaries/export?${qs}&format=xlsx`}>Резюме в Excel</a><a className="btn sm" href={`/api/ai/summaries/export?${qs}&format=csv`}>CSV</a></div>
+        <ExportButton url={`/api/ai/summaries/export?${qs}&format=xlsx`}>Резюме в Excel</ExportButton><ExportButton url={`/api/ai/summaries/export?${qs}&format=csv`}>CSV</ExportButton></div>
       {!t ? <p className="muted">Загрузка…</p> : (<>
         <div className="kpis">
           <div className="card"><span className="lbl">Принято без существенных правок</span><b className={t.acceptedPct === null ? '' : t.acceptedPct >= d!.target ? 'num ok' : 'num bad'}>{pct(t.acceptedPct)}</b><span className="small">цель {d!.target} %; правки до {d!.minorEditPct} % текста считаются мелкими; подтверждено {t.confirmed}</span></div>

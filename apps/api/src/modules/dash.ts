@@ -9,6 +9,7 @@ import { badRequest, forbidden } from '../errors.ts';
 import { PERMISSIONS as P } from '../roles.ts';
 import { toCsv, toXlsx, type Cell, type Table } from '../lib/xlsx.ts';
 import { daysBetween } from './memberships.ts';
+import { guardExport } from './privacy.ts';
 
 export const CATS = ['new', 'renewal', 'return', 'subscription'] as const;
 export const CAT_NAME: Record<string, string> = { new: 'Новые клиенты', renewal: 'Продления', return: 'Возобновление бывших', subscription: 'Подписки' };
@@ -570,13 +571,15 @@ export function dashRoutes(app: FastifyInstance, pool: pg.Pool) {
         where p.kind in ('charge', 'refund') and p.club_id = any($1) and (p.created_at at time zone c.timezone)::date between $2 and $3
           and ($4::uuid is null or m.created_by = $4) and ($5::text is null or p.sale_category = $5)
         order by p.created_at limit 20000`, [clubs.map((c) => c.id), p.from, p.to, userId, q.category || null])).rows;
-      if (q.format === 'csv' || q.format === 'xlsx') await audit(db, ctx, 'report.exported', 'report', 'sales', null, { ...q, userId });
       return { from: p.from, to: p.to, rows: rows.map((r) => ({ ...r, amountKop: Number(r.kop), categoryName: CAT_NAME[r.category] ?? r.category })) };
     });
     if (q.format === 'csv' || q.format === 'xlsx') {
       const METHOD: Record<string, string> = { cash: 'наличные', card_terminal: 'карта (терминал)', sbp: 'СБП', online: 'онлайн', bank_transfer: 'перевод' };
       const t: Table = { title: `Продажи ${res.from}–${res.to}`, columns: ['Дата и время', 'Клуб', 'Клиент', 'Тариф', 'Категория', 'Менеджер', 'Сумма, ₽', 'Способ', 'Операция'],
         rows: res.rows.map((r) => [r.at, r.club, r.person, r.product, r.categoryName, r.seller, r.amountKop / 100, METHOD[r.method] ?? r.method, r.kind === 'refund' ? 'возврат' : 'оплата'] as Cell[]) };
+      // В отчёте имена клиентов: сверх лимита клуба — только с согласованием (защита базы), в конце файла — кто выгрузил
+      const sign = await guardExport(pool, ctx, { report: 'sales', title: t.title, clubId: q.clubId || null, params: { ...q, userId: own ? ctx.userId : q.userId || null }, rows: t.rows.length, format: q.format });
+      t.rows.push([], [sign]);
       return sendTable(reply, t, q.format, t.title);
     }
     return { ...res, total: res.rows.reduce((a, r) => a + r.amountKop, 0) };

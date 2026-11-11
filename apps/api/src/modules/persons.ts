@@ -5,6 +5,7 @@ import { withCtx } from '../db.ts';
 import { PERMISSIONS as P } from '../roles.ts';
 
 import { maskPhone as mask } from './crm.ts';
+import { trackAccess } from './privacy.ts';
 
 export function personRoutes(app: FastifyInstance, pool: pg.Pool) {
   app.get('/api/persons', async (req) => {
@@ -12,6 +13,7 @@ export function personRoutes(app: FastifyInstance, pool: pg.Pool) {
     const { clubId, q } = req.query as { clubId?: string; q?: string };
     const digits = (q ?? '').replace(/\D/g, '');
     const text = (q ?? '').trim();
+    await trackAccess(pool, ctx, 'search', { clubId: clubId || null });
     return withCtx(pool, ctx, async (db) => {
       const rows = (await db.query(
         `select p.id, p.full_name as "fullName", p.segment, p.home_club_id as "clubId", c.name as "clubName",

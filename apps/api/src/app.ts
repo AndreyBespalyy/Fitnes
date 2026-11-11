@@ -31,11 +31,14 @@ import { onboardingRoutes } from './modules/onboarding.ts';
 import { scheduleRoutes, startScheduleWorker } from './modules/schedule.ts';
 import { retentionRoutes, startRetentionWorker } from './modules/retention.ts';
 import { mobileRoutes, startPushWorker } from './modules/mobile.ts';
+import { privacyRoutes } from './modules/privacy.ts';
+import { pdRoutes } from './modules/pd.ts';
+import { monitorRoutes, recordResponse, startMonitorWorker } from './modules/monitor.ts';
 import { aiConfigFromEnv, type AiConfig } from './lib/aiClient.ts';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-export async function buildApp(pool: pg.Pool, opts: { webDist?: string; secureCookie?: boolean; logger?: boolean; storageDir?: string; fiscalWorker?: boolean; messagingWorker?: boolean; billingWorker?: boolean; aiWorker?: boolean; scoringWorker?: boolean; pushWorker?: boolean; insightsWorker?: boolean; scheduleWorker?: boolean; retentionWorker?: boolean; ai?: AiConfig | null; fetch?: typeof fetch } = {}) {
+export async function buildApp(pool: pg.Pool, opts: { webDist?: string; secureCookie?: boolean; logger?: boolean; storageDir?: string; fiscalWorker?: boolean; messagingWorker?: boolean; billingWorker?: boolean; aiWorker?: boolean; scoringWorker?: boolean; pushWorker?: boolean; insightsWorker?: boolean; scheduleWorker?: boolean; retentionWorker?: boolean; monitorWorker?: boolean; ai?: AiConfig | null; fetch?: typeof fetch } = {}) {
   const app = Fastify({ logger: opts.logger ?? false, trustProxy: true });
   await app.register(cookie);
 
@@ -77,6 +80,9 @@ export async function buildApp(pool: pg.Pool, opts: { webDist?: string; secureCo
     return reply.code(500).send({ error: 'internal', message: 'Внутренняя ошибка. Попробуйте ещё раз' });
   });
 
+  // Ошибки сервера считаются для раздела «Состояние системы» и оповещений
+  app.addHook('onResponse', async (req, reply) => { if (req.url.startsWith('/api/')) recordResponse(reply.statusCode); });
+
   app.get('/api/health', async () => {
     await pool.query('select 1');
     return { ok: true };
@@ -111,6 +117,12 @@ export async function buildApp(pool: pg.Pool, opts: { webDist?: string; secureCo
   onboardingRoutes(app, pool);
   scheduleRoutes(app, pool, { fetch: opts.fetch });
   retentionRoutes(app, pool, { fetch: opts.fetch });
+  privacyRoutes(app, pool);
+  pdRoutes(app, pool);
+  // Состояние системы: BACKUP_DIR — папка резервных копий сервера (подключается к контейнеру только для чтения)
+  const monitorOpts = { storage, backupDir: process.env.BACKUP_DIR || undefined, fetch: opts.fetch };
+  monitorRoutes(app, pool, monitorOpts);
+  if (opts.monitorWorker) { const stop = startMonitorWorker(pool, monitorOpts); app.addHook('onClose', async () => stop()); }
   // Фоновая отправка чеков в облачную кассу (в тестах выключена, там вызывается напрямую)
   if (opts.messagingWorker) { const stop = startMessagingWorker(pool, opts.fetch); app.addHook('onClose', async () => stop()); }
   if (opts.billingWorker) { const stop = startBillingWorker(pool, opts.fetch); app.addHook('onClose', async () => stop()); }
