@@ -31,7 +31,7 @@ export const RULES: Record<Kind, { b: number; w: Record<string, number> }> = {
   purchase: { b: -1.9, w: { fast: 0.4, meet_set: 0.9, meet_done: 1.4, touch: 0.25, age: -0.35, recent: 0.6, inbound: 0.8, src: 3, stage: 0.8, former: 0.3, interested: 1, thinking: 0.3 } },
   renewal: { b: -0.8, w: { visits: 0.15, trend: 0.4, tenure: 0.3, debt: -0.9, left: -0.02, interested: 0.8, thinking: 0.2 } },
   return: { b: -1.6, w: { past_visits: 0.6, count: 0.4, months: -0.18, interested: 0.8 } },
-  churn: { b: -2.4, w: { idle: 0.11, drop: 1.1, debt: 0.6, new: 0.4 } },
+  churn: { b: -2.4, w: { idle: 0.11, drop: 1.1, debt: 0.6, new: 0.4, freeze: 0.5, complaint: 1.2 } },
 };
 const FEATS: Record<Kind, Feat[]> = {
   purchase: PURCHASE_FEATS,
@@ -48,6 +48,7 @@ const FEATS: Record<Kind, Feat[]> = {
   churn: [
     { id: 'idle', plus: 'давно не был в клубе', minus: 'ходит' }, { id: 'drop', plus: 'стал ходить заметно реже', minus: '' },
     { id: 'debt', plus: 'есть долг', minus: '' }, { id: 'new', plus: 'клиент первого месяца', minus: '' },
+    { id: 'freeze', plus: 'часто замораживает абонемент', minus: '' }, { id: 'complaint', plus: 'недавно поставил низкую оценку клубу', minus: '' },
   ],
 };
 const TRAINABLE = ['fast', 'meet_set', 'meet_done', 'touch', 'src', 'former', 'interested', 'thinking'];
@@ -174,11 +175,13 @@ async function churnRows(db: Db, clubId: string, today: string): Promise<Row[]> 
   // Без данных о посещениях (турникет не подключён) риск ухода не считаем: данных недостаточно
   if (!(await db.query(`select 1 from visits where club_id = $1 limit 1`, [clubId])).rowCount) return [];
   const rows = (await db.query(
-    `select m.person_id, min(m.starts_on) as started, (array_agg(m.created_by order by m.created_at desc))[1] as seller,
+    `select m.person_id, min(m.starts_on) as started, (array_agg(m.created_by order by m.created_at desc))[1] as seller, (array_agg(m.product_id order by m.created_at desc))[1] as product_id,
        (select max(v.visited_at) from visits v where v.person_id = m.person_id and v.club_id = m.club_id) as last_visit,
        (select count(*) from visits v where v.person_id = m.person_id and v.club_id = m.club_id and v.visited_at > now() - interval '30 days')::int as v30,
        (select count(*) from visits v where v.person_id = m.person_id and v.club_id = m.club_id and v.visited_at between now() - interval '60 days' and now() - interval '30 days')::int as v60,
-       exists (select 1 from charges ch where ch.person_id = m.person_id and ch.club_id = m.club_id and ch.status = 'due' and ch.due_on < $2::date) as debt
+       exists (select 1 from charges ch where ch.person_id = m.person_id and ch.club_id = m.club_id and ch.status = 'due' and ch.due_on < $2::date) as debt,
+       (select count(*) from freezes f join memberships fm on fm.id = f.membership_id where fm.person_id = m.person_id and f.club_id = m.club_id and f.starts_on > $2::date - 180)::int as freezes,
+       (select min(sv.score) from surveys sv where sv.person_id = m.person_id and sv.club_id = m.club_id and sv.status = 'answered' and sv.answered_at > now() - interval '60 days') as low_score
      from memberships m
      where m.club_id = $1 and m.status = 'active' and m.kind in ('term', 'visits', 'subscription') and m.starts_on <= $2::date - 14 and (m.ends_on is null or m.ends_on > $2::date + 30)
      group by m.person_id, m.club_id`, [clubId, today])).rows;
@@ -186,9 +189,10 @@ async function churnRows(db: Db, clubId: string, today: string): Promise<Row[]> 
   return rows.map((r) => {
     const idle = daysAgo(r.last_visit ?? r.started, now)!;
     return {
-      person_id: r.person_id, owner_id: r.seller, opportunity_id: null,
-      x: { idle: Math.min(45, idle), drop: r.v60 >= 4 && r.v30 < r.v60 / 2 ? 1 : 0, debt: r.debt ? 1 : 0, new: daysAgo(r.started, now)! < 45 ? 1 : 0 },
-      meta: { idle: Math.round(idle) },
+      person_id: r.person_id, owner_id: r.seller, opportunity_id: null, product_id: r.product_id,
+      x: { idle: Math.min(45, idle), drop: r.v60 >= 4 && r.v30 < r.v60 / 2 ? 1 : 0, debt: r.debt ? 1 : 0, new: daysAgo(r.started, now)! < 45 ? 1 : 0,
+        freeze: r.freezes >= 2 ? 1 : 0, complaint: r.low_score !== null && r.low_score <= 6 ? 1 : 0 },
+      meta: { idle: Math.round(idle), freezes: r.freezes, lowScore: r.low_score },
     };
   });
 }
@@ -254,14 +258,23 @@ async function productsOf(db: Db, clubId: string): Promise<Product[]> {
      from products p where p.club_id = $1 and p.is_active and p.kind in ('term', 'visits', 'subscription')`, [clubId])).rows
     .filter((p) => p.price !== null).map((p) => ({ ...p, price: Number(p.price) }));
 }
+/** Подсказка, что сказать клиенту с риском ухода: от главной причины к второстепенным */
+export function churnScript(x: Record<string, number>, freezeAllowed: boolean) {
+  const say: string[] = [];
+  if (x.complaint) say.push('Начните с его оценки: извинитесь, спросите, что именно не понравилось, и скажите, что исправили или исправите');
+  if (x.debt) say.push('Мягко напомните о платеже и предложите оплатить по ссылке; если трудно — предложите перенести платёж');
+  if (x.drop || (x.idle ?? 0) >= 14) say.push('Спросите, что мешает ходить (время, нагрузка, тренер), и пригласите на конкретное занятие на этой неделе');
+  if (x.new) say.push('Клиент только начал: предложите вводную тренировку или занятие с тренером, чтобы не бросил');
+  if (x.freeze) say.push('Часто замораживает: узнайте, удобно ли расписание, предложите другое время или формат');
+  else if (freezeAllowed && (x.idle ?? 0) >= 21) say.push('Если сейчас не до клуба — предложите заморозку вместо того, чтобы терять дни');
+  return say.length ? say.join('. ') : 'Позвоните, узнайте, как дела с тренировками, пригласите на занятие';
+}
 const rub = (kop: number) => `${new Intl.NumberFormat('ru-RU').format(Math.round(kop / 100))} ₽`;
 function offerFor(kind: Kind, r: Row, products: Product[], model: string) {
   const own = products.find((p) => p.id === r.product_id);
   const main = products.filter((p) => (model === 'subscription' ? p.kind === 'subscription' : p.kind !== 'subscription'));
   const popular = [...main].sort((a, b) => b.sold - a.sold || a.price - b.price)[0];
-  if (kind === 'churn') {
-    return { text: `Позвонить, узнать, что мешает ходить, пригласить на тренировку${own?.freeze ? '; если нужно, предложить заморозку' : ''}` };
-  }
+  if (kind === 'churn') return { text: churnScript(r.x, !!own?.freeze) };
   const p = own ?? popular;
   if (!p) return null;
   const verb = kind === 'renewal' ? 'Продлить' : kind === 'return' ? 'Вернуться на' : 'Предложить';
@@ -276,6 +289,8 @@ function explain(kind: Kind, x: Record<string, number>, m: { b: number; w: Recor
     let text = c > 0 ? f.plus : f.minus;
     if (f.id === 'age') text += `: ${meta.days} дн.`;
     if (f.id === 'idle') text += `: ${meta.idle} дн.`;
+    if (f.id === 'freeze') text += `: ${meta.freezes} раза за полгода`;
+    if (f.id === 'complaint') text += `: ${meta.lowScore} из 10`;
     if (f.id === 'months') text += `: ${meta.months} мес. назад`;
     if (f.id === 'visits') text += `: ${meta.visits30} за 30 дн.`;
     return { effect: c > 0 ? '+' : '-', text };

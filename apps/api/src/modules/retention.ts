@@ -10,6 +10,7 @@ import { badRequest, notFound } from '../errors.ts';
 import { PERMISSIONS as P } from '../roles.ts';
 import { clubToday } from './memberships.ts';
 import { processNewbies } from './newbie.ts';
+import { churnPlays, trackChurnOutcomes } from './churn.ts';
 import { conversationFor, deliver, queueMessage, renderTemplate } from './messaging.ts';
 import type { Fetch } from './msgProviders.ts';
 
@@ -67,12 +68,12 @@ export async function responsibleFor(db: Db, personId: string, clubId: string) {
     where a.club_id = $1 and a.role_code in ('manager', 'rop') and u.status = 'active'
     order by a.role_code = 'rop', (select count(*) from tasks t where t.assignee_id = u.id and t.done_at is null), u.full_name limit 1`, [clubId])).rows[0]?.id ?? null) as string | null;
 }
-async function task(db: Db, actor: Actor, clubId: string, personId: string, title: string, dueHours = 24) {
+export async function task(db: Db, actor: Actor, clubId: string, personId: string, title: string, dueHours = 24) {
   const assignee = await responsibleFor(db, personId, clubId);
   return (await db.query(`insert into tasks(tenant_id, club_id, assignee_id, person_id, kind, title, due_at, created_by) values ($1,$2,$3,$4,'call',$5, now() + make_interval(hours => $6::int), $7) returning id`,
     [actor.tenantId, clubId, assignee, personId, title, dueHours, actor.userId])).rows[0].id as string;
 }
-async function sendText(db: Db, f: Fetch | null, actor: Actor, personId: string, clubId: string, text: string) {
+export async function sendText(db: Db, f: Fetch | null, actor: Actor, personId: string, clubId: string, text: string) {
   const conv = await conversationFor(db, actor, personId, clubId, true);
   if (!conv || conv === 'new') return null;
   const mid = await queueMessage(db, actor, conv, text, { auto: true });
@@ -179,8 +180,9 @@ export async function processRetention(pool: pg.Pool, f: Fetch | null) {
       await withCtx(pool, sys, async (db) => {
         await trackResults(db, actor, c.id);
         await processNewbies(db, actor, c.id, c.today);
+        await trackChurnOutcomes(db, c.id);
         // Предложения уходят только в рабочее время клуба
-        if (c.h >= Math.max(11, c.wf) && c.h < c.wt) await earlyRenewals(db, f, actor, c.id, c.today);
+        if (c.h >= Math.max(11, c.wf) && c.h < c.wt) { await earlyRenewals(db, f, actor, c.id, c.today); await churnPlays(db, f, actor, c.id); }
       }).catch((e) => console.error('Удержание:', (e as Error).message));
     }
   }
