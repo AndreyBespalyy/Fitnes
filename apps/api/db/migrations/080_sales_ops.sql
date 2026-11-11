@@ -11,7 +11,6 @@ create table sales_ops_settings (
   newbie_days int not null default 45 check (newbie_days between 14 and 120),            -- новички за сколько дней
   newbie_min_visits int not null default 4 check (newbie_min_visits between 1 and 30),   -- меньше стольких визитов в первый месяц — в список
   exclude_low_visits boolean not null default true,                                       -- члены клуба с 0–2 посещениями не идут в обзвон базы
-  notify_telegram boolean not null default true,                                          -- личные сообщения в Telegram через бота сотрудников
   updated_by uuid references users(id),
   updated_at timestamptz not null default now(),
   check (escalate_minutes > remind_minutes)
@@ -71,6 +70,25 @@ create table person_not_duplicates (
 );
 alter table person_not_duplicates enable row level security;
 create policy t_pnd on person_not_duplicates using (tenant_id = app_tenant()) with check (tenant_id = app_tenant());
+
+-- Уведомления сотрудникам внутри CRM (колокольчик в шапке + push приложения). Решение Андрея 12.11.2026: вся связь — в CRM,
+-- без Telegram-групп и личных сообщений бота
+create table staff_notifications (
+  id uuid primary key default gen_random_uuid(),
+  tenant_id uuid not null references tenants(id),
+  club_id uuid references clubs(id),
+  user_id uuid not null references users(id) on delete cascade,
+  kind text not null,                 -- lead_remind, lead_escalate, renewals, newbies, weekly, marketing, lead_daily
+  title text not null,
+  body text,
+  link jsonb,                         -- {tab, p}: какой экран открыть
+  created_at timestamptz not null default now(),
+  read_at timestamptz
+);
+create index staff_notifications_user on staff_notifications (user_id, created_at desc);
+alter table staff_notifications enable row level security;
+create policy t_snot on staff_notifications using (tenant_id = app_tenant() and (club_id is null or app_club_visible(club_id)))
+  with check (tenant_id = app_tenant());
 
 -- Что уже отправлено (чтобы сводки и сигналы не дублировались): клуб, вид, период
 create table sales_ops_sent (

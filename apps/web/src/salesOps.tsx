@@ -67,7 +67,7 @@ function LeadsSpeed({ clubId, openPerson }: { clubId: string; openPerson: (id: s
     <>
       <p className="muted" style={{ margin: 0, maxWidth: 780 }}>
         Новая заявка ждёт кнопку «Беру в работу». Через {s.norm} мин без неё менеджеру приходит напоминание, через {s.escalateAfter} мин — сигнал руководителю отдела
-        и задача. Сообщения приходят лично в Telegram через бота сотрудников (привязка — в «Профиле»).
+        и задача. Сигналы приходят в CRM: колокольчик «Уведомления» в шапке и push в приложении на телефоне.
       </p>
       <div className="card" style={{ display: 'grid', gap: 8 }}>
         <h2>Ждут «Беру в работу» ({data.waiting.length})</h2>
@@ -233,7 +233,7 @@ function Funnel({ clubId }: { clubId: string }) {
       </table></div></div>
       <div className="row" style={{ gap: 6 }}><button className="btn sm" onClick={() => preview('weekly')}>Как выглядит недельная сводка</button><button className="btn sm" onClick={() => preview('marketing')}>Как выглядит маркетинг-дайджест</button></div>
       {pv && <pre className="card small" style={{ whiteSpace: 'pre-wrap', margin: 0 }}>{pv}</pre>}
-      <p className="small muted" style={{ margin: 0 }}>Недельная сводка уходит собственнику, управляющему и РОПу в понедельник в 9:00, маркетинг-дайджест — собственнику и управляющему в 20:00. Отказаться — команда /stop боту сотрудников.</p>
+      <p className="small muted" style={{ margin: 0 }}>Недельная сводка уходит собственнику, управляющему и РОПу в понедельник в 9:00, маркетинг-дайджест — собственнику и управляющему в 20:00. Приходят в колокольчик «Уведомления» в шапке CRM.</p>
     </>
   );
 }
@@ -284,7 +284,7 @@ function BaseCleanup({ clubId, openPerson }: { clubId: string; openPerson: (id: 
 }
 
 /* ---------- Настройки ---------- */
-type Sets = { remindMinutes: number; escalateMinutes: number; newbieDays: number; newbieMinVisits: number; excludeLowVisits: boolean; notifyTelegram: boolean };
+type Sets = { remindMinutes: number; escalateMinutes: number; newbieDays: number; newbieMinVisits: number; excludeLowVisits: boolean };
 function Settings({ clubId }: { clubId: string }) {
   const { data, err, setErr } = useLoad<{ settings: Sets; canManage: boolean }>(`/api/sales-ops/settings?clubId=${clubId}`, [clubId]);
   const [f, setF] = useState<Sets | null>(null);
@@ -299,7 +299,6 @@ function Settings({ clubId }: { clubId: string }) {
       {ro && <p className="small muted" style={{ margin: 0 }}>Менять может управляющий или собственник.</p>}
       <div className="grid2">{num('remindMinutes', 'Напоминание менеджеру, мин')}{num('escalateMinutes', 'Сигнал РОПу, мин')}{num('newbieDays', 'Новички: за сколько дней')}{num('newbieMinVisits', 'Новички: визитов в 1-й месяц меньше')}</div>
       <label className="row" style={{ gap: 8 }}><input type="checkbox" disabled={ro} checked={f.excludeLowVisits} onChange={(e) => setF({ ...f, excludeLowVisits: e.target.checked })} />Не звонить членам клуба с 0–2 посещениями за всё время</label>
-      <label className="row" style={{ gap: 8 }}><input type="checkbox" disabled={ro} checked={f.notifyTelegram} onChange={(e) => setF({ ...f, notifyTelegram: e.target.checked })} />Присылать сигналы и сводки лично в Telegram (бот сотрудников)</label>
       {!ro && <div><button className="btn pri" onClick={save}>Сохранить</button></div>}
     </div>
   );

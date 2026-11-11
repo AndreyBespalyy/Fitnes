@@ -7,25 +7,23 @@
 //  — списки обзвона на каждого менеджера: новые, продления, база; отдельно рекурренты и «ни рубля»;
 //  — воронка «обращение → в работе → встреча → дошёл → продажа» по каналам и менеджерам, источники и «без источника»;
 //  — недельная сводка клуба и вечерний маркетинг-дайджест.
-// Сигналы и сводки уходят сотрудникам лично через бота сотрудников (в группы Telegram — позже, по решению Андрея).
+// Сигналы и сводки приходят сотрудникам внутри CRM: колокольчик «Уведомления» в шапке и push приложения.
+// Решение Андрея 12.11.2026: вся связь — в CRM, без Telegram-групп и личных сообщений бота.
 import type { FastifyInstance } from 'fastify';
 import type pg from 'pg';
-import { can, requirePerm } from '../auth.ts';
+import { can, requireCtx, requirePerm } from '../auth.ts';
 import { audit, withCtx, type Ctx, type Db } from '../db.ts';
 import { badRequest, notFound } from '../errors.ts';
 import { PERMISSIONS as P } from '../roles.ts';
 import { maskPhone } from './crm.ts';
 import { sendTable } from './dash.ts';
 import { addDays, clubToday } from './memberships.ts';
-import type { Fetch } from './msgProviders.ts';
-import { escapeHtml, notifyStaff } from './staffBot.ts';
 import type { Cell } from '../lib/xlsx.ts';
 
 type Actor = { tenantId: string; userId: string | null; ip?: string };
 const uuid = (s?: string | null) => !!s && /^[0-9a-f-]{36}$/i.test(s);
 const isoDate = (s?: string | null) => !!s && /^\d{4}-\d{2}-\d{2}$/.test(s);
 const onlyMine = (ctx: Ctx) => !can(ctx, P.crmViewAll);
-const appUrl = () => (process.env.PUBLIC_URL || 'https://app.amoglobal.ru').replace(/\/$/, '');
 const rub = (kop: number) => `${Math.round(kop / 100).toLocaleString('ru-RU').replace(/ /g, ' ')} ₽`;
 const ruDate = (d: string) => `${d.slice(8, 10)}.${d.slice(5, 7)}`;
 
@@ -37,13 +35,13 @@ export const BLOCK_REASONS: Record<string, string> = {
 export const AUTO_TAGS = ['новичок', 'продление', 'рекуррент', 'ни рубля', 'бывший', 'мало визитов', 'лид'] as const;
 
 /* ---------- настройки ---------- */
-export type OpsSettings = { remindMinutes: number; escalateMinutes: number; newbieDays: number; newbieMinVisits: number; excludeLowVisits: boolean; notifyTelegram: boolean };
-const DEFAULTS: OpsSettings = { remindMinutes: 5, escalateMinutes: 15, newbieDays: 45, newbieMinVisits: 4, excludeLowVisits: true, notifyTelegram: true };
+export type OpsSettings = { remindMinutes: number; escalateMinutes: number; newbieDays: number; newbieMinVisits: number; excludeLowVisits: boolean };
+const DEFAULTS: OpsSettings = { remindMinutes: 5, escalateMinutes: 15, newbieDays: 45, newbieMinVisits: 4, excludeLowVisits: true };
 export async function opsSettings(db: Db, clubId: string): Promise<OpsSettings> {
   const r = (await db.query('select * from sales_ops_settings where club_id = $1', [clubId])).rows[0];
   if (!r) return { ...DEFAULTS };
   return { remindMinutes: r.remind_minutes, escalateMinutes: r.escalate_minutes, newbieDays: r.newbie_days, newbieMinVisits: r.newbie_min_visits,
-    excludeLowVisits: r.exclude_low_visits, notifyTelegram: r.notify_telegram };
+    excludeLowVisits: r.exclude_low_visits };
 }
 
 /** Сотрудники клуба в ролях (действующие назначения) */
@@ -58,14 +56,14 @@ async function once(db: Db, clubId: string, kind: string, period: string) {
   const r = await db.query(`insert into sales_ops_sent(tenant_id, club_id, kind, period) values (app_tenant(), $1, $2, $3) on conflict do nothing`, [clubId, kind, period]);
   return !!r.rowCount;
 }
-async function tell(db: Db, f: Fetch | null, s: OpsSettings, userIds: string[], text: string, respectOptOut = false) {
-  if (!f || !s.notifyTelegram) return 0;
-  let n = 0;
-  for (const id of [...new Set(userIds)]) {
-    if (respectOptOut && (await db.query('select 1 from staff_telegram where user_id = $1 and not summary', [id])).rowCount) continue;
-    if (await notifyStaff(db, f, id, text)) n++;
-  }
-  return n;
+export type NoteLink = { tab: string; p?: Record<string, string> };
+/** Уведомление сотрудникам внутри CRM (колокольчик + push приложения). Возвращает число получателей */
+export async function notify(db: Db, clubId: string | null, userIds: string[], kind: string, title: string, body: string | null, link: NoteLink | null) {
+  const ids = [...new Set(userIds)].filter(Boolean);
+  if (!ids.length) return 0;
+  await db.query(`insert into staff_notifications(tenant_id, club_id, user_id, kind, title, body, link)
+    select app_tenant(), $1, u, $3, $4, $5, $6 from unnest($2::uuid[]) u`, [clubId, ids, kind, title, body, link ? JSON.stringify(link) : null]);
+  return ids.length;
 }
 
 /* ---------- стоп-лист ---------- */
@@ -76,9 +74,11 @@ const callable = (personCol: string, todayParam: string) =>
 /* ========== 1. Заявки и скорость ответа ========== */
 // Отсчёт ведётся с момента, когда заявку должны были начать обрабатывать: для заявки в нерабочее время — с начала смены
 const LEAD_START = `(l.first_response_due_at - make_interval(mins => c.first_response_minutes))`;
+const LEADS: NoteLink = { tab: 'sales', p: { view: 'leads' } };
+const RENEWALS: NoteLink = { tab: 'sales', p: { view: 'renewals' } };
 const LEAD_DONE = `least(coalesce(l.taken_at, 'infinity'::timestamptz), coalesce(l.first_response_at, 'infinity'::timestamptz))`;
 
-export async function processLeadSla(db: Db, f: Fetch | null, actor: Actor, clubId: string) {
+export async function processLeadSla(db: Db, actor: Actor, clubId: string) {
   const s = await opsSettings(db, clubId);
   const rows = (await db.query(`select l.id, l.person_id, l.assigned_to, l.reminded_at, l.escalated_at, p.full_name, ls.name as source,
       extract(epoch from now() - ${LEAD_START}) / 60 as waited
@@ -88,10 +88,10 @@ export async function processLeadSla(db: Db, f: Fetch | null, actor: Actor, club
   let reminded = 0; let escalated = 0;
   for (const l of rows) {
     const waited = Math.floor(Number(l.waited));
-    const who = `${escapeHtml(l.full_name)}${l.source ? ` (${escapeHtml(l.source)})` : ''}`;
+    const who = `${l.full_name}${l.source ? ` (${l.source})` : ''}`;
     if (!l.reminded_at) {
       const to = l.assigned_to ? [l.assigned_to as string] : (await staffOf(db, clubId, ['manager'])).map((u) => u.id);
-      await tell(db, f, s, to, `⏰ Заявка ждёт ${waited} мин без «Беру в работу»: ${who}\n${appUrl()}/?tab=sales&view=leads`);
+      await notify(db, clubId, to, 'lead_remind', `Заявка ждёт ${waited} мин`, `${who}: нажмите «Беру в работу»`, LEADS);
       await db.query('update leads set reminded_at = now() where id = $1', [l.id]);
       reminded++;
     }
@@ -99,7 +99,7 @@ export async function processLeadSla(db: Db, f: Fetch | null, actor: Actor, club
       const heads = await staffOf(db, clubId, ['rop']);
       const to = heads.length ? heads : await staffOf(db, clubId, ['gm']);
       const mgr = l.assigned_to ? (await db.query('select full_name from users where id = $1', [l.assigned_to])).rows[0]?.full_name : null;
-      await tell(db, f, s, to.map((u) => u.id), `🚨 Заявка ${waited} мин без ответа: ${who}. ${mgr ? `Ответственный: ${escapeHtml(mgr)}` : 'Ответственного нет'}\n${appUrl()}/?tab=sales&view=leads`);
+      await notify(db, clubId, to.map((u) => u.id), 'lead_escalate', `Заявка ${waited} мин без ответа`, `${who}. ${mgr ? `Ответственный: ${mgr}` : 'Ответственного нет'}`, LEADS);
       // Задача руководителю: приходит push на телефон и видна в «Задачах»
       if (to[0]) await db.query(`insert into tasks(tenant_id, club_id, assignee_id, person_id, lead_id, kind, title, due_at, created_by) values ($1,$2,$3,$4,$5,'other',$6, now(), null)`,
         [actor.tenantId, clubId, to[0].id, l.person_id, l.id, `Заявка ${s.escalateMinutes}+ мин без ответа${mgr ? ` (${mgr})` : ''}: проверить, кто берёт`]);
@@ -358,28 +358,27 @@ async function weeklyText(db: Db, clubId: string, today: string) {
   const rw = await renewalWindow(db, clubId, today);
   const nb = await newbiesAtRisk(db, clubId, today);
   const st = f.total.steps;
-  return [`📊 <b>${escapeHtml(club.name)}: неделя ${ruDate(from)}–${ruDate(to)}</b>`, '',
+  return { title: `${club.name}: неделя ${ruDate(from)}–${ruDate(to)}`, body: [
     `Выручка: ${rub(money)}`, `Продажи: новых ${sales.new}, продлений ${sales.renew}`,
     `Обращений: ${st[0].count} → в работе ${st[1].count} → встреча ${st[2].count} → дошли ${st[3].count} → купили ${st[4].count}${f.total.worstStep ? ` (больше всего теряем на шаге «${f.total.worstStep}»)` : ''}`,
     `Ответ на заявку в норме: ${speedAll ? Math.round((speedIn / speedAll) * 100) : 0} % (${speedIn} из ${speedAll})`,
     f.noSource.count ? `Без источника: ${f.noSource.count} обращений (${f.noSource.share} %)` : 'Источник указан у всех обращений',
     `Окно продлений: ${rw.stats.total}, не звонили ${rw.stats.notCalled}`, `Новички с малым числом визитов: ${nb.list.length}`,
-    '', `${appUrl()}/?tab=sales`].join('\n');
+  ].join('\n') };
 }
 async function marketingText(db: Db, clubId: string, today: string) {
   const club = (await db.query('select name from clubs where id = $1', [clubId])).rows[0];
   const f = await lossFunnel(db, [clubId], today, today, 'source');
   const mf = await lossFunnel(db, [clubId], `${today.slice(0, 7)}-01`, today, 'none');
-  const lines = f.groups.slice(0, 8).map((g) => `• ${escapeHtml(g.name)}: ${g.steps[0].count}${g.steps[4].count ? `, купили ${g.steps[4].count}` : ''}`);
-  return [`📣 <b>${escapeHtml(club.name)}: маркетинг за ${ruDate(today)}</b>`, '', `Обращений сегодня: ${f.total.steps[0].count}`, ...lines,
+  const lines = f.groups.slice(0, 8).map((g) => `• ${g.name}: ${g.steps[0].count}${g.steps[4].count ? `, купили ${g.steps[4].count}` : ''}`);
+  return { title: `${club.name}: маркетинг за ${ruDate(today)}`, body: [`Обращений сегодня: ${f.total.steps[0].count}`, ...lines,
     f.noSource.count ? `Без источника: ${f.noSource.count}` : '', `С начала месяца: ${mf.total.steps[0].count} обращений, продаж ${mf.total.steps[4].count}, конверсия ${mf.total.conversion ?? 0} %`,
-    '', `${appUrl()}/?tab=sales&view=funnel`].filter((x, i, a) => x !== '' || a[i - 1] !== '').join('\n');
+  ].filter(Boolean).join('\n') };
 }
 
 /** Плановые дела клуба: вызывается раз в минуту. Сигналы по заявкам — всегда; сводки — один раз за свой период */
-export async function processSalesOpsClub(db: Db, f: Fetch | null, actor: Actor, c: { id: string; today: string; h: number; m: number; dow: number }) {
-  const s = await opsSettings(db, c.id);
-  const sla = await processLeadSla(db, f, actor, c.id);
+export async function processSalesOpsClub(db: Db, actor: Actor, c: { id: string; today: string; h: number; m: number; dow: number }) {
+  const sla = await processLeadSla(db, actor, c.id);
   // Ночью — автотеги
   if (c.h >= 3 && c.h < 6 && (await once(db, c.id, 'tags', c.today))) await recomputeTags(db, c.id, c.today);
   // 9:00 — горячее окно продлений РОПу и менеджерам (каждому — его клиенты)
@@ -387,10 +386,10 @@ export async function processSalesOpsClub(db: Db, f: Fetch | null, actor: Actor,
     const rw = await renewalWindow(db, c.id, c.today);
     if (rw.stats.total) {
       const heads = await staffOf(db, c.id, ['rop']);
-      await tell(db, f, s, heads.map((u) => u.id), `🔥 Окно продлений: ${rw.stats.total} (в этом месяце ${rw.stats.thisMonth}), не звонили ${rw.stats.notCalled}\n${appUrl()}/?tab=sales&view=renewals`);
+      await notify(db, c.id, heads.map((u) => u.id), 'renewals', `Окно продлений: ${rw.stats.total}`, `В этом месяце ${rw.stats.thisMonth}, не звонили ${rw.stats.notCalled}`, RENEWALS);
       const byOwner = new Map<string, number>();
       for (const r of rw.list) if (r.ownerId && !r.called) byOwner.set(r.ownerId, (byOwner.get(r.ownerId) ?? 0) + 1);
-      for (const [uid, n] of byOwner) await tell(db, f, s, [uid], `🔥 Ваших клиентов в окне продлений без звонка: ${n}\n${appUrl()}/?tab=sales&view=renewals`);
+      for (const [uid, n] of byOwner) await notify(db, c.id, [uid], 'renewals', `Ваших клиентов в окне продлений без звонка: ${n}`, null, RENEWALS);
     }
   }
   // Понедельник 10:00 — новички РОПу; 9:00 — недельная сводка клуба
@@ -398,33 +397,35 @@ export async function processSalesOpsClub(db: Db, f: Fetch | null, actor: Actor,
     const nb = await newbiesAtRisk(db, c.id, c.today);
     if (nb.list.length) {
       const heads = await staffOf(db, c.id, ['rop']);
-      const names = nb.list.slice(0, 15).map((r) => `• ${escapeHtml(r.name)} — ${r.visits} виз. за ${Math.min(r.day, 30)} дн.`);
-      await tell(db, f, s, heads.map((u) => u.id), [`🌱 Новички за ${nb.days} дней, у кого меньше ${nb.minVisits} визитов в первый месяц: ${nb.list.length}`, ...names,
-        nb.list.length > 15 ? `…и ещё ${nb.list.length - 15}` : '', `${appUrl()}/?tab=sales&view=newbies`].filter(Boolean).join('\n'));
+      const names = nb.list.slice(0, 15).map((r) => `• ${r.name} — ${r.visits} виз. за ${Math.min(r.day, 30)} дн.`);
+      await notify(db, c.id, heads.map((u) => u.id), 'newbies', `Новички с малым числом визитов: ${nb.list.length}`,
+        [`За ${nb.days} дней, меньше ${nb.minVisits} визитов в первый месяц`, ...names, nb.list.length > 15 ? `…и ещё ${nb.list.length - 15}` : ''].filter(Boolean).join('\n'), { tab: 'sales', p: { view: 'newbies' } });
     }
   }
   if (c.dow === 1 && c.h >= 9 && c.h < 12 && (await once(db, c.id, 'weekly', c.today))) {
     const to = await staffOf(db, c.id, ['owner', 'gm', 'rop']);
-    await tell(db, f, s, to.map((u) => u.id), await weeklyText(db, c.id, c.today), true);
+    const w = await weeklyText(db, c.id, c.today);
+    await notify(db, c.id, to.map((u) => u.id), 'weekly', w.title, w.body, { tab: 'sales' });
   }
   // 20:00 — маркетинг-дайджест; 21:00 — отчёт по скорости ответа за день
   if (c.h >= 20 && c.h < 23 && (await once(db, c.id, 'marketing', c.today))) {
     const to = await staffOf(db, c.id, ['owner', 'gm']);
-    await tell(db, f, s, to.map((u) => u.id), await marketingText(db, c.id, c.today), true);
+    const mk = await marketingText(db, c.id, c.today);
+    await notify(db, c.id, to.map((u) => u.id), 'marketing', mk.title, mk.body, { tab: 'sales', p: { view: 'funnel' } });
   }
   if (c.h >= 21 && c.h < 24 && (await once(db, c.id, 'lead_daily', c.today))) {
     const sp = await leadSpeed(db, c.id, c.today);
     if (sp.total.total) {
       const heads = await staffOf(db, c.id, ['rop', 'gm']);
-      const lines = sp.managers.map((m) => `• ${escapeHtml(m.name)}: ${m.total}, дольше нормы ${m.late}${m.avgMinutes !== null ? `, в среднем ${m.avgMinutes} мин` : ''}`);
-      await tell(db, f, s, heads.map((u) => u.id), [`⏱ Заявки за ${ruDate(c.today)}: ${sp.total.total}, в норме ${sp.total.inNorm}, дольше ${sp.norm} мин — ${sp.total.late}, РОПу ушло ${sp.total.escalated}`,
-        ...lines, `${appUrl()}/?tab=sales&view=leads`].join('\n'), true);
+      const lines = sp.managers.map((m) => `• ${m.name}: ${m.total}, дольше нормы ${m.late}${m.avgMinutes !== null ? `, в среднем ${m.avgMinutes} мин` : ''}`);
+      await notify(db, c.id, heads.map((u) => u.id), 'lead_daily', `Заявки за ${ruDate(c.today)}: ${sp.total.total}, дольше нормы ${sp.total.late}`,
+        [`В норме ${sp.total.inNorm}, дольше ${sp.norm} мин — ${sp.total.late}, РОПу ушло ${sp.total.escalated}`, ...lines].join('\n'), LEADS);
     }
   }
   return sla;
 }
 
-export async function processSalesOps(pool: pg.Pool, f: Fetch | null) {
+export async function processSalesOps(pool: pg.Pool) {
   const tenants = (await pool.query('select tenant_id from billing_tenants()')).rows.map((r) => r.tenant_id as string);
   for (const tenantId of tenants) {
     const sys = { tenantId, allClubs: true, clubIds: [] };
@@ -433,12 +434,12 @@ export async function processSalesOps(pool: pg.Pool, f: Fetch | null) {
       extract(hour from now() at time zone c.timezone)::int as h, extract(minute from now() at time zone c.timezone)::int as m,
       extract(isodow from now() at time zone c.timezone)::int as dow
       from clubs c where c.status = 'active' and not c.is_demo`)).rows);
-    for (const c of clubs) await withCtx(pool, sys, (db) => processSalesOpsClub(db, f, actor, c)).catch((e) => console.error('Отдел продаж:', (e as Error).message));
+    for (const c of clubs) await withCtx(pool, sys, (db) => processSalesOpsClub(db, actor, c)).catch((e) => console.error('Отдел продаж:', (e as Error).message));
   }
 }
-export function startSalesOpsWorker(pool: pg.Pool, f: Fetch = fetch, everyMs = 60_000) {
+export function startSalesOpsWorker(pool: pg.Pool, everyMs = 60_000) {
   let busy = false;
-  const run = async () => { if (busy) return; busy = true; try { await processSalesOps(pool, f); } finally { busy = false; } };
+  const run = async () => { if (busy) return; busy = true; try { await processSalesOps(pool); } finally { busy = false; } };
   const t = setInterval(run, everyMs); t.unref();
   return () => clearInterval(t);
 }
@@ -447,6 +448,26 @@ export function startSalesOpsWorker(pool: pg.Pool, f: Fetch = fetch, everyMs = 6
 export function salesOpsRoutes(app: FastifyInstance, pool: pg.Pool) {
   const club = async (db: Db, id?: string) => { if (!uuid(id) || !(await db.query('select 1 from clubs where id = $1', [id])).rowCount) throw badRequest('Выберите клуб'); return id!; };
   const person = async (db: Db, id: string) => { if (!uuid(id) || !(await db.query('select 1 from persons where id = $1', [id])).rowCount) throw notFound('Клиент не найден'); return id; };
+
+  // Уведомления CRM (колокольчик в шапке): свои, последние 50, и сколько непрочитанных
+  app.get('/api/notifications', async (req) => {
+    const ctx = requireCtx(req);
+    return withCtx(pool, ctx, async (db) => {
+      const items = (await db.query(`select id, kind, title, body, link, created_at as "createdAt", read_at as "readAt" from staff_notifications
+        where user_id = $1 order by created_at desc limit 50`, [ctx.userId])).rows;
+      const unread = (await db.query('select count(*)::int as n from staff_notifications where user_id = $1 and read_at is null', [ctx.userId])).rows[0].n as number;
+      return { items, unread };
+    });
+  });
+  app.post('/api/notifications/read', async (req) => {
+    const ctx = requireCtx(req);
+    const { ids } = (req.body ?? {}) as { ids?: string[] };
+    if (ids !== undefined && (!Array.isArray(ids) || !ids.every(uuid))) throw badRequest('Неверный список');
+    return withCtx(pool, ctx, async (db) => {
+      const r = await db.query(`update staff_notifications set read_at = now() where user_id = $1 and read_at is null and ($2::uuid[] is null or id = any($2))`, [ctx.userId, ids ?? null]);
+      return { ok: true, marked: r.rowCount };
+    });
+  });
 
   // Настройки
   app.get('/api/sales-ops/settings', async (req) => {
@@ -467,13 +488,12 @@ export function salesOpsRoutes(app: FastifyInstance, pool: pg.Pool) {
         newbieDays: b.newbieDays === undefined ? cur.newbieDays : n(b.newbieDays, 14, 120, 'Новички: от 14 до 120 дней'),
         newbieMinVisits: b.newbieMinVisits === undefined ? cur.newbieMinVisits : n(b.newbieMinVisits, 1, 30, 'Визитов в первый месяц: от 1 до 30'),
         excludeLowVisits: b.excludeLowVisits === undefined ? cur.excludeLowVisits : !!b.excludeLowVisits,
-        notifyTelegram: b.notifyTelegram === undefined ? cur.notifyTelegram : !!b.notifyTelegram,
       };
       if (s.escalateMinutes <= s.remindMinutes) throw badRequest('Сигнал РОПу должен быть позже напоминания менеджеру');
-      await db.query(`insert into sales_ops_settings(club_id, tenant_id, remind_minutes, escalate_minutes, newbie_days, newbie_min_visits, exclude_low_visits, notify_telegram, updated_by)
-        values ($1, app_tenant(), $2,$3,$4,$5,$6,$7,$8) on conflict (club_id) do update set remind_minutes = $2, escalate_minutes = $3, newbie_days = $4, newbie_min_visits = $5,
-        exclude_low_visits = $6, notify_telegram = $7, updated_by = $8, updated_at = now()`,
-      [id, s.remindMinutes, s.escalateMinutes, s.newbieDays, s.newbieMinVisits, s.excludeLowVisits, s.notifyTelegram, ctx.userId]);
+      await db.query(`insert into sales_ops_settings(club_id, tenant_id, remind_minutes, escalate_minutes, newbie_days, newbie_min_visits, exclude_low_visits, updated_by)
+        values ($1, app_tenant(), $2,$3,$4,$5,$6,$7) on conflict (club_id) do update set remind_minutes = $2, escalate_minutes = $3, newbie_days = $4, newbie_min_visits = $5,
+        exclude_low_visits = $6, updated_by = $7, updated_at = now()`,
+      [id, s.remindMinutes, s.escalateMinutes, s.newbieDays, s.newbieMinVisits, s.excludeLowVisits, ctx.userId]);
       await audit(db, ctx, 'sales_ops.settings', 'club', id, cur, s);
       return { settings: s };
     });
@@ -701,8 +721,8 @@ export function salesOpsRoutes(app: FastifyInstance, pool: pg.Pool) {
     return withCtx(pool, ctx, async (db) => {
       const id = await club(db, clubId);
       const today = await clubToday(db, id);
-      const html = kind === 'marketing' ? await marketingText(db, id, today) : await weeklyText(db, id, today);
-      return { text: html.replace(/<[^>]+>/g, '').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&') };
+      const d = kind === 'marketing' ? await marketingText(db, id, today) : await weeklyText(db, id, today);
+      return { text: `${d.title}\n\n${d.body}` };
     });
   });
 }

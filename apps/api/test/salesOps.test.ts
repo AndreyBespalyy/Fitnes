@@ -43,18 +43,13 @@ before(async () => {
 after(async () => { await t.app.close(); await t.pool.end(); });
 
 test('заявка: через 5 минут — напоминание, через 15 — сигнал РОПу с задачей; «Беру в работу» останавливает', async () => {
-  const sent: { chat: string; text: string }[] = [];
-  const f = (async (_u: string, init?: { body?: string }) => { const b = JSON.parse(init?.body ?? '{}'); sent.push({ chat: b.chat_id, text: b.text }); return new Response(JSON.stringify({ ok: true, result: {} })); }) as typeof fetch;
-  // Бот сотрудников настроен, менеджер и РОП привязали Telegram
-  const tok = await import('../src/modules/fiscal.ts').then((m) => m.encrypt('123:abc'));
-  await sql(`insert into staff_bot(tenant_id, token_enc, enabled) values ($1, $2, true) on conflict (tenant_id) do update set token_enc = $2, enabled = true`, [tenant, tok]);
-  for (const [login, chat] of [['m.volkova', '101'], ['o.astafeva', '202']]) {
-    await sql(`insert into staff_telegram(user_id, tenant_id, chat_id) select id, $2, $3 from users where login = $1 on conflict (user_id) do update set chat_id = $3`, [login, tenant, chat]);
-  }
+  // Уведомления приходят в CRM (колокольчик): смотрим их через API от лица сотрудника
+  const notes = async (login: string) => (await req('GET', '/api/notifications', login)).json() as { items: { id: string; kind: string; title: string; body: string; link: { tab: string; p?: { view?: string } } }[]; unread: number };
+  await sql(`delete from staff_notifications`);
   await sql(`update leads set taken_at = now()`); // заявки из тестовых данных уже в работе
   const a = await lead();
   const b = await lead();
-  const run = () => withCtx(t.pool, sys(), (db) => processLeadSla(db, f, { tenantId: tenant, userId: null }, centr));
+  const run = () => withCtx(t.pool, sys(), (db) => processLeadSla(db, { tenantId: tenant, userId: null }, centr));
   assert.deepEqual(await run(), { reminded: 0, escalated: 0 });
   await age(a.leadId, 6); await age(b.leadId, 6);
   // b взяли в работу — по нему сигналов нет
@@ -63,11 +58,23 @@ test('заявка: через 5 минут — напоминание, чере
   assert.equal(tk.json().already, false);
   assert.equal((await req('POST', `/api/sales-ops/leads/${b.leadId}/take`, 'm.volkova')).json().already, true);
   assert.deepEqual(await run(), { reminded: 1, escalated: 0 });
-  assert.ok(sent.some((s) => s.chat === '101' && /ждёт 6 мин/.test(s.text)), JSON.stringify(sent));
+  const mv = await notes('m.volkova');
+  const rem = mv.items.find((x) => x.kind === 'lead_remind');
+  assert.ok(rem && /ждёт 6 мин/.test(rem.title), JSON.stringify(mv));
+  assert.deepEqual(rem!.link, { tab: 'sales', p: { view: 'leads' } });
+  assert.ok(mv.unread >= 1);
   assert.deepEqual(await run(), { reminded: 0, escalated: 0 }, 'повторно не напоминаем');
   await age(a.leadId, 10);
   assert.deepEqual(await run(), { reminded: 0, escalated: 1 });
-  assert.ok(sent.some((s) => s.chat === '202' && /16 мин без ответа/.test(s.text)));
+  const rop = await notes('o.astafeva');
+  assert.ok(rop.items.some((x) => x.kind === 'lead_escalate' && /16 мин без ответа/.test(x.title)), JSON.stringify(rop));
+  assert.ok(!(await notes('m.volkova')).items.some((x) => x.kind === 'lead_escalate'), 'сигнал РОПу менеджеру не виден');
+  // Прочитано: счётчик обнуляется, чужие уведомления не трогаются
+  assert.equal((await req('POST', '/api/notifications/read', 'm.volkova', { ids: [rem!.id] })).statusCode, 200);
+  assert.equal((await notes('m.volkova')).unread, mv.unread - 1);
+  await req('POST', '/api/notifications/read', 'm.volkova', {});
+  assert.equal((await notes('m.volkova')).unread, 0);
+  assert.ok((await notes('o.astafeva')).unread >= 1);
   const task = await sql(`select t.title, u.login from tasks t join users u on u.id = t.assignee_id where t.lead_id = $1 and t.kind = 'other'`, [a.leadId]);
   assert.equal(task.length, 1);
   assert.equal(task[0].login, 'o.astafeva');
@@ -233,17 +240,18 @@ test('воронка «где теряем»: шаги накопительны�
   assert.match(pv.text, /Обращений: \d+/);
   assert.match((await req('GET', `/api/sales-ops/digest-preview?clubId=${centr}&kind=marketing`, 'o.smirnov')).json().text, /маркетинг за/);
 
-  const sent: string[] = [];
-  const f2 = (async (_u: string, init?: { body?: string }) => { sent.push(JSON.parse(init?.body ?? '{}').text); return new Response(JSON.stringify({ ok: true, result: {} })); }) as typeof fetch;
+  const noteCount = async () => Number((await sql(`select count(*) as n from staff_notifications where club_id = $1 and kind in ('lead_daily', 'marketing')`, [centr]))[0].n);
   const day = await today();
   const c = { id: centr, today: day, h: 21, m: 0, dow: 1 };
-  await withCtx(t.pool, sys(), (db) => processSalesOpsClub(db, f2, { tenantId: tenant, userId: null }, c));
+  await withCtx(t.pool, sys(), (db) => processSalesOpsClub(db, { tenantId: tenant, userId: null }, c));
   const kinds = (await sql('select kind from sales_ops_sent where club_id = $1 and period = $2 order by kind', [centr, day])).map((x) => x.kind);
   assert.deepEqual(kinds, ['lead_daily', 'marketing']);
-  const n1 = sent.length;
-  assert.ok(sent.some((s) => /Заявки за/.test(s)));
-  await withCtx(t.pool, sys(), (db) => processSalesOpsClub(db, f2, { tenantId: tenant, userId: null }, c));
-  assert.equal(sent.length, n1, 'второй раз не отправляем');
+  const n1 = await noteCount();
+  assert.ok(n1 >= 2);
+  const sm = (await req('GET', '/api/notifications', 'o.smirnov')).json();
+  assert.ok(sm.items.some((x: { kind: string; title: string }) => x.kind === 'marketing' && /маркетинг за/.test(x.title)), 'управляющему — маркетинг');
+  await withCtx(t.pool, sys(), (db) => processSalesOpsClub(db, { tenantId: tenant, userId: null }, c));
+  assert.equal(await noteCount(), n1, 'второй раз не отправляем');
 });
 
 test('настройки: управляющий меняет нормы; РОП не может; сигнал РОПу позже напоминания', async () => {

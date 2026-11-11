@@ -3,6 +3,7 @@ import { api, ApiError, can, clearDeviceData, setNavIntent, type Go, MODEL, MODE
 import { errText, toast as alertOk } from './ui.ts';
 import { ReportProblem } from './report.tsx';
 import { OfflineBar, ProfilePage, registerServiceWorker, StaffSessions } from './mobile.tsx';
+import { NotificationsBell } from './notifications.tsx';
 
 // Разделы грузятся по мере открытия: первый вход быстрее, особенно на планшете ресепшна
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -245,7 +246,7 @@ function Shell({ me, onLogout }: { me: Me; onLogout: () => void }) {
             {clubs.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
           </select>
         )}
-        <div className="sp"><Suspense fallback={null}><LocalKktAgent me={me} clubId={clubId} /></Suspense><span>{me.full_name} · {roleNames}</span><button onClick={logout}>Выйти</button></div>
+        <div className="sp"><Suspense fallback={null}><LocalKktAgent me={me} clubId={clubId} /></Suspense><NotificationsBell go={go} /><span>{me.full_name} · {roleNames}</span><button onClick={logout}>Выйти</button></div>
       </header>
       <main className="wrap">
         <OfflineBar />

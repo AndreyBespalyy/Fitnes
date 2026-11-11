@@ -166,7 +166,7 @@ export async function buildApp(pool: pg.Pool, opts: { webDist?: string; secureCo
   if (opts.billingWorker) { const stop = startBillingWorker(pool, opts.fetch); app.addHook('onClose', async () => stop()); }
   if (opts.scheduleWorker) { const stop = startScheduleWorker(pool, opts.fetch ?? fetch); app.addHook('onClose', async () => stop()); }
   if (opts.staffBotWorker) { const stop = startStaffBotWorker(pool, opts.fetch ?? fetch); app.addHook('onClose', async () => stop()); }
-  if (opts.salesOpsWorker) { const stop = startSalesOpsWorker(pool, opts.fetch ?? fetch); app.addHook('onClose', async () => stop()); }
+  if (opts.salesOpsWorker) { const stop = startSalesOpsWorker(pool); app.addHook('onClose', async () => stop()); }
   if (opts.surveyWorker) { const stop = startSurveyWorker(pool, opts.fetch ?? fetch); app.addHook('onClose', async () => stop()); }
   if (opts.retentionWorker) { const stop = startRetentionWorker(pool, opts.fetch ?? fetch); app.addHook('onClose', async () => stop()); }
   if (opts.pushWorker) { const stop = startPushWorker(pool, opts.fetch ?? fetch); app.addHook('onClose', async () => stop()); }
