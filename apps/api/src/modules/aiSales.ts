@@ -266,7 +266,10 @@ export function aiSalesRoutes(app: FastifyInstance, pool: pg.Pool) {
     const q = req.query as { clubId?: string; from?: string; to?: string };
     const d = (s?: string) => (/^\d{4}-\d{2}-\d{2}$/.test(s ?? '') ? s! : null);
     return withCtx(pool, ctx, async (db) => {
-      const today = new Date().toISOString().slice(0, 10);
+      // «Сегодня» — по времени клуба (оценки пишутся днём клуба); по сети — самый поздний день среди клубов
+      const club = q.clubId && q.clubId !== 'all' ? q.clubId : null;
+      const today = club ? await clubToday(db, club)
+        : ((await db.query(`select max((now() at time zone timezone)::date)::text as d from clubs`)).rows[0].d as string | null) ?? new Date().toISOString().slice(0, 10);
       return shadow(db, q.clubId && q.clubId !== 'all' ? q.clubId : null, d(q.from) ?? addDays(today, -14), d(q.to) ?? today);
     });
   });
