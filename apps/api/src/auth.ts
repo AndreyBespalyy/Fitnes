@@ -119,6 +119,9 @@ export function authRoutes(app: FastifyInstance, pool: pg.Pool, opts: { secureCo
       throw invalid;
     }
     if (u.status !== 'active') throw new HttpError(403, 'Учётная запись заблокирована. Обратитесь к администратору', 'blocked');
+    if (!(await pool.query('select auth_tenant_active($1) as ok', [u.tenant_id])).rows[0].ok) {
+      throw new HttpError(403, 'Доступ сети к системе приостановлен. Свяжитесь с поддержкой платформы', 'tenant_suspended');
+    }
     const token = randomBytes(32).toString('base64url');
     const result = await withCtx(pool, tctx, async (db) => {
       await db.query('update users set failed_attempts = 0, locked_until = null where id = $1', [u.id]);
