@@ -1,3 +1,4 @@
+import { SchedulePage } from './schedule.tsx';
 import { HelpPage, OnboardingPage } from './onboarding.tsx';
 import { CallsPage } from './calls.tsx';
 import { HotPage } from './hot.tsx';
@@ -83,7 +84,7 @@ function ChangePassword({ me, forced, onDone, onLogout }: { me: Me; forced?: boo
   );
 }
 
-type Tab = 'dash' | 'hot' | 'calls' | 'leads' | 'board' | 'tasks' | 'home' | 'clubs' | 'tariffs' | 'contracts' | 'site' | 'fiscal' | 'finance' | 'import' | 'chats' | 'access' | 'messaging' | 'pipelines' | 'staff' | 'stafftime' | 'config' | 'reviews' | 'onboarding' | 'help' | 'profile';
+type Tab = 'dash' | 'hot' | 'calls' | 'leads' | 'board' | 'tasks' | 'home' | 'clubs' | 'tariffs' | 'contracts' | 'site' | 'fiscal' | 'finance' | 'import' | 'chats' | 'access' | 'messaging' | 'pipelines' | 'staff' | 'stafftime' | 'config' | 'reviews' | 'onboarding' | 'help' | 'schedule' | 'profile';
 
 function Shell({ me, onLogout }: { me: Me; onLogout: () => void }) {
   const isAdmin = can(me, 'clubs.manage') || can(me, 'staff.manage');
@@ -111,6 +112,7 @@ function Shell({ me, onLogout }: { me: Me; onLogout: () => void }) {
     ['tasks', 'Задачи', can(me, 'crm.work')],
     ['hot', 'Кому звонить', can(me, 'crm.work')],
     ['calls', 'Звонки', can(me, 'crm.work')],
+    ['schedule', 'Расписание', can(me, 'schedule.book')],
     ['leads', 'Лиды', can(me, 'leads.create')],
     ['board', 'Сделки', can(me, 'crm.work')],
     ['chats', 'Переписка', can(me, 'messages.work')],
@@ -135,10 +137,10 @@ function Shell({ me, onLogout }: { me: Me; onLogout: () => void }) {
   ];
   const visible = tabs.filter((t) => t[2]);
   // Нижняя панель на телефоне: главные разделы роли под большим пальцем, остальное — в «Ещё»
-  const PRIMARY: Tab[] = ['dash', 'hot', 'tasks', 'chats', 'home', 'access', 'finance'];
+  const PRIMARY: Tab[] = ['dash', 'hot', 'tasks', 'chats', 'home', 'schedule', 'access', 'finance'];
   const bottom = PRIMARY.filter((k) => visible.some((v) => v[0] === k)).slice(0, 4);
-  const short: Partial<Record<Tab, string>> = { dash: 'Главная', hot: 'Звонить', tasks: 'Задачи', chats: 'Чаты', home: 'Клиенты', access: 'Проходы', finance: 'Финансы' };
-  const icon: Partial<Record<Tab, string>> = { dash: '◧', hot: '☎', tasks: '✓', chats: '✉', home: '☺', access: '⇥', finance: '₽' };
+  const short: Partial<Record<Tab, string>> = { dash: 'Главная', hot: 'Звонить', tasks: 'Задачи', schedule: 'Занятия', chats: 'Чаты', home: 'Клиенты', access: 'Проходы', finance: 'Финансы' };
+  const icon: Partial<Record<Tab, string>> = { dash: '◧', hot: '☎', tasks: '✓', schedule: '▦', chats: '✉', home: '☺', access: '⇥', finance: '₽' };
   return (
     <>
       <header className="top">
@@ -177,6 +179,7 @@ function Shell({ me, onLogout }: { me: Me; onLogout: () => void }) {
         {tab === 'staff' && <StaffPage me={me} clubs={clubs} />}
         {tab === 'stafftime' && <StaffTimePage me={me} clubs={clubs} clubId={clubId} />}
         {tab === 'config' && <ConfigPage me={me} clubs={clubs} clubId={clubId} />}
+        {tab === 'schedule' && <SchedulePage me={me} clubs={clubs} clubId={clubId} openPerson={setPersonId} />}
         {tab === 'onboarding' && <OnboardingPage me={me} clubId={clubId} go={(t) => setTab(t as Tab)} reloadClubs={reloadClubs} />}
         {tab === 'help' && <HelpPage me={me} clubs={clubs} clubId={clubId} page={tab} />}
         {tab === 'reviews' && <ReviewsPage me={me} clubs={clubs} clubId={clubId} openPerson={setPersonId} />}

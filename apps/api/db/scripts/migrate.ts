@@ -1,4 +1,5 @@
 // Применяет SQL-миграции по порядку (под владельцем схемы) и выдаёт права приложению.
+import { seedDemoSchedule } from './demoSchedule.ts';
 import { readdirSync, readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { join, dirname } from 'node:path';
@@ -64,6 +65,9 @@ export async function migrate(url = need('OWNER_DATABASE_URL'), quiet = false) {
     await c.query('begin');
     try { if (await seedDemoCalls(c as unknown as Db, demo.id) && !quiet) console.log('Добавлены демо-разговоры'); await c.query('commit'); }
     catch (e) { await c.query('rollback'); console.error('Демо-разговоры не добавлены:', (e as Error).message); }
+    await c.query('begin');
+    try { if (await seedDemoSchedule(c as unknown as Db, demo.id) && !quiet) console.log('Добавлено демо-расписание'); await c.query('commit'); }
+    catch (e) { await c.query('rollback'); console.error('Демо-расписание не добавлено:', (e as Error).message); }
   }
   await c.end();
   if (!quiet) console.log('Миграции применены');

@@ -1,4 +1,5 @@
 // Шаг 18. Персонал: графики и замены, табель по проходам и отметкам, зарплата по табелю и KPI, ведомость (FR-STAFF-01…08).
+import { trainerSessions } from './schedule.ts';
 import type { FastifyInstance } from 'fastify';
 import type pg from 'pg';
 import { can, requireCtx, requirePerm } from '../auth.ts';
@@ -110,6 +111,7 @@ export async function calcPayroll(db: Db, clubId: string, month: string, today: 
   const ts = await timesheet(db, clubId, mi.from, mi.to, userIds, today);
   const sales = await salesFact(db, [clubId], mi.from, mi.to);
   const plan = await targets(db, [clubId], month);
+  const done = await trainerSessions(db, clubId, mi.from, mi.to);
   const lines: { userId: string; items: Item[]; totalKop: number }[] = [];
   for (const u of userIds) {
     const s = schemes.find((x) => x.user_id === u);
@@ -124,8 +126,11 @@ export async function calcPayroll(db: Db, clubId: string, month: string, today: 
       if (s.kind === 'hourly') items.push({ code: 'hours', title: 'Часы по табелю', basis: `${rub(rate)} в час × ${hours(t.workedMin)}`, amountKop: Math.round((rate * t.workedMin) / 60) });
       if (s.kind === 'shift') items.push({ code: 'shifts', title: 'Смены', basis: `${rub(rate)} за смену × ${t.workedShifts} отработанных из ${t.shifts} по графику`, amountKop: rate * t.workedShifts });
       if (s.kind === 'trainer') {
-        const n = adj.filter((a) => a.user_id === u && a.kind === 'sessions').reduce((x, a) => x + Number(a.quantity ?? 0), 0);
-        items.push({ code: 'sessions', title: 'Проведённые занятия', basis: `${rub(rate)} за занятие × ${n}`, amountKop: Math.round(rate * n) });
+        const manual = adj.filter((a) => a.user_id === u && a.kind === 'sessions').reduce((x, a) => x + Number(a.quantity ?? 0), 0);
+        const sch = done.find((x) => x.userId === u);
+        const n = manual + (sch?.n ?? 0);
+        const parts = [sch ? `по расписанию ${sch.n} (групповых ${sch.group}, персональных ${sch.personal})` : '', manual ? `вручную ${manual}` : ''].filter(Boolean).join(', ');
+        items.push({ code: 'sessions', title: 'Проведённые занятия', basis: `${rub(rate)} за занятие × ${n}${parts ? `: ${parts}` : ''}`, amountKop: Math.round(rate * n) });
       }
       const pct = Number(s.sales_percent);
       const mySales = sales.filter((x) => x.userId === u).reduce((a, x) => a + x.kop, 0);

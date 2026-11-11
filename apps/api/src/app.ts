@@ -28,12 +28,13 @@ import { staffTimeRoutes } from './modules/staffTime.ts';
 import { configRoutes } from './modules/config.ts';
 import { insightsRoutes, startInsightsWorker } from './modules/insights.ts';
 import { onboardingRoutes } from './modules/onboarding.ts';
+import { scheduleRoutes, startScheduleWorker } from './modules/schedule.ts';
 import { mobileRoutes, startPushWorker } from './modules/mobile.ts';
 import { aiConfigFromEnv, type AiConfig } from './lib/aiClient.ts';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-export async function buildApp(pool: pg.Pool, opts: { webDist?: string; secureCookie?: boolean; logger?: boolean; storageDir?: string; fiscalWorker?: boolean; messagingWorker?: boolean; billingWorker?: boolean; aiWorker?: boolean; scoringWorker?: boolean; pushWorker?: boolean; insightsWorker?: boolean; ai?: AiConfig | null; fetch?: typeof fetch } = {}) {
+export async function buildApp(pool: pg.Pool, opts: { webDist?: string; secureCookie?: boolean; logger?: boolean; storageDir?: string; fiscalWorker?: boolean; messagingWorker?: boolean; billingWorker?: boolean; aiWorker?: boolean; scoringWorker?: boolean; pushWorker?: boolean; insightsWorker?: boolean; scheduleWorker?: boolean; ai?: AiConfig | null; fetch?: typeof fetch } = {}) {
   const app = Fastify({ logger: opts.logger ?? false, trustProxy: true });
   await app.register(cookie);
 
@@ -107,9 +108,11 @@ export async function buildApp(pool: pg.Pool, opts: { webDist?: string; secureCo
   configRoutes(app, pool);
   insightsRoutes(app, pool);
   onboardingRoutes(app, pool);
+  scheduleRoutes(app, pool, { fetch: opts.fetch });
   // Фоновая отправка чеков в облачную кассу (в тестах выключена, там вызывается напрямую)
   if (opts.messagingWorker) { const stop = startMessagingWorker(pool, opts.fetch); app.addHook('onClose', async () => stop()); }
   if (opts.billingWorker) { const stop = startBillingWorker(pool, opts.fetch); app.addHook('onClose', async () => stop()); }
+  if (opts.scheduleWorker) { const stop = startScheduleWorker(pool, opts.fetch ?? fetch); app.addHook('onClose', async () => stop()); }
   if (opts.pushWorker) { const stop = startPushWorker(pool, opts.fetch ?? fetch); app.addHook('onClose', async () => stop()); }
   if (opts.scoringWorker) { const stop = startScoringWorker(pool); app.addHook('onClose', async () => stop()); }
   if (opts.aiWorker) { const stop = startAiWorker(pool, ai, storage); app.addHook('onClose', async () => stop()); }

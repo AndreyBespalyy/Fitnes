@@ -179,3 +179,12 @@ a.btn{text-decoration:none;color:inherit}
   .top .sp>span{display:none}
   .toast{bottom:calc(84px + env(safe-area-inset-bottom));z-index:40}
 }
+
+/* Расписание: неделя по дням */
+.week7{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:8px}
+.week7 .day{padding:8px;display:grid;gap:6px;align-content:start;min-width:0}
+.week7 .day.today{outline:2px solid var(--accent)}
+.week7 .cls{display:grid;gap:2px;text-align:left;width:100%;font-size:13px}
+.week7 .cls.cancelled{opacity:.55;text-decoration:line-through}
+.week7 .cls.done{background:var(--surface-2)}
+@media (max-width:900px){.week7{grid-template-columns:1fr}}
