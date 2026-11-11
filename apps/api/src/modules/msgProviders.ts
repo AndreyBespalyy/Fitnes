@@ -7,7 +7,8 @@
 
 export type Fetch = typeof fetch;
 export type ChannelRow = { id: string; kind: string; messenger: string; settings: Record<string, string>; secret: string | null; poll_offset: string | null };
-export type Inbound = { chatId: string; externalId: string; text: string; name: string; phone: string | null; at?: Date };
+// ownPhone — клиент поделился своим номером кнопкой Telegram (а не переслал чужой контакт): только так бот узнаёт клиента
+export type Inbound = { chatId: string; externalId: string; text: string; name: string; phone: string | null; at?: Date; ownPhone?: boolean };
 export type PollResult = { events: Inbound[]; offset?: number | null };
 
 export class ProviderError extends Error {}
@@ -23,7 +24,8 @@ function tgMessage(u: Record<string, any>): Inbound | null { // eslint-disable-l
   if (!m || m.chat?.type !== 'private') return null;
   const text = m.text ?? m.caption ?? (m.contact ? `Отправил контакт: ${m.contact.phone_number}` : m.photo ? '[фото]' : m.voice ? '[голосовое сообщение]' : m.sticker ? '[стикер]' : '[вложение]');
   const name = [m.from?.first_name, m.from?.last_name].filter(Boolean).join(' ') || (m.from?.username ? `@${m.from.username}` : 'Клиент из Telegram');
-  return { chatId: String(m.chat.id), externalId: String(m.message_id), text, name, phone: m.contact?.phone_number ?? null, at: new Date(m.date * 1000) };
+  return { chatId: String(m.chat.id), externalId: String(m.message_id), text, name, phone: m.contact?.phone_number ?? null, at: new Date(m.date * 1000),
+    ownPhone: !!m.contact && m.contact.user_id != null && m.contact.user_id === m.from?.id };
 }
 
 /* ---------- Green-API (WhatsApp) ---------- */
@@ -51,10 +53,12 @@ export function wazzupMessages(ch: ChannelRow, body: Record<string, any>): Inbou
       phone: ch.messenger === 'whatsapp' ? digits(String(m.chatId)) : m.contact?.phone ?? null, at: m.dateTime ? new Date(m.dateTime) : undefined }));
 }
 
-export async function sendMessage(f: Fetch, ch: ChannelRow, chatId: string, text: string): Promise<{ externalId: string }> {
+/** markup — кнопки клиентского бота (только Telegram-бот; другие каналы отправляют один текст). */
+export async function sendMessage(f: Fetch, ch: ChannelRow, chatId: string, text: string, markup?: unknown): Promise<{ externalId: string }> {
   if (ch.kind === 'test') return { externalId: `test-${Date.now()}-${Math.random().toString(36).slice(2, 8)}` };
   if (ch.kind === 'telegram_bot') {
-    const r = await json(await f(tg(ch, 'sendMessage'), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ chat_id: chatId, text }) }));
+    const r = await json(await f(tg(ch, 'sendMessage'), { method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ chat_id: chatId, text, ...(markup ? { reply_markup: markup } : {}) }) }));
     if (!r.ok) throw new ProviderError(r.description === 'Forbidden: bot was blocked by the user' ? 'Клиент заблокировал бота' : `Telegram: ${r.description ?? 'ошибка отправки'}`);
     return { externalId: String(r.result.message_id) };
   }

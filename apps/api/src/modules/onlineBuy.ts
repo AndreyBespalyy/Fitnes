@@ -15,6 +15,7 @@ import { PERMISSIONS as P } from '../roles.ts';
 import { checkOp, esc, getAcq, page } from './billing.ts';
 import { createLead, normalizePhone } from './crm.ts';
 import { addDays, clubToday, payCharge, sellMembership } from './memberships.ts';
+import { botNotifyPaid } from './clientBot.ts';
 import { createPayment, PayError, type Fetch } from './payProviders.ts';
 import { referralDiscount } from './referrals.ts';
 import { task } from './retention.ts';
@@ -31,7 +32,7 @@ export async function buySettings(db: Db, clubId: string) {
   const r = (await db.query('select enabled, max_start_days, note from club_online_buy where club_id = $1', [clubId])).rows[0];
   return { enabled: r?.enabled ?? false, maxStartDays: r?.max_start_days ?? 30, note: (r?.note ?? null) as string | null };
 }
-async function buyProducts(db: Db, clubId: string) {
+export async function buyProducts(db: Db, clubId: string) {
   return (await db.query(`select p.id, p.name, p.kind, p.duration_days as "durationDays", p.visits_count as "visitsCount", p.validity_days as "validityDays",
       to_char(p.access_from, 'HH24:MI') as "accessFrom", to_char(p.access_to, 'HH24:MI') as "accessTo",
       (select amount_kop from price_versions v where v.product_id = p.id and v.valid_from <= now() order by v.valid_from desc limit 1)::bigint as "priceKop"
@@ -42,7 +43,7 @@ async function currentDocs(db: Db, clubId: string) {
   return (await db.query(`select d.kind, d.title, d.version, f.sha256, f.storage_path, f.mime from club_documents d join files f on f.id = d.file_id where d.club_id = $1 and d.is_current`, [clubId])).rows as
     { kind: 'contract' | 'rules'; title: string; version: number; sha256: string; storage_path: string; mime: string }[];
 }
-function productLine(p: { kind: string; durationDays: number | null; visitsCount: number | null; validityDays: number | null; accessFrom: string | null; accessTo: string | null }) {
+export function productLine(p: { kind: string; durationDays: number | null; visitsCount: number | null; validityDays: number | null; accessFrom: string | null; accessTo: string | null }) {
   const parts = [KIND[p.kind] ?? p.kind];
   if (p.kind === 'term' && p.durationDays) parts.push(`${p.durationDays} дн.`);
   if ((p.kind === 'visits' || p.kind === 'personal') && p.visitsCount) parts.push(`${p.visitsCount} занятий за ${p.validityDays ?? 90} дн.`);
@@ -53,7 +54,8 @@ function productLine(p: { kind: string; durationDays: number | null; visitsCount
 /* ---------- заказ ---------- */
 type OrderIn = { productId?: string; name?: string; phone?: string; email?: string; startsOn?: string; offer?: string | boolean; consent?: string | boolean; autopay?: string | boolean };
 
-export async function placeOrder(db: Db, f: Fetch, actor: Actor, clubId: string, b: OrderIn, meta: { ip: string; ua: string; base: string }) {
+/** meta.personId — клиент уже известен (клиентский бот): заявку не создаём, покупка — продление у действующего клиента. */
+export async function placeOrder(db: Db, f: Fetch, actor: Actor, clubId: string, b: OrderIn, meta: { ip: string; ua: string; base: string; personId?: string }) {
   const s = await buySettings(db, clubId);
   if (!s.enabled) throw badRequest('Онлайн-покупка в этом клубе сейчас не работает');
   const p = (await buyProducts(db, clubId)).find((x) => x.id === b.productId);
@@ -72,9 +74,8 @@ export async function placeOrder(db: Db, f: Fetch, actor: Actor, clubId: string,
   const startsOn = /^\d{4}-\d{2}-\d{2}$/.test(b.startsOn ?? '') ? b.startsOn! : today;
   if (startsOn < today || startsOn > addDays(today, s.maxStartDays)) throw badRequest(`Дата начала: с сегодня до ${ru(addDays(today, s.maxStartDays))}`);
 
-  const lead = await createLead(db, actor as never, { clubId, fullName: name, phone, email: email || undefined, sourceCode: 'site',
-    comment: `Покупка онлайн: ${p.name}. Клиент принял договор-оферту и правила клуба, дал согласие на обработку персональных данных` });
-  const personId = lead.personId as string;
+  const personId = meta.personId ?? (await createLead(db, actor as never, { clubId, fullName: name, phone, email: email || undefined, sourceCode: 'site',
+    comment: `Покупка онлайн: ${p.name}. Клиент принял договор-оферту и правила клуба, дал согласие на обработку персональных данных` })).personId as string;
   // Повторное нажатие: та же неоплаченная покупка — та же ссылка на оплату
   const same = (await db.query(`select o.id, o.online_payment_id from online_orders o join online_payments op on op.id = o.online_payment_id
     where o.person_id = $1 and o.product_id = $2 and o.status = 'awaiting_payment' and op.status in ('created', 'pending') and op.expires_at > now() order by o.created_at desc limit 1`, [personId, p.id])).rows[0];
@@ -148,6 +149,11 @@ export async function finalizeOrder(db: Db, actor: Actor, orderId: string) {
     [orderId, o.op_paid_at, sale.id, charge?.id ?? null, cred, taskId]);
   if (conflict) await db.query('update online_payments set conflict = $2 where id = $1', [o.online_payment_id, conflict]);
   await audit(db, actor as never, 'online_order.paid', 'online_order', orderId, { status: 'awaiting_payment' }, { status: 'paid', membershipId: sale.id, contractId: sale.contractId, conflict });
+  // Покупка из клиентского бота: подтверждение приходит туда же
+  if (o.ip === 'telegram') {
+    const start = o.start < today ? today : o.start;
+    await botNotifyPaid(db, actor, o.person_id, o.club_id, `Оплата получена, спасибо! Абонемент «${prod}» оформлен и начнётся ${ru(start)}. Договор заключён, QR-код для прохода покажут на ресепшне.`);
+  }
   return 'paid';
 }
 

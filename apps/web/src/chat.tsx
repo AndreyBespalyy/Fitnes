@@ -11,7 +11,7 @@ type Conv = { id: string; clubId: string; channelId: string; channelName: string
   unread: number; optOut: boolean | null; marketingConsent: boolean | null; lastText: string | null; lastDirection: 'in' | 'out' | null };
 type Msg = { id: string; direction: 'in' | 'out'; body: string; status: string; error: string | null; auto: boolean; createdAt: string; authorName: string | null; triggerEvent: string | null };
 type Channel = { id: string; clubId: string; kind: string; kindName: string; messenger: string; name: string; settings: Record<string, string>; hasSecret: boolean; status: string;
-  lastError: string | null; lastOkAt: string | null; webhookUrl?: string; polling: boolean };
+  lastError: string | null; lastOkAt: string | null; webhookUrl?: string; polling: boolean; clientBot?: boolean };
 type Template = { id: string; clubId: string; name: string; body: string; isActive: boolean; event: string | null };
 type Trigger = { id: string; event: string; days: number; templateId: string; templateName: string; marketing: boolean; enabled: boolean; sendHour: number; sent30: number };
 type Preview = { ready: { personId: string; name: string; text: string }[]; skipped: { personId: string; name: string; reason: string }[]; sent: number };
@@ -206,6 +206,9 @@ function Channels({ clubId }: { clubId: string }) {
     } catch (x) { setErr(errText(x)); }
   };
   const test = async (id: string) => { try { const t = await api<{ ok: boolean; info: string }>('POST', `/api/msg/channels/${id}/test`); toast(t.info); load(); } catch (e) { setErr(errText(e)); } };
+  const botToggle = async (c: Channel) => {
+    try { await api('PATCH', `/api/msg/channels/${c.id}`, { clientBot: !c.clientBot }); toast(c.clientBot ? 'Клиентский бот выключен' : 'Клиентский бот включён: клиенты видят абонемент, продлевают и замораживают его сами'); load(); } catch (e) { setErr(errText(e)); }
+  };
   const toggle = async (c: Channel) => { try { await api('PATCH', `/api/msg/channels/${c.id}`, { status: c.status === 'active' ? 'disabled' : 'active' }); load(); } catch (e) { setErr(errText(e)); } };
   const simulate = async (e: FormEvent) => {
     e.preventDefault(); if (!sim) return; setErr('');
@@ -221,12 +224,15 @@ function Channels({ clubId }: { clubId: string }) {
           <table><thead><tr><th>Канал</th><th>Мессенджер</th><th>Подключение</th><th>Состояние</th><th /></tr></thead>
             <tbody>{list.map((c) => (
               <tr key={c.id}>
-                <td><b>{c.name}</b>{c.webhookUrl && !c.polling && c.kind !== 'test' && <div className="small">Адрес для входящих: <code>{c.webhookUrl}</code></div>}</td>
+                <td><b>{c.name}</b>{c.webhookUrl && !c.polling && c.kind !== 'test' && <div className="small">Адрес для входящих: <code>{c.webhookUrl}</code></div>}
+                  {c.messenger === 'telegram' && (c.kind === 'telegram_bot' || c.kind === 'test') && (
+                    <label className="small row" style={{ gap: 6, marginTop: 4 }} title="Клиент делится номером и в боте видит абонемент и остаток, продлевает с оплатой онлайн и оформляет заморозку. Остальные сообщения, как и раньше, приходят в «Переписку»">
+                      <input type="checkbox" checked={!!c.clientBot} onChange={() => botToggle(c)} style={{ width: 'auto' }} /> Клиентский бот: абонемент, продление, заморозка</label>)}</td>
                 <td>{MESSENGER[c.messenger]}</td><td className="small">{c.kindName}</td>
                 <td>{c.status !== 'active' ? <span className="chip">отключён</span> : c.lastError ? <span className="chip bad" title={c.lastError}>ошибка: {c.lastError}</span>
                   : <span className="chip ok">работает{c.lastOkAt ? `, ${dt(c.lastOkAt)}` : ''}</span>}</td>
                 <td className="r"><div className="row" style={{ justifyContent: 'flex-end' }}>
-                  {c.kind === 'test' && c.status === 'active' && <button className="btn sm" onClick={() => setSim({ id: c.id, messenger: c.messenger, name: 'Анна Тестова', phone: '+7 916 000-00-01', text: 'Здравствуйте! Сколько стоит абонемент?' })}>Написать от клиента</button>}
+                  {c.kind === 'test' && c.status === 'active' && <button className="btn sm" onClick={() => setSim({ id: c.id, messenger: c.messenger, name: 'Анна Тестова', phone: c.messenger === 'whatsapp' ? '+7 916 000-00-01' : '', text: 'Здравствуйте! Сколько стоит абонемент?' })}>Написать от клиента</button>}
                   <button className="btn sm" onClick={() => test(c.id)}>Проверить</button>
                   <button className="btn sm" onClick={() => toggle(c)}>{c.status === 'active' ? 'Отключить' : 'Включить'}</button></div></td>
               </tr>))}</tbody></table>)}
@@ -235,7 +241,7 @@ function Channels({ clubId }: { clubId: string }) {
         <form className="card" onSubmit={simulate} style={{ display: 'grid', gap: 8 }}>
           <h2>Сообщение от клиента (имитация)</h2>
           <div className="grid2"><label className="f">Имя в мессенджере<input value={sim.name} onChange={(e) => setSim({ ...sim, name: e.target.value })} /></label>
-            {sim.messenger === 'whatsapp' && <label className="f">Телефон<input value={sim.phone} onChange={(e) => setSim({ ...sim, phone: e.target.value })} /></label>}</div>
+            <label className="f">{sim.messenger === 'whatsapp' ? 'Телефон' : 'Номер, которым клиент поделился (необязательно)'}<input value={sim.phone} onChange={(e) => setSim({ ...sim, phone: e.target.value })} /></label></div>
           <label className="f">Текст<input value={sim.text} onChange={(e) => setSim({ ...sim, text: e.target.value })} /></label>
           <div className="row"><button className="btn pri">Отправить в клуб</button><button type="button" className="btn" onClick={() => setSim(null)}>Отмена</button></div>
         </form>)}

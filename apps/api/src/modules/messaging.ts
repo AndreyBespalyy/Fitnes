@@ -11,10 +11,11 @@ import { PERMISSIONS as P } from '../roles.ts';
 import { createLead, normalizePhone } from './crm.ts';
 import { decrypt, encrypt } from './fiscal.ts';
 import { addDays, clubToday } from './memberships.ts';
+import { clientBot } from './clientBot.ts';
 import { parseWebhook, poll, ProviderError, sendMessage, testChannel, type ChannelRow, type Fetch, type Inbound } from './msgProviders.ts';
 
 type Actor = { tenantId: string; userId: string | null; ip?: string };
-type Channel = ChannelRow & { club_id: string; tenant_id: string; name: string; status: string };
+type Channel = ChannelRow & { club_id: string; tenant_id: string; name: string; status: string; client_bot?: boolean };
 const KINDS: Record<string, { name: string; messengers: string[]; polling: boolean }> = {
   telegram_bot: { name: 'Telegram-бот клуба', messengers: ['telegram'], polling: true },
   green_api: { name: 'WhatsApp через Green-API', messengers: ['whatsapp'], polling: true },
@@ -70,9 +71,10 @@ async function settingsOf(db: Db, clubId: string) {
 export async function handleInbound(db: Db, actor: Actor, ch: Channel, ev: Inbound) {
   let conv = (await db.query('select * from msg_conversations where channel_id = $1 and external_chat_id = $2', [ch.id, ev.chatId])).rows[0];
   if (conv && (await db.query('select 1 from msg_messages where conversation_id = $1 and direction = $2 and external_id = $3', [conv.id, 'in', ev.externalId])).rowCount) {
-    return { duplicate: true, conversationId: conv.id as string, autoreplyId: null as string | null };
+    return { duplicate: true, conversationId: conv.id as string, autoreplyId: null as string | null, botReplies: [] as string[] };
   }
-  const phone = ch.messenger === 'whatsapp' ? normalizePhone(ev.phone ?? ev.chatId) : normalizePhone(ev.phone);
+  // В Telegram номер берём, только если клиент поделился своим: пересланный чужой контакт не привязывает переписку к другому человеку
+  const phone = ch.messenger === 'whatsapp' ? normalizePhone(ev.phone ?? ev.chatId) : normalizePhone(ev.ownPhone === false ? null : ev.phone);
   const tgContact = ch.messenger === 'telegram' ? { type: 'telegram' as const, value: ev.name, normalized: `tg:${ev.chatId}` } : undefined;
   const recent = conv?.last_inbound_at && Date.now() - new Date(conv.last_inbound_at).getTime() < 30 * 86_400_000;
   let personId: string | null = conv?.person_id ?? null;
@@ -126,21 +128,23 @@ export async function handleInbound(db: Db, actor: Actor, ch: Channel, ev: Inbou
   let autoreplyId: string | null = null;
   const s = await settingsOf(db, ch.club_id);
   const h = await clubHour(db, ch.club_id);
+  // Клиентский бот отвечает сам на свои кнопки; остальное, как и раньше, видит менеджер
+  const botReplies = ch.client_bot && ch.messenger === 'telegram' ? await clientBot(db, actor, ch, conv.id, ev) : null;
   const offHours = h < s.work_from || h >= s.work_to;
   const lastAuto = conv.last_autoreply_at ? new Date(conv.last_autoreply_at).getTime() : 0;
-  if (offHours && s.autoreply_enabled && Date.now() - lastAuto > 12 * 3_600_000 && !STOP.test(ev.text)) {
+  if (!botReplies && offHours && s.autoreply_enabled && Date.now() - lastAuto > 12 * 3_600_000 && !STOP.test(ev.text)) {
     autoreplyId = await queueMessage(db, actor, conv.id, s.autoreply_text, { auto: true });
     await db.query('update msg_conversations set last_autoreply_at = now() where id = $1', [conv.id]);
   }
-  return { duplicate: false, conversationId: conv.id as string, personId, autoreplyId };
+  return { duplicate: false, conversationId: conv.id as string, personId, autoreplyId, botReplies: botReplies ?? [] };
 }
 
 /* ---------- исходящие ---------- */
-export async function queueMessage(db: Db, actor: Actor, conversationId: string, text: string, o: { auto?: boolean; templateId?: string | null; triggerId?: string | null } = {}) {
+export async function queueMessage(db: Db, actor: Actor, conversationId: string, text: string, o: { auto?: boolean; templateId?: string | null; triggerId?: string | null; markup?: unknown } = {}) {
   const c = (await db.query('select club_id from msg_conversations where id = $1', [conversationId])).rows[0];
-  return (await db.query(`insert into msg_messages(tenant_id, club_id, conversation_id, direction, body, status, author_id, template_id, trigger_id, auto, next_attempt_at)
-    values ($1,$2,$3,'out',$4,'queued',$5,$6,$7,$8,now()) returning id`,
-  [actor.tenantId, c.club_id, conversationId, text, o.auto ? null : actor.userId, o.templateId ?? null, o.triggerId ?? null, !!o.auto])).rows[0].id as string;
+  return (await db.query(`insert into msg_messages(tenant_id, club_id, conversation_id, direction, body, status, author_id, template_id, trigger_id, auto, next_attempt_at, reply_markup)
+    values ($1,$2,$3,'out',$4,'queued',$5,$6,$7,$8,now(),$9) returning id`,
+  [actor.tenantId, c.club_id, conversationId, text, o.auto ? null : actor.userId, o.templateId ?? null, o.triggerId ?? null, !!o.auto, o.markup ? JSON.stringify(o.markup) : null])).rows[0].id as string;
 }
 
 /** Отправка через провайдера. Ошибка не теряет сообщение: повтор через 1, 2, 4, 8 минут, потом «не отправлено». */
@@ -150,7 +154,7 @@ export async function deliver(db: Db, f: Fetch, messageId: string) {
   const ch = await loadChannel(db, m.channel_id);
   try {
     if (ch.status !== 'active') throw new ProviderError('Канал отключён');
-    const r = await sendMessage(f, ch, m.external_chat_id, m.body);
+    const r = await sendMessage(f, ch, m.external_chat_id, m.body, m.reply_markup ?? undefined);
     await db.query(`update msg_messages set status = 'sent', external_id = $2, sent_at = now(), error = null, attempts = attempts + 1, next_attempt_at = null where id = $1`, [messageId, r.externalId]);
     await db.query('update msg_channels set last_ok_at = now(), last_error = null where id = $1', [ch.id]);
     return 'sent';
@@ -281,6 +285,7 @@ export async function processMessaging(pool: pg.Pool, f: Fetch, o: { triggers: b
           for (const ev of r.events) {
             const res = await handleInbound(db, actor, ch, ev);
             if (res.autoreplyId) await deliver(db, f, res.autoreplyId);
+            for (const id of res.botReplies) await deliver(db, f, id);
           }
           await db.query('update msg_channels set poll_offset = $2, last_ok_at = now(), last_error = null where id = $1', [id, r.offset ?? ch.poll_offset]);
         } catch (e) {
@@ -350,7 +355,7 @@ async function loadConv(db: Db, ctx: Ctx, id: string) {
   if (onlyMine(ctx) && c.assignedTo && c.assignedTo !== ctx.userId) throw notFound('Диалог не найден');
   return c;
 }
-const CHANNEL_SELECT = `select id, club_id as "clubId", kind, messenger, name, settings, secret_enc is not null as "hasSecret", status, last_error as "lastError",
+const CHANNEL_SELECT = `select id, club_id as "clubId", kind, messenger, name, settings, secret_enc is not null as "hasSecret", status, client_bot as "clientBot", last_error as "lastError",
   last_ok_at as "lastOkAt", webhook_token as "webhookToken", created_at as "createdAt" from msg_channels`;
 
 export function messagingRoutes(app: FastifyInstance, pool: pg.Pool, opts: { fetch?: Fetch } = {}) {
@@ -402,7 +407,7 @@ export function messagingRoutes(app: FastifyInstance, pool: pg.Pool, opts: { fet
   app.patch('/api/msg/channels/:id', async (req) => {
     const ctx = requirePerm(req, P.messagesManage);
     const { id } = req.params as { id: string };
-    const b = (req.body ?? {}) as { name?: string; settings?: Record<string, string>; secret?: string; status?: string };
+    const b = (req.body ?? {}) as { name?: string; settings?: Record<string, string>; secret?: string; status?: string; clientBot?: boolean };
     return withCtx(pool, ctx, async (db) => {
       const c = (await db.query('select * from msg_channels where id = $1', [id])).rows[0];
       if (!c) throw notFound('Канал не найден');
@@ -410,7 +415,12 @@ export function messagingRoutes(app: FastifyInstance, pool: pg.Pool, opts: { fet
       if (b.status && !['active', 'disabled'].includes(b.status)) throw badRequest('Неверное состояние');
       await db.query(`update msg_channels set name = coalesce($2, name), settings = $3, secret_enc = coalesce($4, secret_enc), status = coalesce($5, status), updated_at = now() where id = $1`,
         [id, b.name?.trim() || null, JSON.stringify(settings), b.secret?.trim() ? encrypt(b.secret.trim()) : null, b.status ?? null]);
-      await audit(db, ctx, 'msg_channel.updated', 'msg_channel', id, { status: c.status, settings: c.settings }, { status: b.status ?? c.status, settings, secretChanged: !!b.secret?.trim() });
+      if (typeof b.clientBot === 'boolean') {
+        if (b.clientBot && (c.messenger !== 'telegram' || !['telegram_bot', 'test'].includes(c.kind))) throw badRequest('Клиентский бот работает только в собственном Telegram-боте клуба');
+        await db.query('update msg_channels set client_bot = $2 where id = $1', [id, b.clientBot]);
+      }
+      await audit(db, ctx, 'msg_channel.updated', 'msg_channel', id, { status: c.status, settings: c.settings, clientBot: c.client_bot },
+        { status: b.status ?? c.status, settings, secretChanged: !!b.secret?.trim(), clientBot: b.clientBot ?? c.client_bot });
       return { ok: true };
     });
   });
@@ -446,8 +456,9 @@ export function messagingRoutes(app: FastifyInstance, pool: pg.Pool, opts: { fet
       if (ch.messenger === 'whatsapp' && !phone) throw badRequest('Укажите телефон клиента');
       const chatId = ch.messenger === 'whatsapp' ? phone!.replace(/\D/g, '') : (b.chatId?.trim() || String(Date.now()));
       const res = await handleInbound(db, { tenantId: ctx.tenantId, userId: null }, ch,
-        { chatId, externalId: `sim-${Date.now()}`, text: b.text!.trim(), name: b.name?.trim() || 'Клиент', phone: phone });
+        { chatId, externalId: `sim-${Date.now()}`, text: b.text!.trim(), name: b.name?.trim() || 'Клиент', phone: phone, ownPhone: !!phone });
       if (res.autoreplyId) await deliver(db, f, res.autoreplyId);
+      for (const m of res.botReplies) await deliver(db, f, m);
       return res;
     });
   });
@@ -463,6 +474,7 @@ export function messagingRoutes(app: FastifyInstance, pool: pg.Pool, opts: { fet
       for (const ev of parseWebhook(ch, req.body)) {
         const r = await handleInbound(db, { tenantId: auth.tenant_id, userId: null }, ch, ev);
         if (r.autoreplyId) await deliver(db, f, r.autoreplyId);
+        for (const m of r.botReplies) await deliver(db, f, m);
       }
     });
     return { ok: true };
