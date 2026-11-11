@@ -9,6 +9,7 @@ import { badRequest, forbidden } from '../errors.ts';
 import { PERMISSIONS as P } from '../roles.ts';
 import { toCsv, toXlsx, type Cell, type Table } from '../lib/xlsx.ts';
 import { daysBetween } from './memberships.ts';
+import { npsReport } from './surveys.ts';
 
 export const CATS = ['new', 'renewal', 'return', 'subscription'] as const;
 export const CAT_NAME: Record<string, string> = { new: 'Новые клиенты', renewal: 'Продления', return: 'Возобновление бывших', subscription: 'Подписки' };
@@ -69,12 +70,13 @@ export const WIDGETS: W[] = [
   { id: 'funnel_managers', title: 'Конверсия по менеджерам', description: 'Лид → контакт → встреча → покупка по каждому менеджеру и в среднем', perm: P.dashView },
   { id: 'kpi', title: 'KPI сотрудников', description: 'Звонки, сообщения, встречи, продажи, отказы, задачи и первый ответ в сравнении с нормой', perm: P.dashView },
   { id: 'risks', title: 'Отклонения и риски', description: 'Пропущенные первые ответы, просроченные задачи, долги, неудачные автосписания, уходящие клиенты', perm: P.dashView },
+  { id: 'nps', title: 'Индекс лояльности', description: 'Оценки клиентов после визита: индекс по клубам и сотрудникам, низкие оценки и что по ним сделано', perm: P.dashView },
   { id: 'my_plan', title: 'Мой план', description: 'Личный план на месяц и на сегодня, факт, процент, дефицит по категориям', perm: P.crmWork },
   { id: 'my_kpi', title: 'Мои показатели', description: 'Мои звонки, встречи, продажи и задачи за сегодня в сравнении с нормой', perm: P.crmWork },
 ];
 const ROLE_DEFAULTS: Record<string, string[]> = {
-  owner: ['day', 'clubs', 'plan', 'risks', 'funnel_sources'],
-  gm: ['day', 'plan', 'team', 'risks', 'kpi'],
+  owner: ['day', 'clubs', 'plan', 'risks', 'nps', 'funnel_sources'],
+  gm: ['day', 'plan', 'team', 'risks', 'nps', 'kpi'],
   rop: ['team', 'funnel_managers', 'funnel_sources', 'kpi', 'my_plan'],
   manager: ['my_plan', 'my_kpi'],
   fin: ['day', 'plan', 'risks'],
@@ -330,6 +332,13 @@ export async function widgetData(db: Db, ctx: Ctx, id: string, q: Q) {
     return { ...base, from: p.from, to: p.to, days: p.days, metrics: KPI, rows };
   }
 
+  if (id === 'nps') {
+    const p = period(q, t);
+    const per = await Promise.all(clubs.map(async (c) => ({ clubId: c.id, name: c.name, ...(await npsReport(db, [c.id], p.from, p.to)) })));
+    const all = await npsReport(db, ids, p.from, p.to);
+    return { ...base, from: p.from, to: p.to, total: { index: all.index, n: all.n, sent: all.sent, answeredPct: all.answeredPct, promoters: all.promoters, passives: all.passives, detractors: all.detractors },
+      clubs: per.map((x) => ({ id: x.clubId, name: x.name, index: x.index, n: x.n })), byStaff: all.byStaff.slice(0, 10), lows: all.lows.slice(0, 10) };
+  }
   if (id === 'risks') {
     const per = await Promise.all(clubs.map(async (c) => {
       const r = (await db.query(`
@@ -388,6 +397,9 @@ export function widgetTable(d: any): Table {
   if (d.widget === 'risks') return { title, columns: ['Показатель', 'Значение', 'Сумма, ₽', 'Что делать'],
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     rows: d.items.map((i: any) => [i.title, i.value, rub(i.moneyKop), i.hint]) };
+  if (d.widget === 'nps') return { title: `${title} ${d.from} — ${d.to}`, columns: ['Срез', 'Индекс', 'Оценок'],
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    rows: [['Итого', d.total.index, d.total.n], ...d.clubs.map((c: any) => [c.name, c.index, c.n]), ...d.byStaff.map((x: any) => [`Продавал: ${x.name}`, x.index, x.n])] };
   return { title, columns: [], rows: [] };
 }
 

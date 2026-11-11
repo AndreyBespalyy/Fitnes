@@ -61,7 +61,7 @@ export function DashPage({ me, clubs, clubId, openPerson }: { me: Me; clubs: Clu
         </div>}
       </div>
       {drill && <PlanDrill clubId={drill.clubId} month={drill.month} category={drill.category} userId={drill.userId} onClose={() => setDrill(null)} openPerson={openPerson} />}
-      {view === 'desk' && (layout.widgets.length ? layout.widgets.map((w) => <Widget key={`${w}-${clubId}`} id={w} q={q} tick={tick} metrics={metrics}
+      {view === 'desk' && (layout.widgets.length ? layout.widgets.map((w) => <Widget key={`${w}-${clubId}`} id={w} q={q} tick={tick} metrics={metrics} openPerson={openPerson}
         onDrill={(x) => { const c = club?.id ?? (clubs.length === 1 ? clubs[0].id : null); if (!c) { toast('Выберите клуб вверху страницы, чтобы раскрыть цифру до клиентов'); return; } setDrill({ ...x, month, clubId: c }); }}
         title={layout.available.find((a) => a.id === w)?.title ?? w} />)
         : <div className="card"><p>На рабочем столе пока нет виджетов. Нажмите «Настроить» и выберите нужные.</p></div>)}
@@ -77,7 +77,7 @@ const SelectClub = () => <div className="card"><p>Выберите клуб в �
 
 /* ---------- обёртка виджета ---------- */
 type DrillFn = (x: { category: string | null; userId: string | null }) => void;
-function Widget({ id, q, tick, title, metrics, onDrill }: { id: string; q: string; tick: number; title: string; metrics: Metric[]; onDrill: DrillFn }) {
+function Widget({ id, q, tick, title, metrics, onDrill, openPerson }: { id: string; q: string; tick: number; title: string; metrics: Metric[]; onDrill: DrillFn; openPerson?: (id: string) => void }) {
   const [d, setD] = useState<Any>(null);
   const [err, setErr] = useState('');
   useEffect(() => { api<Any>('GET', `/api/dash/widget/${id}?${q}`).then((x) => { setD(x); setErr(''); }).catch((e) => setErr(errText(e))); }, [id, q, tick]);
@@ -93,7 +93,7 @@ function Widget({ id, q, tick, title, metrics, onDrill }: { id: string; q: strin
       </div>
       {err && <p className="err">{err}</p>}
       {!d && !err && <p className="muted">Загрузка…</p>}
-      {d && <WidgetBody d={d} metrics={metrics} onDrill={onDrill} />}
+      {d && <WidgetBody d={d} metrics={metrics} onDrill={onDrill} openPerson={openPerson} />}
     </section>
   );
 }
@@ -107,7 +107,7 @@ const Kpi = ({ label, value, sub, metric, metrics, tone }: { label: string; valu
 const Bar = ({ v }: { v: number | null }) => <div className="meter" aria-hidden><i style={{ width: `${Math.min(100, Math.max(0, v ?? 0))}%` }} /></div>;
 const Light = ({ l }: { l: string }) => <span className={`chip ${LIGHT[l]?.[1] ?? ''}`}>{LIGHT[l]?.[0] ?? l}</span>;
 
-function WidgetBody({ d, metrics, onDrill }: { d: Any; metrics: Metric[]; onDrill: DrillFn }) {
+function WidgetBody({ d, metrics, onDrill, openPerson }: { d: Any; metrics: Metric[]; onDrill: DrillFn; openPerson?: (id: string) => void }) {
   if (d.widget === 'day') {
     const m = d.monthPlan;
     return <>
@@ -183,6 +183,27 @@ function WidgetBody({ d, metrics, onDrill }: { d: Any; metrics: Metric[]; onDril
         <tbody>{d.rows.map((r: Any) => <tr key={r.userId}><td><b>{r.name}</b>{d.clubs.length > 1 && <div className="small muted">{r.club}</div>}</td>
           {r.metrics.map((m: Any) => <td key={m.id} className={`num kpi-${m.status}`}>{num(m.value)}{m.norm !== null && <div className="small muted">{m.norm}</div>}</td>)}</tr>)}</tbody></table></div>
     </>;
+  }
+  if (d.widget === 'nps') {
+    const tone = (v: number | null) => (v == null ? '' : v >= 50 ? 'ok' : v >= 0 ? 'warn' : 'bad');
+    const sign = (v: number | null) => (v == null ? '—' : v > 0 ? `+${v}` : String(v));
+    return (
+      <div style={{ display: 'grid', gap: 8 }}>
+        <div className="row" style={{ gap: 16, flexWrap: 'wrap', alignItems: 'baseline' }}>
+          <b className={`num ${tone(d.total.index)}`} style={{ fontSize: 28 }}>{sign(d.total.index)}</b>
+          <span className="small muted">оценок {d.total.n} из {d.total.sent} опросов{d.total.answeredPct != null ? ` (${d.total.answeredPct}%)` : ''} · довольных {d.total.promoters}, нейтральных {d.total.passives}, недовольных {d.total.detractors}</span>
+        </div>
+        {d.clubs.length > 1 && <div className="small">{d.clubs.map((c: Any) => <span key={c.id} style={{ marginRight: 12 }}>{c.name}: <b className={tone(c.index)}>{sign(c.index)}</b> <span className="muted">({c.n})</span></span>)}</div>}
+        {d.byStaff.length > 0 && <div className="tbl"><table><thead><tr><th>Продавал абонемент</th><th className="num">Индекс</th><th className="num">Оценок</th></tr></thead>
+          <tbody>{d.byStaff.map((x: Any) => <tr key={x.name}><td>{x.name}</td><td className={`num ${tone(x.index)}`}>{sign(x.index)}</td><td className="num">{x.n}</td></tr>)}</tbody></table></div>}
+        {d.lows.length > 0 && <div style={{ display: 'grid', gap: 4 }}><b className="small">Низкие оценки</b>{d.lows.map((l: Any) => (
+          <div key={l.id} className="item row between" style={{ gap: 8 }}>
+            <span><button className="btn sm" onClick={() => openPerson?.(l.personId)}>{l.name}</button> <b className="bad">{l.score}</b>{l.comment && <div className="small muted">«{l.comment}»</div>}</span>
+            <span className={`chip ${l.taskDoneAt ? 'ok' : 'warn'}`}>{l.taskDoneAt ? 'разобрались' : 'ждёт звонка'}</span>
+          </div>))}</div>}
+        {!d.total.n && <p className="small muted" style={{ margin: 0 }}>Оценок за период пока нет. Опросы уходят клиентам после первого визита, через месяц после покупки и раз в квартал.</p>}
+      </div>
+    );
   }
   if (d.widget === 'risks') return (
     <div className="risk-list">{d.items.map((i: Any) => (
