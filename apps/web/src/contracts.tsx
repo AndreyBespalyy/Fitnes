@@ -1,8 +1,8 @@
 // Шаг 7. Раздел «Договоры» (юрлицо и PDF клуба), договор в карточке клиента: печать, скан, подпись на планшете.
 // Плюс раздел «Сайт»: предложения клуба для выгрузки на сайт.
 import { OnlineBuyBlock } from './onlineBuy.tsx';
-import { useEffect, useRef, useState, type FormEvent } from 'react';
-import { api, can, type Club, type Me } from './api.ts';
+import { useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react';
+import { api, ApiError, can, type Club, type Me } from './api.ts';
 import { errText, toast } from './ui.ts';
 import { rub, type Product } from './memberships.tsx';
 
@@ -45,7 +45,43 @@ export function ContractsAdminPage({ me, clubs, clubId }: { me: Me; clubs: Club[
       </div>
       <LegalEntityForm key={`le${club}`} club={c} manage={manage} />
       <Documents key={`d${club}`} club={c} manage={manage} />
+      {me.allClubs && (can(me, '*') || manage) && <SmsSettings />}
     </>
+  );
+}
+
+function SmsSettings() {
+  type S = { provider: 'test' | 'smsru' | 'smsc'; sender: string | null; login: string | null; hasSecret: boolean; updatedAt: string | null; outbox: { phone: string; text: string; provider: string; status: string; error: string | null; at: string }[] };
+  const [s, setS] = useState<S | null>(null);
+  const [f, setF] = useState({ provider: 'test', sender: '', login: '', secret: '' });
+  const [phone, setPhone] = useState('');
+  const [err, setErr] = useState('');
+  const load = () => api<S>('GET', '/api/sms/settings').then((x) => { setS(x); setF({ provider: x.provider, sender: x.sender ?? '', login: x.login ?? '', secret: '' }); }).catch(() => setS(null));
+  useEffect(() => { load(); }, []);
+  if (!s) return null;
+  const save = async () => { setErr(''); try { await api('PUT', '/api/sms/settings', f); toast('Настройки СМС сохранены'); load(); } catch (x) { setErr(errText(x)); } };
+  const test = async () => { setErr(''); try { await api('POST', '/api/sms/settings/test', { phone }); toast('Проверочное СМС отправлено'); load(); } catch (x) { setErr(errText(x)); } };
+  const ST: Record<string, string> = { sent: 'отправлено', failed: 'ошибка', test: 'тест, не отправлялось' };
+  return (
+    <div className="card" style={{ display: 'grid', gap: 10 }}>
+      <h2>СМС для подписи договоров</h2>
+      <p className="small muted" style={{ margin: 0 }}>Клиент подписывает договор кодом из СМС — это простая электронная подпись: в клубе (код вводят на экране подписания) или удалённо по ссылке. В тестовом режиме СМС не отправляются, код показывается сотруднику — так можно проверить порядок работы до подключения провайдера.</p>
+      <div className="grid2" style={{ gridTemplateColumns: 'repeat(auto-fit,minmax(180px,1fr))', alignItems: 'end' }}>
+        <label className="f">Провайдер<select className="f" value={f.provider} onChange={(e) => setF({ ...f, provider: e.target.value })}>
+          <option value="test">Тестовый (без отправки)</option><option value="smsru">SMS.ru</option><option value="smsc">SMSC.ru</option></select></label>
+        {f.provider !== 'test' && <>
+          {f.provider === 'smsc' && <label className="f">Логин SMSC<input value={f.login} onChange={(e) => setF({ ...f, login: e.target.value })} /></label>}
+          <label className="f">{f.provider === 'smsru' ? 'API-ключ (api_id)' : 'Пароль или API-ключ'}<input type="password" value={f.secret} onChange={(e) => setF({ ...f, secret: e.target.value })} placeholder={s.hasSecret ? 'сохранён, введите новый для замены' : ''} /></label>
+          <label className="f">Имя отправителя<input value={f.sender} maxLength={11} onChange={(e) => setF({ ...f, sender: e.target.value })} placeholder="согласованное у провайдера" /></label>
+        </>}
+        <button className="btn pri" onClick={save}>Сохранить</button>
+      </div>
+      {s.provider !== 'test' && <div className="row" style={{ gap: 6 }}><input value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="+7 900 000-00-00" aria-label="Телефон для проверки" style={{ maxWidth: 200 }} /><button className="btn sm" disabled={!phone} onClick={test}>Отправить проверочное СМС</button></div>}
+      {err && <div className="err">{err}</div>}
+      {s.outbox.length > 0 && <details><summary className="small">Последние СМС ({s.outbox.length})</summary>
+        {s.outbox.map((o, i) => <div key={i} className="small">{new Date(o.at).toLocaleString('ru-RU', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })} · {o.phone} · {ST[o.status] ?? o.status}{o.error ? ` (${o.error})` : ''} · <span className="muted">{o.text}</span></div>)}
+      </details>}
+    </div>
   );
 }
 
@@ -115,15 +151,24 @@ function Documents({ club, manage }: { club: Club; manage: boolean }) {
 
 /* ---------------- Договор в карточке клиента ---------------- */
 export function ContractLine({ me, c, reload }: { me: Me; c: ContractBrief; reload: () => void }) {
-  const [view, setView] = useState<'print' | 'tablet' | null>(null);
+  const [view, setView] = useState<'print' | 'tablet' | 'sms' | null>(null);
   const [err, setErr] = useState('');
   const sign = can(me, 'contracts.sign');
+  const [linkInfo, setLinkInfo] = useState<ReactNode>(null);
+  const sendLink = async () => {
+    setErr('');
+    try {
+      const r = await api<{ phoneMasked: string; expiresInDays: number; testUrl?: string }>('POST', `/api/contracts/${c.id}/sms/link`);
+      setLinkInfo(<>Ссылка на подпись отправлена на {r.phoneMasked}, действует {r.expiresInDays} дня. Клиент откроет договор и правила и подпишет кодом из СМС; статус обновится сам.
+        {r.testUrl && <><br /><b>Тестовый режим:</b> СМС не отправлялось, ссылка: <a href={r.testUrl} target="_blank" rel="noreferrer">{r.testUrl}</a></>}</>);
+    } catch (x) { setErr(errText(x)); }
+  };
   const scan = async (f: File | undefined) => {
     if (!f) return;
     setErr('');
     try { await api('POST', `/api/contracts/${c.id}/scan`, await readFile(f)); toast(`Скан договора № ${c.number} загружен, договор подписан`); reload(); } catch (x) { setErr(errText(x)); }
   };
-  const label = c.status === 'signed' ? (c.signMethod === 'tablet' ? 'подписан на планшете' : c.signMethod === 'online_offer' ? 'заключён онлайн (оферта принята и оплачена)' : c.scanFileId ? 'подписан, скан в системе' : 'подписан на бумаге') : c.status === 'cancelled' ? 'расторгнут' : 'ждёт подписи';
+  const label = c.status === 'signed' ? (c.signMethod === 'tablet' ? 'подписан на планшете' : c.signMethod === 'sms' ? 'подписан кодом из СМС' : c.signMethod === 'online_offer' ? 'заключён онлайн (оферта принята и оплачена)' : c.scanFileId ? 'подписан, скан в системе' : 'подписан на бумаге') : c.status === 'cancelled' ? 'расторгнут' : 'ждёт подписи';
   return (
     <div className="row between small" style={{ borderTop: '1px dashed var(--line)', paddingTop: 6 }}>
       <span>Договор № {c.number} от {d(c.date)} · <span className={`chip ${c.status === 'signed' ? 'ok' : c.status === 'cancelled' ? '' : 'warn'}`}>{label}</span>
@@ -134,11 +179,15 @@ export function ContractLine({ me, c, reload }: { me: Me; c: ContractBrief; relo
         {c.signatureFileId && <a className="btn sm" href={fileUrl(c.signatureFileId)} target="_blank" rel="noreferrer">Подпись</a>}
         {sign && c.status === 'awaiting_signature' && <>
           <label className="btn sm">Загрузить скан<input type="file" accept="application/pdf,image/jpeg,image/png" hidden onChange={(e) => { scan(e.target.files?.[0]); e.target.value = ''; }} /></label>
-          <button className="btn sm pri" onClick={() => setView('tablet')} disabled={!c.hasLegalEntity}>Подписать на планшете</button></>}
+          <button className="btn sm pri" onClick={() => setView('tablet')} disabled={!c.hasLegalEntity}>Подписать на планшете</button>
+          <button className="btn sm" onClick={() => setView('sms')} disabled={!c.hasLegalEntity}>Код из СМС</button>
+          <button className="btn sm" onClick={sendLink} disabled={!c.hasLegalEntity}>Ссылку клиенту</button></>}
       </span>
       {err && <div className="err" style={{ width: '100%' }}>{err}</div>}
       {view === 'print' && <PrintContract id={c.id} onClose={() => setView(null)} />}
       {view === 'tablet' && <TabletSign id={c.id} onClose={(done) => { setView(null); if (done) reload(); }} />}
+      {view === 'sms' && <SmsSign id={c.id} onClose={(done) => { setView(null); if (done) reload(); }} />}
+      {linkInfo && <div className="item small" style={{ width: '100%' }}>{linkInfo}</div>}
     </div>
   );
 }
@@ -193,6 +242,55 @@ function PrintContract({ id, onClose }: { id: string; onClose: () => void }) {
             Распечатайте этот лист вместе с текстом договора и правил{c.contractDoc ? <>: <a href={fileUrl(c.contractDoc.fileId)} target="_blank" rel="noreferrer">договор (PDF)</a></> : ''}
             {c.rulesDoc ? <>, <a href={fileUrl(c.rulesDoc.fileId)} target="_blank" rel="noreferrer">правила (PDF)</a></> : ''}. После подписи отсканируйте и нажмите «Загрузить скан» в карточке клиента.
           </div>
+        </>)}
+      </div>
+    </div>
+  );
+}
+
+function SmsSign({ id, onClose }: { id: string; onClose: (done: boolean) => void }) {
+  const { c, err: loadErr } = useContract(id);
+  const [err, setErr] = useState('');
+  const [agree, setAgree] = useState(false);
+  const [sent, setSent] = useState<{ phoneMasked: string; testCode?: string } | null>(null);
+  const [code, setCode] = useState('');
+  const [doc, setDoc] = useState<'contract' | 'rules' | null>(null);
+  const send = async () => {
+    setErr('');
+    try { setSent(await api<{ phoneMasked: string; testCode?: string }>('POST', `/api/contracts/${id}/sms/send`)); } catch (x) {
+      setErr(errText(x));
+      // Код уже отправлен минуту назад (окно открыли заново) — сразу поле для кода
+      if (x instanceof ApiError && x.code === 'too_soon' && !sent) setSent({ phoneMasked: c?.person.phone ?? 'телефон клиента' });
+    }
+  };
+  const submit = async () => {
+    setErr('');
+    try { await api('POST', `/api/contracts/${id}/sms/confirm`, { code, accepted: agree }); toast('Договор подписан кодом из СМС'); onClose(true); } catch (x) { setErr(errText(x)); }
+  };
+  return (
+    <div className="overlay" style={{ zIndex: 60, background: 'var(--bg)' }}>
+      <div className="sheet tablet">
+        <div className="row between"><span className="lbl">Подписание кодом из СМС</span><button className="btn sm" onClick={() => onClose(false)}>Отмена</button></div>
+        {(loadErr || err) && <div className="err">{loadErr || err}</div>}
+        {!c ? <p className="muted">Загрузка…</p> : (<>
+          <Terms c={c} />
+          <div className="row">
+            {c.contractDoc && <button className="btn" aria-pressed={doc === 'contract'} onClick={() => setDoc(doc === 'contract' ? null : 'contract')}>Текст договора</button>}
+            {c.rulesDoc && <button className="btn" aria-pressed={doc === 'rules'} onClick={() => setDoc(doc === 'rules' ? null : 'rules')}>Правила клуба</button>}
+          </div>
+          {doc && <iframe title="Документ" src={fileUrl((doc === 'contract' ? c.contractDoc : c.rulesDoc)!.fileId)} style={{ width: '100%', height: '55vh', border: '1px solid var(--line)', borderRadius: 8 }} />}
+          <label className="row" style={{ gap: 10, fontSize: 16 }}><input type="checkbox" style={{ width: 22, height: 22 }} checked={agree} onChange={(e) => setAgree(e.target.checked)} />
+            Я ознакомлен(а) с договором и правилами клуба и согласен(на) с ними. Ввод кода из СМС — моя простая электронная подпись</label>
+          {!sent ? <div className="row between"><span className="small muted">Код придёт на телефон клиента {c.person.phone ?? '(в карточке нет телефона)'}</span>
+            <button className="btn pri" disabled={!c.person.phone} onClick={send}>Отправить код</button></div>
+          : <>
+            <div className="small">Код отправлен на {sent.phoneMasked}, действует 10 минут. <button className="link small" onClick={send}>Отправить ещё раз</button></div>
+            {sent.testCode && <div className="small" style={{ background: 'var(--warn-soft, #fff6d6)', padding: 8, borderRadius: 8 }}>Тестовый режим: СМС не отправлялось, код {sent.testCode}. Настоящие СМС включаются в разделе «Договоры» → «СМС для подписи».</div>}
+            <div className="row between">
+              <input inputMode="numeric" autoComplete="one-time-code" maxLength={6} value={code} onChange={(e) => setCode(e.target.value.replace(/\D/g, ''))} placeholder="Код из СМС" aria-label="Код из СМС" style={{ fontSize: 22, letterSpacing: 6, maxWidth: 200 }} />
+              <button className="btn pri" style={{ fontSize: 17, padding: '12px 22px' }} disabled={!agree || code.length !== 6} onClick={submit}>Подписать договор</button>
+            </div>
+          </>}
         </>)}
       </div>
     </div>

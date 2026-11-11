@@ -49,6 +49,7 @@ import { rulesRoutes } from './modules/rules.ts';
 import { loginSecurityRoutes } from './modules/loginSecurity.ts';
 import { usageRoutes } from './modules/usage.ts';
 import { leadIntakeRoutes } from './modules/leadIntake.ts';
+import { contractSmsRoutes } from './modules/contractSms.ts';
 import { loyaltyRoutes } from './modules/loyalty.ts';
 import { staffBotRoutes } from './modules/staffBot.ts';
 import { morningRoutes, startStaffBotWorker } from './modules/morning.ts';
@@ -152,6 +153,7 @@ export async function buildApp(pool: pg.Pool, opts: { webDist?: string; secureCo
   loginSecurityRoutes(app, pool);
   usageRoutes(app, pool);
   leadIntakeRoutes(app, pool, { fetch: opts.fetch });
+  contractSmsRoutes(app, pool, storage, { fetch: opts.fetch });
   loyaltyRoutes(app, pool);
   staffBotRoutes(app, pool, { fetch: opts.fetch });
   morningRoutes(app, pool, { fetch: opts.fetch });
