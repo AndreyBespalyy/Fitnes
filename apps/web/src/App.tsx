@@ -26,6 +26,7 @@ import { StaffTimePage } from './staff.tsx';
 import { LoginSecurity } from './loginSecurity.tsx';
 import { ReportProblem } from './report.tsx';
 import { UsagePage } from './usage.tsx';
+import { IntakePage } from './intake.tsx';
 import { ConfigPage } from './config.tsx';
 import { ReviewsPage } from './insights.tsx';
 import { OfflineBar, ProfilePage, registerServiceWorker, StaffSessions } from './mobile.tsx';
@@ -95,7 +96,7 @@ function ChangePassword({ me, forced, onDone, onLogout }: { me: Me; forced?: boo
   );
 }
 
-type Tab = 'dash' | 'hot' | 'calls' | 'leads' | 'board' | 'tasks' | 'home' | 'clubs' | 'tariffs' | 'contracts' | 'site' | 'fiscal' | 'finance' | 'import' | 'chats' | 'access' | 'messaging' | 'pipelines' | 'staff' | 'stafftime' | 'config' | 'reviews' | 'onboarding' | 'help' | 'schedule' | 'retention' | 'shop' | 'corp' | 'trainer' | 'desk' | 'load' | 'cohorts' | 'pnl' | 'usage' | 'profile';
+type Tab = 'dash' | 'hot' | 'calls' | 'leads' | 'board' | 'tasks' | 'home' | 'clubs' | 'tariffs' | 'contracts' | 'site' | 'fiscal' | 'finance' | 'import' | 'chats' | 'access' | 'messaging' | 'pipelines' | 'staff' | 'stafftime' | 'config' | 'reviews' | 'onboarding' | 'help' | 'schedule' | 'retention' | 'shop' | 'corp' | 'trainer' | 'desk' | 'load' | 'cohorts' | 'pnl' | 'usage' | 'intake' | 'profile';
 
 function Shell({ me, onLogout }: { me: Me; onLogout: () => void }) {
   const firstTab: Tab = 'dash';
@@ -150,6 +151,7 @@ function Shell({ me, onLogout }: { me: Me; onLogout: () => void }) {
     ['messaging', 'Сообщения', can(me, 'messages.manage')],
     ['import', 'Перенос из 1С', can(me, 'import.manage')],
     ['pipelines', 'Воронки', can(me, 'pipelines.manage')],
+    ['intake', 'Приём заявок', can(me, 'sources.manage') || can(me, 'config.manage')],
     ['staff', 'Сотрудники', can(me, 'staff.view')],
     ['retention', 'Возврат клиентов', can(me, 'retention.manage')],
     ['reviews', 'Обзоры', can(me, 'crm.work') || can(me, 'dash.view') || can(me, 'ai.review')],
@@ -202,6 +204,7 @@ function Shell({ me, onLogout }: { me: Me; onLogout: () => void }) {
         {tab === 'messaging' && <MessagingAdmin me={me} clubs={clubs} clubId={clubId} />}
         {tab === 'import' && <ImportPage clubs={clubs} clubId={clubId} />}
         {tab === 'pnl' && <PnlPage me={me} clubs={clubs} clubId={clubId} />}
+        {tab === 'intake' && <IntakePage me={me} clubs={clubs} clubId={clubId} openPerson={setPersonId} />}
         {tab === 'usage' && <UsagePage tabs={tabs.map(([k, l]) => [k, l])} />}
         {tab === 'cohorts' && <CohortsPage me={me} clubs={clubs} clubId={clubId} />}
         {tab === 'load' && <LoadPage me={me} clubs={clubs} clubId={clubId} />}
