@@ -3,6 +3,7 @@ import { useEffect, useState, type FormEvent } from 'react';
 import { api, can, type Club, type Me, navParams } from './api.ts';
 import { dt, errText, fromLocal, localInput, toast } from './ui.ts';
 import { MembershipsBlock } from './memberships.tsx';
+import { ReferralBlock } from './referrals.tsx';
 import { PersonChats } from './chat.tsx';
 import { PersonPasses } from './access.tsx';
 import { PersonCards } from './payments.tsx';
@@ -260,6 +261,7 @@ export function PersonCard({ me, id, onClose }: { me: Me; id: string; onClose: (
           {can(me, 'messages.work') && <PersonChats me={me} personId={card.person.id} homeClubId={card.person.homeClubId}
             marketingConsent={card.person.marketingConsent} optOut={card.person.messagingOptOut} reload={reload} />}
           <MembershipsBlock me={me} personId={card.person.id} homeClubId={card.person.homeClubId} />
+          {can(me, 'persons.view') && <ReferralBlock me={me} personId={card.person.id} clubId={card.person.homeClubId} />}
           {(can(me, 'acs.work') || can(me, 'acs.manage')) && <PersonPasses me={me} personId={card.person.id} clubId={card.person.homeClubId ?? ''} />}
 
           {card.opportunities.map((o) => (

@@ -9,6 +9,7 @@ import { contractsByMembership, createContract } from './contracts.ts';
 import { receiptForCharge } from './fiscal.ts';
 import { recordPayment } from './finance.ts';
 import { resolveDiscount, type DiscountInput } from './promos.ts';
+import { onReferralPurchase, referralDiscount } from './referrals.ts';
 
 /* ---------- даты (строки YYYY-MM-DD, без часовых сдвигов) ---------- */
 const D = (s: string) => new Date(`${s}T00:00:00Z`);
@@ -174,6 +175,8 @@ export async function sellMembership(db: Db, ctx: Pick<Ctx, 'tenantId' | 'userId
   // Скидка: промокод, ручная в пределах лимита продавца или согласованная. Цена по тарифу сохраняется для отчёта по акциям
   const listPrice = Number(price.amount_kop);
   const disc = await resolveDiscount(db, ctx, b, { personId: b.personId!, productId: prod.id, clubId: prod.club_id, category, amountKop: listPrice, today });
+  // Друг по рекомендации получает скидку на первую покупку, если другой скидки нет
+  if (!disc.discountKop) { const rd = await referralDiscount(db, b.personId!, prod.club_id, category, listPrice); if (rd) Object.assign(disc, rd); }
   const amount = listPrice - disc.discountKop;
   let endsOn: string | null = null;
   let visits: number | null = null;
@@ -204,6 +207,7 @@ export async function sellMembership(db: Db, ctx: Pick<Ctx, 'tenantId' | 'userId
   }
   await db.query('insert into membership_operations(tenant_id, club_id, membership_id, kind, params, actor_id) values ($1,$2,$3,$4,$5,$6)',
     [ctx.tenantId, prod.club_id, id, renewedFrom ? 'renewal' : 'sale', JSON.stringify({ productId: prod.id, priceVersionId: price.id, amountKop: amount, listPriceKop: listPrice, discountKop: disc.discountKop, discount: disc.label, installments: n, startsOn, renewedFrom }), ctx.userId]);
+  await onReferralPurchase(db, ctx, { personId: b.personId!, clubId: prod.club_id, membershipId: id, category, amountKop: amount, discountKop: disc.discountKop });
   const contract = await createContract(db, ctx, id);
   await db.query(`update persons set segment = case when $2 = 'subscription' then 'активный подписчик' else 'действующий' end, updated_at = now() where id = $1`, [b.personId, prod.kind]);
   if (lockedOffer) await db.query(`update renewal_offers set status = 'used', used_membership_id = $2 where id = $1`, [lockedOffer, id]);
