@@ -7,6 +7,7 @@ import { ReferralBlock } from './referrals.tsx';
 import { UpsellBlock } from './upsell.tsx';
 import { DepositBlock } from './gifts.tsx';
 import { FamilyBlock } from './familyCorp.tsx';
+import { LoyaltyBlock } from './loyalty.tsx';
 import { PersonChats } from './chat.tsx';
 import { PersonPasses } from './access.tsx';
 import { PersonCards } from './payments.tsx';
@@ -267,6 +268,7 @@ export function PersonCard({ me, id, onClose }: { me: Me; id: string; onClose: (
           <MembershipsBlock me={me} personId={card.person.id} homeClubId={card.person.homeClubId} />
           {can(me, 'memberships.view') && <FamilyBlock me={me} personId={card.person.id} clubId={card.person.homeClubId} />}
           {can(me, 'memberships.view') && <DepositBlock personId={card.person.id} clubId={card.person.homeClubId} />}
+          {can(me, 'memberships.view') && <LoyaltyBlock personId={card.person.id} clubId={card.person.homeClubId} />}
           {can(me, 'persons.view') && <ReferralBlock me={me} personId={card.person.id} clubId={card.person.homeClubId} />}
           {(can(me, 'acs.work') || can(me, 'acs.manage')) && <PersonPasses me={me} personId={card.person.id} clubId={card.person.homeClubId ?? ''} />}
 

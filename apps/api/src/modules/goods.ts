@@ -11,6 +11,7 @@ import { recordPayment } from './finance.ts';
 import { receiptForGoods } from './fiscal.ts';
 import { clubToday } from './memberships.ts';
 import { depositSpend } from './gifts.ts';
+import { loyaltySpend, pointsForKop } from './loyalty.ts';
 
 const METHODS = ['cash', 'card_terminal'];
 type GoodsIn = { clubId?: string; name?: string; kind?: string; category?: string | null; priceKop?: number; minStock?: number | null; isActive?: boolean; sort?: number };
@@ -29,7 +30,9 @@ export async function sellGoods(db: Db, ctx: Pick<Ctx, 'tenantId' | 'userId' | '
   if (!items.length) throw badRequest('Добавьте товар или услугу');
   const onAccount = !b.method;
   const fromDeposit = b.method === 'deposit';
-  if (!onAccount && !fromDeposit && !METHODS.includes(b.method!)) throw badRequest('Выберите способ оплаты');
+  const fromPoints = b.method === 'points';
+  if (!onAccount && !fromDeposit && !fromPoints && !METHODS.includes(b.method!)) throw badRequest('Выберите способ оплаты');
+  if (fromPoints && !b.personId) throw badRequest('Баллами можно оплатить только клиенту: найдите его карточку');
   if (fromDeposit && !b.personId) throw badRequest('С депозита можно оплатить только клиенту: найдите его карточку');
   if (onAccount && !b.personId) throw badRequest('На счёт можно записать только клиенту: найдите его карточку');
   if (b.personId && !(await db.query('select 1 from persons where id = $1', [b.personId])).rowCount) throw badRequest('Клиент не найден');
@@ -61,7 +64,11 @@ export async function sellGoods(db: Db, ctx: Pick<Ctx, 'tenantId' | 'userId' | '
   }
   let receiptId: string | null = null;
   // С депозита: деньги пришли при пополнении (там и чек), второй платёж в журнал не пишется
-  if (fromDeposit) await depositSpend(db, ctx, { clubId: b.clubId, personId: b.personId!, amountKop: total, goodsSaleId: saleId, comment: `Покупка: ${title}` });
+  // Баллами: это не деньги — платежа и чека нет, списание баллов отдельной строкой
+  if (fromPoints) {
+    const pts = await pointsForKop(db, b.clubId, total);
+    await loyaltySpend(db, ctx, { clubId: b.clubId, personId: b.personId!, kind: 'spend_goods', points: pts, refId: saleId, comment: `Покупка: ${title}` });
+  } else if (fromDeposit) await depositSpend(db, ctx, { clubId: b.clubId, personId: b.personId!, amountKop: total, goodsSaleId: saleId, comment: `Покупка: ${title}` });
   else if (!onAccount) {
     await recordPayment(db, ctx as never, { clubId: b.clubId, direction: 'in', kind: 'charge', amountKop: total, method: b.method!, personId: b.personId ?? null, saleCategory: 'goods' });
     receiptId = await receiptForGoods(db, ctx, { clubId: b.clubId, personId: b.personId ?? null, saleId, method: b.method!,

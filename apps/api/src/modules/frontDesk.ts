@@ -11,6 +11,7 @@ import { PERMISSIONS as P } from '../roles.ts';
 import { decidePerson, recordEvent } from './acs.ts';
 import { maskPhone } from './crm.ts';
 import { depositBalance } from './gifts.ts';
+import { loyaltyBalance, loyaltySettings } from './loyalty.ts';
 import { clubToday, loadMembership, payCharge, personMemberships, sellMembership } from './memberships.ts';
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -68,6 +69,7 @@ export async function deskCard(db: Db, clubId: string, personId: string) {
     renew: renewable && renewProduct?.is_active && renewProduct.price != null ? { membershipId: renewable.id, productName: renewProduct.name, priceKop: Number(renewProduct.price) } : null,
     single: single && single.price != null ? { productId: single.id, name: single.name, priceKop: Number(single.price) } : null,
     depositKop: await depositBalance(db, personId, clubId),
+    points: await (async () => { const ls = await loyaltySettings(db, clubId); return ls.enabled ? { balance: await loyaltyBalance(db, personId, clubId), valueKop: ls.pointValueKop, goods: ls.spendGoods } : null; })(),
     bookings, lastVisit, inside: !!lastVisit?.inside,
   };
 }

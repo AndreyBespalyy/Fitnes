@@ -12,7 +12,7 @@ type Card = {
   debts: { id: string; title: string; amountKop: number; dueOn: string; overdue: boolean; productName: string }[];
   renew: { membershipId: string; productName: string; priceKop: number } | null;
   single: { productId: string; name: string; priceKop: number } | null;
-  depositKop: number; bookings: { id: string; typeName: string; at: string; status: string }[]; lastVisit: { at: string } | null;
+  depositKop: number; points: { balance: number; valueKop: number; goods: boolean } | null; bookings: { id: string; typeName: string; at: string; status: string }[]; lastVisit: { at: string } | null;
   canSell: boolean; canTakeMoney: boolean;
 };
 type Goods = { id: string; name: string; kind: string; priceKop: number; stock: number | null; isActive: boolean };
@@ -154,7 +154,7 @@ export function DeskPage({ me, clubs, clubId, openPerson }: { me: Me; clubs: Clu
             <Photo card={card} v={photoV} onSaved={() => setPhotoV((x) => x + 1)} />
             <div style={{ display: 'grid', gap: 4, minWidth: 0 }}>
               <button className="link desk-name" onClick={() => openPerson(card.id)}>{card.name}</button>
-              <span className="small muted">{card.phone ?? ''}{card.depositKop ? ` · депозит ${rub(card.depositKop)}` : ''}{card.inside ? ' · сейчас в клубе' : ''}</span>
+              <span className="small muted">{card.phone ?? ''}{card.depositKop ? ` · депозит ${rub(card.depositKop)}` : ''}{card.points ? ` · баллов ${card.points.balance.toLocaleString('ru-RU')}` : ''}{card.inside ? ' · сейчас в клубе' : ''}</span>
               {card.birthday && <span className="chip acc">Сегодня день рождения — поздравьте!</span>}
               <div className={`desk-verdict ${card.verdict.allow ? 'ok' : 'no'}`}>{card.verdict.allow ? '✓ Можно' : '✕ Нельзя'}: {card.verdict.reason}</div>
               {card.verdict.warn && <span className="small bad">{card.verdict.warn}</span>}
@@ -179,7 +179,7 @@ export function DeskPage({ me, clubs, clubId, openPerson }: { me: Me; clubs: Clu
               </div>
               <button className="btn" onClick={() => setMode(null)}>Отмена (Esc)</button>
             </div>)}
-          {mode?.op === 'goods' && <QuickGoods club={club} personId={card.id} depositKop={card.depositKop} onDone={(t) => { setDone({ ok: true, text: t }); measure('goods'); setMode(null); reload(); }} onCancel={() => setMode(null)} />}
+          {mode?.op === 'goods' && <QuickGoods club={club} personId={card.id} depositKop={card.depositKop} points={card.points} onDone={(t) => { setDone({ ok: true, text: t }); measure('goods'); setMode(null); reload(); }} onCancel={() => setMode(null)} />}
           {mode?.op === 'manual' && <ManualPass club={club} card={card} onDone={(t) => { setDone({ ok: true, text: t }); measure('manual_pass'); setMode(null); reload(); }} onCancel={() => setMode(null)} />}
 
           <div className="desk-info">
@@ -227,7 +227,7 @@ function Photo({ card, v, onSaved }: { card: Card; v: number; onSaved: () => voi
   );
 }
 
-function QuickGoods({ club, personId, depositKop, onDone, onCancel }: { club: string; personId: string; depositKop: number; onDone: (t: string) => void; onCancel: () => void }) {
+function QuickGoods({ club, personId, depositKop, points, onDone, onCancel }: { club: string; personId: string; depositKop: number; points: Card['points']; onDone: (t: string) => void; onCancel: () => void }) {
   const [items, setItems] = useState<Goods[]>([]);
   const [cart, setCart] = useState<Record<string, number>>({});
   const [err, setErr] = useState('');
@@ -257,6 +257,7 @@ function QuickGoods({ club, personId, depositKop, onDone, onCancel }: { club: st
         <b style={{ alignSelf: 'center' }}>Итого {rub(total)}</b>
         {METHODS.map(([m, l]) => <button key={m} className="btn pri" disabled={busy} onClick={() => sell(m)}>{l}</button>)}
         {depositKop >= total && <button className="btn" disabled={busy} onClick={() => sell('deposit')}>С депозита</button>}
+        {points?.goods && points.balance * points.valueKop >= total && <button className="btn" disabled={busy} onClick={() => sell('points')}>Баллами ({Math.ceil(total / points.valueKop)})</button>}
         <button className="btn" onClick={() => setCart({})}>Очистить</button>
       </div>}
       <button className="btn" onClick={onCancel}>Отмена (Esc)</button>

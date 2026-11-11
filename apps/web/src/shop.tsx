@@ -13,7 +13,7 @@ type Report = {
 };
 const rub = (k: number) => `${Math.round(k / 100).toLocaleString('ru-RU')} ₽`;
 const toKop = (s: string) => Math.round(Number(s.replace(',', '.').replace(/\s/g, '')) * 100);
-const METHOD: Record<string, string> = { cash: 'Наличные', card_terminal: 'Карта', on_account: 'На счёт', deposit: 'С депозита' };
+const METHOD: Record<string, string> = { cash: 'Наличные', card_terminal: 'Карта', on_account: 'На счёт', deposit: 'С депозита', points: 'Баллами' };
 
 export function ShopPage({ me: _me, clubs, clubId, openPerson }: { me: Me; clubs: Club[]; clubId: string; openPerson: (id: string) => void }) {
   const [club, setClub] = useState(clubId !== 'all' ? clubId : clubs[0]?.id ?? '');
@@ -63,7 +63,7 @@ function Sell({ club, items, onSold }: { club: string; items: Goods[]; onSold: (
     setErr(''); setBusy(true);
     try {
       const r = await api<{ totalKop: number; receiptId: string | null }>('POST', '/api/goods/sales', { clubId: club, personId: person?.id ?? null, method, items: lines.map((l) => ({ goodsId: l.g.id, qty: l.qty })) });
-      toast(method === 'deposit' ? `Оплачено с депозита: ${rub(r.totalKop)}` : method ? `Продано на ${rub(r.totalKop)}${r.receiptId ? ', чек отправлен в кассу' : ''}` : `Записано на счёт клиента: ${rub(r.totalKop)}`);
+      toast(method === 'deposit' ? `Оплачено с депозита: ${rub(r.totalKop)}` : method === 'points' ? `Оплачено баллами: ${rub(r.totalKop)}` : method ? `Продано на ${rub(r.totalKop)}${r.receiptId ? ', чек отправлен в кассу' : ''}` : `Записано на счёт клиента: ${rub(r.totalKop)}`);
       setCart({}); setPerson(null); setQ(''); onSold();
     } catch (x) { setErr(errText(x)); } finally { setBusy(false); }
   };
@@ -101,6 +101,7 @@ function Sell({ club, items, onSold }: { club: string; items: Goods[]; onSold: (
           <button className="btn pri" disabled={!lines.length || busy} onClick={() => pay('cash')}>Наличные</button>
           <button className="btn" disabled={!lines.length || busy || !person} onClick={() => pay(null)} title={person ? '' : 'Сначала выберите клиента'}>На счёт клиента</button>
           <button className="btn" disabled={!lines.length || busy || !person} onClick={() => pay('deposit')} title={person ? '' : 'Сначала выберите клиента'}>С депозита</button>
+          <button className="btn" disabled={!lines.length || busy || !person} onClick={() => pay('points')} title={person ? 'Списать бонусные баллы клиента' : 'Сначала выберите клиента'}>Баллами</button>
         </div>
         <p className="small muted" style={{ margin: 0 }}>Наличные — только при открытой кассовой смене. «На счёт» — клиент оплатит позже: долг виден в его карточке и в «Финансах». «С депозита» — списать с внутреннего счёта клиента.</p>
       </div>

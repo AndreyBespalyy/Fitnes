@@ -2,6 +2,7 @@
 // Бывшие клиенты делятся на группы по давности ухода, тарифу и визитам; кампания отправляет предложение тем, у кого есть мессенджер
 // и согласие на рекламу, остальным ставит звонок. Ответившим — задача менеджеру. Покупка в течение 45 дней засчитывается кампании.
 // Досрочное продление: за N дней до конца абонемента клиенту предлагают продлиться по текущей цене, цена держится до конца абонемента.
+import { processLoyalty } from './loyalty.ts';
 import type { FastifyInstance } from 'fastify';
 import type pg from 'pg';
 import { requirePerm } from '../auth.ts';
@@ -186,6 +187,7 @@ export async function processRetention(pool: pg.Pool, f: Fetch | null) {
         // Предложения уходят только в рабочее время клуба
         if (c.h >= Math.max(11, c.wf) && c.h < c.wt) { await earlyRenewals(db, f, actor, c.id, c.today); await churnPlays(db, f, actor, c.id); }
       }).catch((e) => console.error('Удержание:', (e as Error).message));
+      await withCtx(pool, sys, (db) => processLoyalty(db, tenantId, c.id)).catch((e) => console.error('Баллы:', (e as Error).message));
     }
   }
 }

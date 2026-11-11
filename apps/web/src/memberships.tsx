@@ -1,4 +1,5 @@
 // Шаг 6. Раздел «Тарифы» (настройки клуба, тарифы и цены) и абонементы в карточке клиента.
+import { LoyaltySettings } from './loyalty.tsx';
 import { Fragment, useEffect, useState, type FormEvent } from 'react';
 import { PayLinkButton } from './payments.tsx';
 import { PayerPick, type PayerValue } from './familyCorp.tsx';
@@ -51,6 +52,7 @@ export function TariffsPage({ me, clubs, clubId }: { me: Me; clubs: Club[]; club
       <SettingsForm key={`s${club}`} club={c} manage={manage} />
       <Products key={`p${club}`} club={c} manage={manage} />
       <PromosBlock key={`a${club}`} club={c} manage={manage} />
+      <LoyaltySettings key={`l${club}`} club={c} />
     </>
   );
 }
