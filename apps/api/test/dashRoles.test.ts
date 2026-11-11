@@ -47,3 +47,13 @@ test('риски ведут в нужные разделы', async () => {
   const d = (await req('/api/dash/widget/risks?clubId=all', 'a.bespalyy')).json();
   assert.ok(d.items.every((i: { go?: { tab: string } }) => i.go?.tab));
 });
+
+test('окно «Защита данных» у собственника и управляющего, плитка «Состояние системы» у администратора', async () => {
+  const lay = (await req('/api/dash/layout', 'o.smirnov')).json();
+  assert.ok(lay.widgets.includes('protection'));
+  const p = (await req('/api/dash/widget/protection?clubId=all', 'o.smirnov')).json();
+  assert.ok(p.tiles.every((x: { go: { tab: string } }) => x.go.tab === 'privacy'));
+  assert.equal((await req('/api/dash/widget/protection?clubId=all', 'm.volkova')).statusCode, 403);
+  const s = (await req('/api/dash/widget/system?clubId=all', 'i.kotova')).json();
+  assert.ok(s.tiles.some((x: { label: string; go: { tab: string } }) => x.label === 'Состояние системы' && x.go.tab === 'system'));
+});

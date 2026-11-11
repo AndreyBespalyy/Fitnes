@@ -79,13 +79,14 @@ export const WIDGETS: W[] = [
   { id: 'desk_day', title: 'Ресепшн сегодня', description: 'Посещения, занятия, кассовая смена, кому предложить продление, должники, пришедшие сегодня', perm: P.acsWork },
   { id: 'fin_day', title: 'Финансы сегодня', description: 'Поступления и расходы, долги, неудачные автосписания, согласования, кассовые смены, сверка с банком', perm: P.financeView },
   { id: 'trainer_day', title: 'Мои занятия', description: 'Занятия сегодня и на неделю, кого записано, неотмеченные посещения, проведено за месяц', perm: P.scheduleBook },
-  { id: 'system', title: 'Система', description: 'Клубы, подключение, сотрудники без роли и с временным паролем, обращения в поддержку, перенос из 1С', perm: P.clubsManage, network: true },
+  { id: 'system', title: 'Система', description: 'Клубы, подключение, сотрудники без роли и с временным паролем, обращения в поддержку, перенос из 1С, состояние системы', perm: P.clubsManage, network: true },
+  { id: 'protection', title: 'Защита данных', description: 'Неразобранные сигналы о всплесках просмотров, запросы на большие выгрузки, обращения клиентов по персональным данным', perm: P.dataProtect },
   { id: 'my_plan', title: 'Мой план', description: 'Личный план на месяц и на сегодня, факт, процент, дефицит по категориям', perm: P.crmWork },
   { id: 'my_kpi', title: 'Мои показатели', description: 'Мои звонки, встречи, продажи и задачи за сегодня в сравнении с нормой', perm: P.crmWork },
 ];
 const ROLE_DEFAULTS: Record<string, string[]> = {
-  owner: ['day', 'clubs', 'plan', 'retention', 'risks', 'nps', 'funnel_sources', 'system'],
-  gm: ['club_today', 'day', 'plan', 'risks', 'retention', 'team', 'nps', 'kpi'],
+  owner: ['day', 'clubs', 'plan', 'retention', 'risks', 'nps', 'funnel_sources', 'system', 'protection'],
+  gm: ['club_today', 'day', 'plan', 'risks', 'retention', 'team', 'nps', 'kpi', 'protection'],
   rop: ['team', 'my_day', 'retention', 'funnel_managers', 'funnel_sources', 'kpi', 'my_plan'],
   manager: ['my_day', 'my_plan', 'my_kpi'],
   desk: ['desk_day'],

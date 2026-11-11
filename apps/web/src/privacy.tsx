@@ -1,6 +1,6 @@
 // Защита базы клиентов, персональные данные (152-ФЗ) и состояние системы.
 import { useEffect, useState, type ReactNode } from 'react';
-import { api, ApiError, can, type Club, type Me } from './api.ts';
+import { api, ApiError, can, navParams, type Club, type Me } from './api.ts';
 import { dt, errText, toast } from './ui.ts';
 
 /** Скачивание выгрузки. Если сервер отказал (например, нужно согласование управляющего), показываем причину, а не пустую страницу. */
@@ -44,8 +44,8 @@ type Text = { id: string; kind: string; version: number; title: string; body: st
 
 export function PrivacyPage({ me, clubId, openPerson }: { me: Me; clubs: Club[]; clubId: string; openPerson: (id: string) => void }) {
   type View = 'exports' | 'alerts' | 'activity' | 'requests' | 'texts' | 'limits';
-  const [view, setView] = useState<View>('exports');
   const views: [View, string][] = [['exports', 'Выгрузки'], ['alerts', 'Сигналы'], ['activity', 'Кто что смотрел'], ['requests', 'Обращения клиентов'], ['texts', 'Тексты согласий'], ['limits', 'Пороги']];
+  const [view, setView] = useState<View>(() => { const v = navParams('privacy').view; return (views.find((x) => x[0] === v)?.[0]) ?? 'exports'; });
   return (
     <>
       <div><div className="lbl">Защита данных</div><h1>База клиентов и персональные данные</h1></div>
