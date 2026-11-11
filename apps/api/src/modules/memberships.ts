@@ -135,7 +135,7 @@ export async function sellMembership(db: Db, ctx: Pick<Ctx, 'tenantId' | 'userId
     if (recent.renewed_from_id && recent.renewed_from_id === b.renewFromId) throw new HttpError(409, `Этот абонемент уже продлён (${who}${at}). Повторная продажа не нужна`, 'already_renewed');
     throw new HttpError(409, `Такой же тариф этому клиенту уже продан ${at} (${who.replace(/, $/, '') || 'другим сотрудником'}). Если это правда вторая покупка, подтвердите`, 'duplicate_sale');
   }
-  const price = await currentPrice(db, prod.id);
+  let price = await currentPrice(db, prod.id);
   if (!price) throw badRequest('У тарифа нет цены');
   const s = await getSettings(db, prod.club_id);
   const today = await clubToday(db, prod.club_id);
@@ -151,6 +151,14 @@ export async function sellMembership(db: Db, ctx: Pick<Ctx, 'tenantId' | 'userId
     // Продление считается от даты окончания текущего абонемента: клиент не теряет дни
     if (prev.ends_on && prev.ends_on >= today) startsOn = addDays(prev.ends_on, 1);
     renewedFrom = prev.id;
+  }
+  // Досрочное продление: цена из предложения держится до конца абонемента, даже если тариф подорожал
+  let lockedOffer: string | null = null;
+  if (renewedFrom) {
+    const lock = (await db.query(`select id, price_version_id, amount_kop from renewal_offers where membership_id = $1 and product_id = $2 and status in ('sent', 'call') and valid_until >= $3`,
+      [renewedFrom, prod.id, today])).rows[0];
+    if (lock && lock.price_version_id && Number(lock.amount_kop) < Number(price.amount_kop)) price = { id: lock.price_version_id, amount_kop: lock.amount_kop };
+    if (lock) lockedOffer = lock.id;
   }
 
   const n = Math.max(1, Math.floor(b.installments ?? 1));
@@ -193,7 +201,8 @@ export async function sellMembership(db: Db, ctx: Pick<Ctx, 'tenantId' | 'userId
     [ctx.tenantId, prod.club_id, id, renewedFrom ? 'renewal' : 'sale', JSON.stringify({ productId: prod.id, priceVersionId: price.id, amountKop: amount, installments: n, startsOn, renewedFrom }), ctx.userId]);
   const contract = await createContract(db, ctx, id);
   await db.query(`update persons set segment = case when $2 = 'subscription' then 'активный подписчик' else 'действующий' end, updated_at = now() where id = $1`, [b.personId, prod.kind]);
-  await audit(db, ctx, renewedFrom ? 'membership.renewed' : 'membership.sold', 'membership', id, null, { productId: prod.id, amountKop: amount, installments: n, startsOn, endsOn });
+  if (lockedOffer) await db.query(`update renewal_offers set status = 'used', used_membership_id = $2 where id = $1`, [lockedOffer, id]);
+  await audit(db, ctx, renewedFrom ? 'membership.renewed' : 'membership.sold', 'membership', id, null, { productId: prod.id, amountKop: amount, installments: n, startsOn, endsOn, renewalOffer: lockedOffer });
   return { id, startsOn, endsOn, contractId: contract.id, contractNumber: contract.number };
 }
 

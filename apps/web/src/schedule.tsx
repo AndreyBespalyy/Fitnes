@@ -202,13 +202,13 @@ function SetupView({ club, setup, reload }: { club: string; setup: Setup; reload
       <div className="card" style={{ display: 'grid', gap: 6 }}>
         <h2>Правила записи</h2>
         <label className="f">Поздняя отмена — меньше чем за, часов<input type="number" value={st.lateCancelHours} onChange={(e) => setSt({ ...st, lateCancelHours: Number(e.target.value) })} /></label>
-        <label><input type="checkbox" checked={st.chargePersonalLate} onChange={(e) => setSt({ ...st, chargePersonalLate: e.target.checked })} /> Персональное: поздняя отмена и неявка списываются из пакета</label>
-        <label><input type="checkbox" checked={st.chargeGroupNoShow} onChange={(e) => setSt({ ...st, chargeGroupNoShow: e.target.checked })} /> Групповое: неявка списывает посещение из пакета посещений</label>
+        <label className="row" style={{ gap: 8 }}><input type="checkbox" style={{ width: "auto" }} checked={st.chargePersonalLate} onChange={(e) => setSt({ ...st, chargePersonalLate: e.target.checked })} /> Персональное: поздняя отмена и неявка списываются из пакета</label>
+        <label className="row" style={{ gap: 8 }}><input type="checkbox" style={{ width: "auto" }} checked={st.chargeGroupNoShow} onChange={(e) => setSt({ ...st, chargeGroupNoShow: e.target.checked })} /> Групповое: неявка списывает посещение из пакета посещений</label>
         <label className="f">Закрыть запись после неявок за 30 дней (пусто — не закрывать)<input type="number" value={st.noShowLimit ?? ''} onChange={(e) => setSt({ ...st, noShowLimit: e.target.value ? Number(e.target.value) : null })} /></label>
         <label className="f">На сколько дней закрыть запись<input type="number" value={st.noShowBlockDays} onChange={(e) => setSt({ ...st, noShowBlockDays: Number(e.target.value) })} /></label>
         <label className="f">Запись открыта вперёд, дней<input type="number" value={st.bookAheadDays} onChange={(e) => setSt({ ...st, bookAheadDays: Number(e.target.value) })} /></label>
-        <label><input type="checkbox" checked={st.remind24} onChange={(e) => setSt({ ...st, remind24: e.target.checked })} /> Напоминание клиенту за сутки</label>
-        <label><input type="checkbox" checked={st.remind2} onChange={(e) => setSt({ ...st, remind2: e.target.checked })} /> Напоминание за 2 часа</label>
+        <label className="row" style={{ gap: 8 }}><input type="checkbox" style={{ width: "auto" }} checked={st.remind24} onChange={(e) => setSt({ ...st, remind24: e.target.checked })} /> Напоминание клиенту за сутки</label>
+        <label className="row" style={{ gap: 8 }}><input type="checkbox" style={{ width: "auto" }} checked={st.remind2} onChange={(e) => setSt({ ...st, remind2: e.target.checked })} /> Напоминание за 2 часа</label>
         <button className="btn pri" onClick={() => call(() => api('PUT', '/api/schedule/settings', { clubId: club, ...st }), 'Правила сохранены')}>Сохранить правила</button>
       </div>
     </div>

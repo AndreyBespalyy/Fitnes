@@ -1,3 +1,4 @@
+import { RetentionPage } from './retention.tsx';
 import { SchedulePage } from './schedule.tsx';
 import { HelpPage, OnboardingPage } from './onboarding.tsx';
 import { CallsPage } from './calls.tsx';
@@ -84,7 +85,7 @@ function ChangePassword({ me, forced, onDone, onLogout }: { me: Me; forced?: boo
   );
 }
 
-type Tab = 'dash' | 'hot' | 'calls' | 'leads' | 'board' | 'tasks' | 'home' | 'clubs' | 'tariffs' | 'contracts' | 'site' | 'fiscal' | 'finance' | 'import' | 'chats' | 'access' | 'messaging' | 'pipelines' | 'staff' | 'stafftime' | 'config' | 'reviews' | 'onboarding' | 'help' | 'schedule' | 'profile';
+type Tab = 'dash' | 'hot' | 'calls' | 'leads' | 'board' | 'tasks' | 'home' | 'clubs' | 'tariffs' | 'contracts' | 'site' | 'fiscal' | 'finance' | 'import' | 'chats' | 'access' | 'messaging' | 'pipelines' | 'staff' | 'stafftime' | 'config' | 'reviews' | 'onboarding' | 'help' | 'schedule' | 'retention' | 'profile';
 
 function Shell({ me, onLogout }: { me: Me; onLogout: () => void }) {
   const isAdmin = can(me, 'clubs.manage') || can(me, 'staff.manage');
@@ -128,6 +129,7 @@ function Shell({ me, onLogout }: { me: Me; onLogout: () => void }) {
     ['import', 'Перенос из 1С', can(me, 'import.manage')],
     ['pipelines', 'Воронки', can(me, 'pipelines.manage')],
     ['staff', 'Сотрудники', can(me, 'staff.view')],
+    ['retention', 'Возврат клиентов', can(me, 'retention.manage')],
     ['reviews', 'Обзоры', can(me, 'crm.work') || can(me, 'dash.view') || can(me, 'ai.review')],
     ['stafftime', 'График и зарплата', true],
     ['config', 'Настройки клуба', can(me, 'config.manage')],
@@ -180,6 +182,7 @@ function Shell({ me, onLogout }: { me: Me; onLogout: () => void }) {
         {tab === 'stafftime' && <StaffTimePage me={me} clubs={clubs} clubId={clubId} />}
         {tab === 'config' && <ConfigPage me={me} clubs={clubs} clubId={clubId} />}
         {tab === 'schedule' && <SchedulePage me={me} clubs={clubs} clubId={clubId} openPerson={setPersonId} />}
+        {tab === 'retention' && <RetentionPage me={me} clubs={clubs} clubId={clubId} openPerson={setPersonId} />}
         {tab === 'onboarding' && <OnboardingPage me={me} clubId={clubId} go={(t) => setTab(t as Tab)} reloadClubs={reloadClubs} />}
         {tab === 'help' && <HelpPage me={me} clubs={clubs} clubId={clubId} page={tab} />}
         {tab === 'reviews' && <ReviewsPage me={me} clubs={clubs} clubId={clubId} openPerson={setPersonId} />}
