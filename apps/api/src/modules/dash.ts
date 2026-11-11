@@ -132,20 +132,20 @@ export async function salesFact(db: Db, clubIds: string[], from: string, to: str
   return (await db.query(`
     select p.club_id as "clubId", m.created_by as "userId", coalesce(p.sale_category, 'new') as category,
       (m.kind = 'subscription' and coalesce(ch.due_on, (p.created_at at time zone c.timezone)::date) > (m.created_at at time zone c.timezone)::date + 3) as recurring,
-      ((p.created_at at time zone c.timezone)::date = $4::date) as "isToday",
+      ((p.created_at >= ($4::date)::date::timestamp at time zone c.timezone and p.created_at < (($4::date)::date + 1)::timestamp at time zone c.timezone)) as "isToday",
       sum(case when p.direction = 'in' then p.amount_kop else -p.amount_kop end)::bigint as kop
     from payments p join clubs c on c.id = p.club_id
       left join charges ch on ch.id = p.charge_id
       left join refunds r on r.id = p.refund_id
       left join memberships m on m.id = coalesce(ch.membership_id, r.membership_id)
-    where p.kind in ('charge', 'refund') and p.club_id = any($1) and (p.created_at at time zone c.timezone)::date between $2 and $3
+    where p.kind in ('charge', 'refund') and p.club_id = any($1) and (p.created_at >= ($2)::date::timestamp at time zone c.timezone and p.created_at < (($3)::date + 1)::timestamp at time zone c.timezone)
     group by 1, 2, 3, 4, 5`, [clubIds, from, to, to])).rows.map((r) => ({ ...r, kop: Number(r.kop) })) as
     { clubId: string; userId: string | null; category: string; recurring: boolean; isToday: boolean; kop: number }[];
 }
 export async function clientsFact(db: Db, clubIds: string[], from: string, to: string) {
   return (await db.query(`select m.club_id as "clubId", m.created_by as "userId", coalesce(m.sale_category, 'new') as category, count(*)::int as n
     from memberships m join clubs c on c.id = m.club_id
-    where m.club_id = any($1) and m.kind <> 'guest' and m.status <> 'cancelled' and (m.created_at at time zone c.timezone)::date between $2 and $3
+    where m.club_id = any($1) and m.kind <> 'guest' and m.status <> 'cancelled' and (m.created_at >= ($2)::date::timestamp at time zone c.timezone and m.created_at < (($3)::date + 1)::timestamp at time zone c.timezone)
     group by 1, 2, 3`, [clubIds, from, to])).rows as { clubId: string; userId: string | null; category: string; n: number }[];
 }
 export async function targets(db: Db, clubIds: string[], month: string) {
@@ -207,7 +207,7 @@ export async function funnel(db: Db, clubIds: string[], from: string, to: string
       select l.id, l.club_id, l.person_id, l.created_at, l.assigned_to, l.first_response_at,
         coalesce(s.name, 'Без источника') as source
       from leads l join clubs c on c.id = l.club_id left join lead_sources s on s.id = l.source_id
-      where l.club_id = any($1) and (l.created_at at time zone c.timezone)::date between $2 and $3 and ($4::uuid is null or l.assigned_to = $4)
+      where l.club_id = any($1) and (l.created_at >= ($2)::date::timestamp at time zone c.timezone and l.created_at < (($3)::date + 1)::timestamp at time zone c.timezone) and ($4::uuid is null or l.assigned_to = $4)
     )
     select ${by === 'source' ? 'l.source' : `coalesce(u.full_name, 'Не назначен')`} as name, ${by === 'source' ? 'null' : 'l.assigned_to'} as "userId",
       count(*)::int as leads,
@@ -229,7 +229,7 @@ export async function funnel(db: Db, clubIds: string[], from: string, to: string
 export async function kpi(db: Db, clubIds: string[], from: string, to: string, userIds: string[]) {
   if (!userIds.length) return [];
   const q = async (sql: string) => new Map((await db.query(sql, [clubIds, from, to, userIds])).rows.map((r) => [r.u as string, Number(r.v)]));
-  const local = (col: string) => `(${col} at time zone c.timezone)::date between $2 and $3`;
+  const local = (col: string) => `(${col} >= ($2)::date::timestamp at time zone c.timezone and ${col} < (($3)::date + 1)::timestamp at time zone c.timezone)`;
   const [calls, messages, mSet, mDone, sales, refusals, tDone, tOver, fr] = await Promise.all([
     q(`select t.assignee_id as u, count(*) as v from tasks t join clubs c on c.id = t.club_id where t.club_id = any($1) and t.assignee_id = any($4) and t.kind in ('call', 'first_response') and t.done_at is not null and ${local('t.done_at')} group by 1`),
     q(`select m.author_id as u, count(*) as v from msg_messages m join clubs c on c.id = m.club_id where m.club_id = any($1) and m.author_id = any($4) and m.direction = 'out' and ${local('m.created_at')} group by 1`),
@@ -284,16 +284,16 @@ export async function widgetData(db: Db, ctx: Ctx, id: string, q: Q) {
     const per = await Promise.all(clubs.map(async (c) => {
       const d = (await db.query(`
         select
-          (select coalesce(sum(case when direction = 'in' then amount_kop else -amount_kop end), 0) from payments where club_id = $1 and kind in ('charge', 'refund') and (created_at at time zone $2)::date = $3::date)::bigint as sales,
-          (select coalesce(sum(amount_kop), 0) from payments where club_id = $1 and direction = 'in' and (created_at at time zone $2)::date = $3::date)::bigint as inflow,
-          (select coalesce(sum(amount_kop), 0) from payments where club_id = $1 and kind = 'expense' and (created_at at time zone $2)::date = $3::date)::bigint as expenses,
-          (select count(*) from memberships where club_id = $1 and kind <> 'guest' and status <> 'cancelled' and (created_at at time zone $2)::date = $3::date)::int as "salesCount",
-          (select count(*) from leads where club_id = $1 and (created_at at time zone $2)::date = $3::date)::int as leads,
-          (select count(*) from meetings where club_id = $1 and (scheduled_at at time zone $2)::date = $3::date and status <> 'cancelled')::int as meetings,
-          (select count(*) from visits where club_id = $1 and (visited_at at time zone $2)::date = $3::date)::int as visits,
+          (select coalesce(sum(case when direction = 'in' then amount_kop else -amount_kop end), 0) from payments where club_id = $1 and kind in ('charge', 'refund') and (created_at >= ($3::date)::date::timestamp at time zone $2 and created_at < (($3::date)::date + 1)::timestamp at time zone $2))::bigint as sales,
+          (select coalesce(sum(amount_kop), 0) from payments where club_id = $1 and direction = 'in' and (created_at >= ($3::date)::date::timestamp at time zone $2 and created_at < (($3::date)::date + 1)::timestamp at time zone $2))::bigint as inflow,
+          (select coalesce(sum(amount_kop), 0) from payments where club_id = $1 and kind = 'expense' and (created_at >= ($3::date)::date::timestamp at time zone $2 and created_at < (($3::date)::date + 1)::timestamp at time zone $2))::bigint as expenses,
+          (select count(*) from memberships where club_id = $1 and kind <> 'guest' and status <> 'cancelled' and (created_at >= ($3::date)::date::timestamp at time zone $2 and created_at < (($3::date)::date + 1)::timestamp at time zone $2))::int as "salesCount",
+          (select count(*) from leads where club_id = $1 and (created_at >= ($3::date)::date::timestamp at time zone $2 and created_at < (($3::date)::date + 1)::timestamp at time zone $2))::int as leads,
+          (select count(*) from meetings where club_id = $1 and (scheduled_at >= ($3::date)::date::timestamp at time zone $2 and scheduled_at < (($3::date)::date + 1)::timestamp at time zone $2) and status <> 'cancelled')::int as meetings,
+          (select count(*) from visits where club_id = $1 and (visited_at >= ($3::date)::date::timestamp at time zone $2 and visited_at < (($3::date)::date + 1)::timestamp at time zone $2))::int as visits,
           (select count(*) > 0 from visits where club_id = $1) or (select count(*) > 0 from access_gateways where club_id = $1) as "hasVisits",
           (select coalesce(sum(amount_kop), 0) from charges where club_id = $1 and status = 'due' and due_on < $3::date)::bigint as debts,
-          (select count(*) from leads where club_id = $1 and (created_at at time zone $2)::date between $4 and $3)::int as "monthLeads"`,
+          (select count(*) from leads where club_id = $1 and (created_at >= ($4)::date::timestamp at time zone $2 and created_at < (($3)::date + 1)::timestamp at time zone $2))::int as "monthLeads"`,
       [c.id, c.timezone, t, mi.from])).rows[0];
       const f = await funnel(db, [c.id], mi.from, t, 'source');
       return { clubId: c.id, name: c.name, salesKop: Number(d.sales), inflowKop: Number(d.inflow), expensesKop: Number(d.expenses), salesCount: d.salesCount, leads: d.leads,
@@ -594,7 +594,7 @@ export function dashRoutes(app: FastifyInstance, pool: pg.Pool) {
           left join charges ch on ch.id = p.charge_id left join refunds r on r.id = p.refund_id
           left join memberships m on m.id = coalesce(ch.membership_id, r.membership_id)
           left join users u on u.id = m.created_by left join persons pp on pp.id = p.person_id
-        where p.kind in ('charge', 'refund') and p.club_id = any($1) and (p.created_at at time zone c.timezone)::date between $2 and $3
+        where p.kind in ('charge', 'refund') and p.club_id = any($1) and (p.created_at >= ($2)::date::timestamp at time zone c.timezone and p.created_at < (($3)::date + 1)::timestamp at time zone c.timezone)
           and ($4::uuid is null or m.created_by = $4) and ($5::text is null or p.sale_category = $5)
         order by p.created_at limit 20000`, [clubs.map((c) => c.id), p.from, p.to, userId, q.category || null])).rows;
       if (q.format === 'csv' || q.format === 'xlsx') await audit(db, ctx, 'report.exported', 'report', 'sales', null, { ...q, userId });

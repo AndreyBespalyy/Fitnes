@@ -32,7 +32,7 @@ export async function monthPnl(db: Db, clubId: string | null, month: string, tod
       sum(p.amount_kop)::bigint as s
     from payments p join clubs c on c.id = p.club_id left join charges ch on ch.id = p.charge_id left join memberships m on m.id = ch.membership_id
       left join expense_categories ec on ec.code = p.expense_category
-    where ($1::uuid is null or p.club_id = $1) and (p.created_at at time zone c.timezone)::date >= $2::date and (p.created_at at time zone c.timezone)::date < $3::date
+    where ($1::uuid is null or p.club_id = $1) and p.created_at >= ($2::date)::date::timestamp at time zone c.timezone and p.created_at < ($3::date)::date::timestamp at time zone c.timezone
     group by 1, 2, 3, 4, 5, 6`, [clubId, from, to])).rows.map((r) => ({ ...r, s: Number(r.s) }));
   const revMap = new Map<string, number>();
   for (const r of pays.filter((x) => x.direction === 'in')) revMap.set(r.rev, (revMap.get(r.rev) ?? 0) + r.s);
@@ -50,7 +50,7 @@ export async function monthPnl(db: Db, clubId: string | null, month: string, tod
     if (sheet) { payrollKop += Number(sheet.s); sources.add('approved'); continue; }
     const paid = Number((await db.query(`select coalesce(sum(p.amount_kop), 0)::bigint as s from payments p join clubs cl on cl.id = p.club_id
       where p.club_id = $1 and p.kind = 'expense' and p.expense_category = 'salary'
-        and (p.created_at at time zone cl.timezone)::date >= $2::date and (p.created_at at time zone cl.timezone)::date < $3::date`, [c, from, to])).rows[0].s);
+        and p.created_at >= ($2::date)::date::timestamp at time zone cl.timezone and p.created_at < ($3::date)::date::timestamp at time zone cl.timezone`, [c, from, to])).rows[0].s);
     if (paid) { payrollKop += paid; sources.add('paid'); continue; }
     const est = (await calcPayroll(db, c, month, today)).reduce((s2, l) => s2 + l.totalKop, 0);
     if (est) { payrollKop += est; sources.add('estimate'); }

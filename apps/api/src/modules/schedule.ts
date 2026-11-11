@@ -182,7 +182,7 @@ export async function trainerSessions(db: Db, clubId: string, from: string, to: 
       count(*) filter (where t.kind = 'personal')::int as personal, count(*) filter (where t.kind = 'group')::int as "group"
     from class_sessions s join class_types t on t.id = s.type_id join clubs c on c.id = s.club_id
     where s.club_id = $1 and s.status = 'done' and s.trainer_id is not null
-      and (s.starts_at at time zone c.timezone)::date between $2 and $3
+      and (s.starts_at >= ($2)::date::timestamp at time zone c.timezone and s.starts_at < (($3)::date + 1)::timestamp at time zone c.timezone)
       and (t.kind = 'group' or exists (select 1 from class_bookings b where b.session_id = s.id and b.status = 'attended') or exists (select 1 from class_bookings b where b.session_id = s.id and b.charged))
     group by s.trainer_id`, [clubId, from, to])).rows as { userId: string; n: number; personal: number; group: number }[];
 }
@@ -243,7 +243,7 @@ export function scheduleRoutes(app: FastifyInstance, pool: pg.Pool, opts: { fetc
     if (!isDate(q.from) || !isDate(q.to)) throw badRequest('Укажите период');
     return withCtx(pool, ctx, async (db) => {
       await clubOf(db, q.clubId);
-      return (await db.query(`${SESSION} where s.club_id = $1 and (s.starts_at at time zone c.timezone)::date between $2 and $3
+      return (await db.query(`${SESSION} where s.club_id = $1 and (s.starts_at >= ($2)::date::timestamp at time zone c.timezone and s.starts_at < (($3)::date + 1)::timestamp at time zone c.timezone)
         and ($4::uuid is null or s.trainer_id = $4) order by s.starts_at`, [q.clubId, q.from, q.to, uuid(q.trainerId) ? q.trainerId : null])).rows;
     });
   });

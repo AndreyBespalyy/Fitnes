@@ -45,9 +45,9 @@ export async function timesheet(db: Db, clubId: string, from: string, to: string
   const marks = (await db.query(
     `select user_id, at, direction, source, to_char(at at time zone $5, 'YYYY-MM-DD') as day, to_char(at at time zone $5, 'HH24:MI') as hm from (
        select user_id, happened_at as at, direction, 'turnstile' as source from access_events
-         where club_id = $1 and user_id is not null and decision = 'allow' and (happened_at at time zone $5)::date between $2 and $3
+         where club_id = $1 and user_id is not null and decision = 'allow' and (happened_at >= ($2)::date::timestamp at time zone $5 and happened_at < (($3)::date + 1)::timestamp at time zone $5)
        union all
-       select user_id, at, direction, source from staff_marks where club_id = $1 and (at at time zone $5)::date between $2 and $3
+       select user_id, at, direction, source from staff_marks where club_id = $1 and (at >= ($2)::date::timestamp at time zone $5 and at < (($3)::date + 1)::timestamp at time zone $5)
      ) x where ($4::uuid[] is null or user_id = any($4)) order by at`, [clubId, from, to, userIds, tz])).rows;
   const users = new Set<string>([...shifts.map((s) => s.user_id), ...marks.map((m) => m.user_id), ...abs.map((a) => a.user_id), ...(userIds ?? [])]);
   const out: Record<string, { days: DayRow[]; totals: { plannedMin: number; workedMin: number; lateMin: number; lateCount: number; earlyMin: number; overtimeMin: number; shifts: number; workedShifts: number; absentDays: number; absences: Record<string, number> } }> = {};
@@ -107,7 +107,7 @@ export async function personalValue(db: Db, clubId: string, from: string, to: st
     from class_bookings b join class_sessions s on s.id = b.session_id join class_types t on t.id = s.type_id join clubs c on c.id = s.club_id
       join memberships m on m.id = b.membership_id join products p on p.id = m.product_id
     where s.club_id = $1 and t.kind = 'personal' and s.status = 'done' and s.trainer_id is not null and (b.status = 'attended' or b.charged)
-      and (s.starts_at at time zone c.timezone)::date between $2 and $3 group by s.trainer_id`, [clubId, from, to])).rows.map((r) => ({ userId: r.userId as string, n: r.n as number, valueKop: Number(r.valueKop) }));
+      and (s.starts_at >= ($2)::date::timestamp at time zone c.timezone and s.starts_at < (($3)::date + 1)::timestamp at time zone c.timezone) group by s.trainer_id`, [clubId, from, to])).rows.map((r) => ({ userId: r.userId as string, n: r.n as number, valueKop: Number(r.valueKop) }));
 }
 
 export async function calcPayroll(db: Db, clubId: string, month: string, today: string) {

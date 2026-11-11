@@ -313,7 +313,7 @@ export function financeRoutes(app: FastifyInstance, pool: pg.Pool) {
          pe.full_name as "personName", coalesce(ch.title, e.description, 'Возврат') as "title", u.full_name as "createdBy"
        from payments p left join persons pe on pe.id = p.person_id left join charges ch on ch.id = p.charge_id left join expenses e on e.id = p.expense_id left join users u on u.id = p.created_by
        join clubs c on c.id = p.club_id
-       where ($1::uuid is null or p.club_id = $1) and (p.created_at at time zone c.timezone)::date >= $2 and (p.created_at at time zone c.timezone)::date < $3
+       where ($1::uuid is null or p.club_id = $1) and p.created_at >= ($2)::date::timestamp at time zone c.timezone and p.created_at < ($3)::date::timestamp at time zone c.timezone
        order by p.created_at desc limit 500`, [clubId || null, r.from, r.to])).rows);
   });
 
@@ -337,7 +337,7 @@ export function financeRoutes(app: FastifyInstance, pool: pg.Pool) {
       const rows = (await db.query(
         `select p.direction, p.kind, p.method, p.sale_category, p.expense_category, ec.name as expense_name, sum(p.amount_kop)::bigint as s
          from payments p join clubs c on c.id = p.club_id left join expense_categories ec on ec.code = p.expense_category
-         where ($1::uuid is null or p.club_id = $1) and (p.created_at at time zone c.timezone)::date >= $2 and (p.created_at at time zone c.timezone)::date < $3
+         where ($1::uuid is null or p.club_id = $1) and p.created_at >= ($2)::date::timestamp at time zone c.timezone and p.created_at < ($3)::date::timestamp at time zone c.timezone
          group by 1,2,3,4,5,6`, [clubId || null, r.from, r.to])).rows.map((x) => ({ ...x, s: Number(x.s) }));
       const sum = (f: (x: typeof rows[number]) => boolean) => rows.filter(f).reduce((a, x) => a + x.s, 0);
       const inflow = sum((x) => x.direction === 'in');
@@ -365,7 +365,7 @@ export function financeRoutes(app: FastifyInstance, pool: pg.Pool) {
       const plan = (await db.query(`select category, sum(amount_kop)::bigint as s from plan_targets where user_id is null and ($1::uuid is null or club_id = $1) and month = $2 group by category`, [clubId || null, r.from])).rows;
       const fact = (await db.query(`select p.sale_category as category, sum(case when p.direction = 'in' then p.amount_kop else -p.amount_kop end)::bigint as s
         from payments p join clubs c on c.id = p.club_id
-        where p.kind in ('charge', 'refund') and ($1::uuid is null or p.club_id = $1) and (p.created_at at time zone c.timezone)::date >= $2 and (p.created_at at time zone c.timezone)::date < $3
+        where p.kind in ('charge', 'refund') and ($1::uuid is null or p.club_id = $1) and p.created_at >= ($2)::date::timestamp at time zone c.timezone and p.created_at < ($3)::date::timestamp at time zone c.timezone
         group by 1`, [clubId || null, r.from, r.to])).rows;
       const cats = ['new', 'renewal', 'return', 'subscription'];
       const items = cats.map((k) => {

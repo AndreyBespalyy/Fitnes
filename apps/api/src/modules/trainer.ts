@@ -87,7 +87,7 @@ export function trainerRoutes(app: FastifyInstance, pool: pg.Pool) {
             from class_bookings b join persons p on p.id = b.person_id left join memberships m on m.id = b.membership_id
             where b.session_id = s.id and b.status in ('booked', 'attended', 'no_show')), '[]') as people
         from class_sessions s join class_types t on t.id = s.type_id left join rooms r on r.id = s.room_id
-        where s.trainer_id = $1 and s.club_id = $2 and s.status <> 'cancelled' and (s.starts_at at time zone $4)::date between $3::date and $3::date + 6
+        where s.trainer_id = $1 and s.club_id = $2 and s.status <> 'cancelled' and (s.starts_at >= ($3::date)::date::timestamp at time zone $4 and s.starts_at < (($3::date + 6)::date + 1)::timestamp at time zone $4)
         order by s.starts_at`, [trainerId, clubId, date, tz])).rows;
       const shifts = (await db.query(`select to_char(day, 'YYYY-MM-DD') as day, to_char(starts, 'HH24:MI') as starts, to_char(ends, 'HH24:MI') as ends
         from staff_shifts where user_id = $1 and club_id = $2 and day between $3::date and $3::date + 6 order by day, starts`, [trainerId, clubId, date])).rows;

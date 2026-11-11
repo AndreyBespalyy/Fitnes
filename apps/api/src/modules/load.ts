@@ -37,17 +37,20 @@ function dowCounts(from: string, to: string) {
  */
 export async function loadGrid(db: Db, clubId: string, tz: string, from: string, to: string) {
   const inside = grid(); const entries = grid();
-  const rows = (await db.query(`with h as (
-        select g as h from generate_series($2::timestamp, $3::timestamp - interval '1 hour', interval '1 hour') g),
-      v as (
+  // Каждое посещение раскладываем только на те часы, которые оно занимает (обычно 2–3), а не сравниваем со всеми часами периода:
+  // на 1 млн посещений это секунды вместо десятков секунд
+  const rows = (await db.query(`with v as (
         select visited_at at time zone $4 as a,
           (case when exit_at is not null then least(exit_at, visited_at + interval '16 hours') else visited_at + make_interval(mins => $5) end) at time zone $4 as b
-        from visits where club_id = $1 and visited_at >= ($2::timestamp - interval '16 hours') at time zone $4 and visited_at < $3::timestamp at time zone $4)
-    select (extract(isodow from h.h)::int - 1) as dow, extract(hour from h.h)::int as hr,
+        from visits where club_id = $1 and visited_at >= ($2::timestamp - interval '16 hours') at time zone $4 and visited_at < $3::timestamp at time zone $4),
+      x as (
+        select v.a, v.b, h from v cross join lateral generate_series(date_trunc('hour', v.a), v.b, interval '1 hour') h
+        where h < v.b and h >= $2::timestamp and h < $3::timestamp)
+    select (extract(isodow from h)::int - 1) as dow, extract(hour from h)::int as hr,
       -- доля часа, которую человек провёл в клубе: 30 минут из 60 — это половина человека в этот час
-      coalesce(sum(extract(epoch from (least(v.b, h.h + interval '1 hour') - greatest(v.a, h.h))) / 3600.0) filter (where v.a is not null), 0)::float as inside,
-      count(*) filter (where v.a >= h.h and v.a < h.h + interval '1 hour')::int as entries
-    from h left join v on v.a < h.h + interval '1 hour' and v.b > h.h
+      sum(extract(epoch from (least(b, h + interval '1 hour') - greatest(a, h))) / 3600.0)::float as inside,
+      count(*) filter (where a >= h and a < h + interval '1 hour')::int as entries
+    from x
     group by 1, 2`, [clubId, from, to, tz, DEFAULT_STAY_MIN])).rows;
   const days = dowCounts(from, to);
   for (const r of rows) {
@@ -142,7 +145,7 @@ export function loadRoutes(app: FastifyInstance, pool: pg.Pool) {
       const booked = (await db.query(`select to_char(s.starts_at at time zone $3, 'YYYY-MM-DD') as day, extract(hour from s.starts_at at time zone $3)::int as hr,
           count(b.id)::int as n
         from class_sessions s join class_bookings b on b.session_id = s.id and b.status = 'booked'
-        where s.club_id = $1 and s.status = 'scheduled' and (s.starts_at at time zone $3)::date between $2::date and $2::date + 6 group by 1, 2`, [q.clubId, today, s.timezone])).rows;
+        where s.club_id = $1 and s.status = 'scheduled' and (s.starts_at >= ($2::date)::date::timestamp at time zone $3 and s.starts_at < (($2::date + 6)::date + 1)::timestamp at time zone $3) group by 1, 2`, [q.clubId, today, s.timezone])).rows;
       const forecast = Array.from({ length: 7 }, (_, i) => {
         const day = addDays(today, i);
         const dow = (new Date(`${day}T12:00:00Z`).getUTCDay() + 6) % 7;

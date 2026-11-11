@@ -25,14 +25,17 @@ export async function deskFind(db: Db, clubId: string, q: string) {
   const digits = text.replace(/\D/g, '');
   if (text.length < 2) return [];
   const byCard = (await db.query(`select person_id from access_credentials where upper(code) = upper($1) and person_id is not null`, [text])).rows.map((r) => r.person_id as string);
-  const rows = (await db.query(`select p.id, p.full_name as name, p.home_club_id = $1 as "homeClub",
+  // Кандидаты отдельно по карте, телефону и имени: так каждый поиск идёт по своему индексу (на 30 тыс. клиентов — миллисекунды)
+  const rows = (await db.query(`with ids as (
+      select unnest($2::uuid[]) as id
+      union select person_ids_by_phone($3)
+      union select person_ids_by_name($4))
+    select p.id, p.full_name as name, p.home_club_id = $1 as "homeClub",
       (select value from person_contacts pc where pc.person_id = p.id and pc.is_primary limit 1) as phone,
       exists (select 1 from person_photos f where f.person_id = p.id) as "hasPhoto",
       (select max(v.visited_at) from visits v where v.person_id = p.id) as "lastVisit"
-    from persons p
-    where p.merged_into_id is null and (p.id = any($2::uuid[])
-      or ($3 <> '' and exists (select 1 from person_contacts pc where pc.person_id = p.id and pc.normalized_value like '%' || $3 || '%'))
-      or ($4 <> '' and p.full_name ilike '%' || $4 || '%'))
+    from persons p join ids on ids.id = p.id
+    where p.merged_into_id is null
     order by (p.id = any($2::uuid[])) desc, (p.home_club_id = $1) desc, "lastVisit" desc nulls last, p.full_name limit 8`,
   [clubId, byCard, digits.length >= 4 ? digits : '', digits.length >= 4 || byCard.length ? '' : text])).rows;
   return rows.map((r) => ({ ...r, phone: maskPhone(r.phone), byCard: byCard.includes(r.id) }));
@@ -58,7 +61,7 @@ export async function deskCard(db: Db, clubId: string, personId: string) {
     from products p where p.club_id = $1 and p.kind = 'guest' and p.is_active order by p.sort, p.name limit 1`, [clubId])).rows[0] ?? null;
   const bookings = (await db.query(`select b.id, t.name as "typeName", to_char(s.starts_at at time zone c.timezone, 'HH24:MI') as at, b.status
     from class_bookings b join class_sessions s on s.id = b.session_id join class_types t on t.id = s.type_id join clubs c on c.id = s.club_id
-    where b.person_id = $1 and s.club_id = $2 and (s.starts_at at time zone c.timezone)::date = $3::date and b.status in ('booked', 'attended') order by s.starts_at`,
+    where b.person_id = $1 and s.club_id = $2 and (s.starts_at >= ($3::date)::date::timestamp at time zone c.timezone and s.starts_at < (($3::date)::date + 1)::timestamp at time zone c.timezone) and b.status in ('booked', 'attended') order by s.starts_at`,
   [personId, clubId, today])).rows;
   const lastVisit = (await db.query('select visited_at as at, exit_at is null and visited_at > now() - interval \'16 hours\' as inside from visits where person_id = $1 and club_id = $2 order by visited_at desc limit 1', [personId, clubId])).rows[0] ?? null;
   return {

@@ -137,13 +137,13 @@ export async function managerReview(db: Db, clubId: string, userId: string, from
   const [tg, sf, cf] = await Promise.all([targets(db, [clubId], month), salesFact(db, [clubId], mi.from, upto), clientsFact(db, [clubId], mi.from, upto)]);
   const plan = planFact(mi, tg, sf, cf, { userId });
   // Качество разговоров по стандарту
-  const q = (await db.query(`select count(*)::int as n, round(avg(score), 1)::float as avg from call_evaluations where club_id = $1 and user_id = $2 and (created_at at time zone 'UTC')::date between $3 and $4`,
+  const q = (await db.query(`select count(*)::int as n, round(avg(score), 1)::float as avg from call_evaluations where club_id = $1 and user_id = $2 and (created_at >= ($3)::date::timestamp at time zone 'UTC' and created_at < (($4)::date + 1)::timestamp at time zone 'UTC')`,
     [clubId, userId, from, to])).rows[0];
   const weakItems = (await db.query(`select i ->> 'text' as text, count(*) filter (where (i ->> 'ok')::boolean is false)::int as missed, count(*)::int as total
-    from call_evaluations e, jsonb_array_elements(e.items) i where e.club_id = $1 and e.user_id = $2 and (e.created_at at time zone 'UTC')::date between $3 and $4 and i ->> 'ok' is not null
+    from call_evaluations e, jsonb_array_elements(e.items) i where e.club_id = $1 and e.user_id = $2 and (e.created_at >= ($3)::date::timestamp at time zone 'UTC' and e.created_at < (($4)::date + 1)::timestamp at time zone 'UTC') and i ->> 'ok' is not null
     group by 1 having count(*) filter (where (i ->> 'ok')::boolean is false) > 0 order by 2 desc limit 3`, [clubId, userId, from, to])).rows as { text: string; missed: number; total: number }[];
   // Рабочее время и эфир (FR-AI-17)
-  const air = (await db.query(`select coalesce(sum(duration_sec), 0)::int as sec, count(*)::int as n from calls where club_id = $1 and user_id = $2 and (started_at at time zone 'UTC')::date between $3 and $4`,
+  const air = (await db.query(`select coalesce(sum(duration_sec), 0)::int as sec, count(*)::int as n from calls where club_id = $1 and user_id = $2 and (started_at >= ($3)::date::timestamp at time zone 'UTC' and started_at < (($4)::date + 1)::timestamp at time zone 'UTC')`,
     [clubId, userId, from, to])).rows[0];
   const workedH = mine ? mine.workedMin / 60 : null;
   const work = {
@@ -205,7 +205,7 @@ export async function managerReview(db: Db, clubId: string, userId: string, from
 
 /* ---------- рекомендации: выполнение и обратная связь (AT31) ---------- */
 export async function metricValue(db: Db, clubId: string, userId: string, metric: string, from: string, to: string, today: string) {
-  if (metric === 'quality') return Number((await db.query(`select avg(score)::float as v from call_evaluations where club_id = $1 and user_id = $2 and (created_at at time zone 'UTC')::date between $3 and $4`, [clubId, userId, from, to])).rows[0].v ?? 0);
+  if (metric === 'quality') return Number((await db.query(`select avg(score)::float as v from call_evaluations where club_id = $1 and user_id = $2 and (created_at >= ($3)::date::timestamp at time zone 'UTC' and created_at < (($4)::date + 1)::timestamp at time zone 'UTC')`, [clubId, userId, from, to])).rows[0].v ?? 0);
   if (metric.startsWith('plan:')) {
     const cat = metric.slice(5);
     const sf = await salesFact(db, [clubId], from, to <= today ? to : today);
@@ -427,7 +427,7 @@ export function insightsRoutes(app: FastifyInstance, pool: pg.Pool) {
           left join charges ch on ch.id = p.charge_id left join refunds r on r.id = p.refund_id
           left join memberships m on m.id = coalesce(ch.membership_id, r.membership_id)
           left join users u on u.id = m.created_by left join persons pp on pp.id = p.person_id
-        where p.kind in ('charge', 'refund') and p.club_id = $1 and (p.created_at at time zone c.timezone)::date between $2 and $3
+        where p.kind in ('charge', 'refund') and p.club_id = $1 and (p.created_at >= ($2)::date::timestamp at time zone c.timezone and p.created_at < (($3)::date + 1)::timestamp at time zone c.timezone)
           and ($4::uuid is null or m.created_by = $4) and ($5::text is null or coalesce(p.sale_category, 'new') = $5)
         order by p.created_at desc limit 1000`, [clubId, mi.from, mi.current ? today : mi.to, userId, category])).rows
         .map((r) => ({ ...r, amountKop: Number(r.kop), categoryName: CAT_NAME[r.category] ?? r.category }));
@@ -488,13 +488,13 @@ export function insightsRoutes(app: FastifyInstance, pool: pg.Pool) {
       const today = await clubToday(db, clubId);
       const from = isDate(q.from) ? q.from! : addDays(today, -29); const to = isDate(q.to) ? q.to! : today;
       const byUser = (await db.query(`select e.user_id as "userId", coalesce(u.full_name, '—') as name, count(*)::int as n, round(avg(e.score), 1)::float as avg
-        from call_evaluations e left join users u on u.id = e.user_id where e.club_id = $1 and (e.created_at at time zone 'UTC')::date between $2 and $3 group by 1, 2 order by 4 desc`, [clubId, from, to])).rows;
+        from call_evaluations e left join users u on u.id = e.user_id where e.club_id = $1 and (e.created_at >= ($2)::date::timestamp at time zone 'UTC' and e.created_at < (($3)::date + 1)::timestamp at time zone 'UTC') group by 1, 2 order by 4 desc`, [clubId, from, to])).rows;
       const items = (await db.query(`select i ->> 'text' as text, count(*)::int as total, count(*) filter (where (i ->> 'ok')::boolean)::int as ok
-        from call_evaluations e, jsonb_array_elements(e.items) i where e.club_id = $1 and (e.created_at at time zone 'UTC')::date between $2 and $3 and i ->> 'ok' is not null
+        from call_evaluations e, jsonb_array_elements(e.items) i where e.club_id = $1 and (e.created_at >= ($2)::date::timestamp at time zone 'UTC' and e.created_at < (($3)::date + 1)::timestamp at time zone 'UTC') and i ->> 'ok' is not null
         group by 1 order by (count(*) filter (where (i ->> 'ok')::boolean))::float / count(*)`, [clubId, from, to])).rows.map((r) => ({ ...r, pct: pct(r.ok, r.total) }));
       const best = (await db.query(`select e.call_id as "callId", e.score::float, e.source, c.started_at as "startedAt", coalesce(u.full_name, '—') as "userName", e.standard_version as "standardVersion"
         from call_evaluations e join calls c on c.id = e.call_id left join users u on u.id = e.user_id
-        where e.club_id = $1 and (e.created_at at time zone 'UTC')::date between $2 and $3 order by e.score desc, c.duration_sec desc nulls last limit 5`, [clubId, from, to])).rows;
+        where e.club_id = $1 and (e.created_at >= ($2)::date::timestamp at time zone 'UTC' and e.created_at < (($3)::date + 1)::timestamp at time zone 'UTC') order by e.score desc, c.duration_sec desc nulls last limit 5`, [clubId, from, to])).rows;
       const suggestions = items.filter((i) => i.total >= 3 && (i.pct ?? 100) < 50).map((i) => `«${i.text}» выполняется только в ${i.pct} % оценённых звонков. Разберите на планёрке лучшие звонки по этому пункту; если пункт не подходит клубу — поменяйте формулировку в «Настройки клуба» → «Стандарт продаж».`);
       return { from, to, byUser, items, best, suggestions };
     });

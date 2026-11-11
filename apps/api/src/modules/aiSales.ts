@@ -81,7 +81,7 @@ async function dayPlan(db: Db, ctx: Ctx, clubId: string) {
       count(*) filter (where call_id is not null)::int as reviews
     from tasks where club_id = $1 and assignee_id = $2 and done_at is null`, [clubId, ctx.userId, today])).rows[0];
   const meetings = (await db.query(`select m.scheduled_at as at, p.full_name as name from meetings m join persons p on p.id = m.person_id join clubs c on c.id = m.club_id
-    where m.club_id = $1 and m.created_by = $2 and m.status = 'scheduled' and (m.scheduled_at at time zone c.timezone)::date = $3::date order by m.scheduled_at`, [clubId, ctx.userId, today])).rows;
+    where m.club_id = $1 and m.created_by = $2 and m.status = 'scheduled' and (m.scheduled_at >= ($3::date)::date::timestamp at time zone c.timezone and m.scheduled_at < (($3::date)::date + 1)::timestamp at time zone c.timezone) order by m.scheduled_at`, [clubId, ctx.userId, today])).rows;
   const list = await hotList(db, ctx, { clubId, mine: true, limit: 40 });
   const callFirst = list.filter((r) => r.segment === 'hot').slice(0, 10);
   const byKind = Object.fromEntries(KINDS.map((k) => [k, list.filter((r) => r.kind === k).length]));
@@ -160,7 +160,7 @@ async function shadow(db: Db, clubId: string | null, from: string, to: string) {
        select distinct on (m.person_id, m.club_id) m.person_id, m.club_id, (m.created_at at time zone c.timezone)::date as d, coalesce(m.sale_category, 'new') as cat
        from memberships m join clubs c on c.id = m.club_id
        where ($1::uuid is null or m.club_id = $1) and m.kind <> 'guest' and m.status <> 'cancelled' and m.import_batch_id is null
-         and (m.created_at at time zone c.timezone)::date between $2 and $3
+         and (m.created_at >= ($2)::date::timestamp at time zone c.timezone and m.created_at < (($3)::date + 1)::timestamp at time zone c.timezone)
        order by m.person_id, m.club_id, m.created_at)
      select b.cat,
        count(*)::int as bought,
@@ -175,7 +175,7 @@ async function shadow(db: Db, clubId: string | null, from: string, to: string) {
        from ai_score_history h where ($1::uuid is null or h.club_id = $1) and h.day between $2 and $3 and h.kind in ('purchase', 'return') and h.segment <> 'excluded'
        order by h.person_id, h.club_id, h.kind, h.day),
      o as (select f.*, exists (select 1 from memberships m join clubs c on c.id = m.club_id where m.person_id = f.person_id and m.club_id = f.club_id and m.kind <> 'guest'
-             and m.status <> 'cancelled' and (m.created_at at time zone c.timezone)::date between f.day and f.day + 14) as won,
+             and m.status <> 'cancelled' and (m.created_at >= (f.day)::date::timestamp at time zone c.timezone and m.created_at < ((f.day + 14)::date + 1)::timestamp at time zone c.timezone)) as won,
            exists (select 1 from tasks t where t.person_id = f.person_id and t.done_at::date between f.day and f.day + 2)
              or exists (select 1 from calls c where c.person_id = f.person_id and c.started_at::date between f.day and f.day + 2) as contacted
            from f)

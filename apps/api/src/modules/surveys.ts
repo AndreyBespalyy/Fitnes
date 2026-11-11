@@ -127,13 +127,13 @@ export function npsOf(scores: number[], lowMax = 6, highMin = 9) {
 }
 export async function npsReport(db: Db, clubIds: string[], from: string, to: string) {
   const rows = (await db.query(`select s.club_id, s.staff_id, u.full_name as staff, s.score, s.kind from surveys s left join users u on u.id = s.staff_id
-    where s.club_id = any($1) and s.status = 'answered' and (s.answered_at at time zone 'Europe/Moscow')::date between $2 and $3`, [clubIds, from, to])).rows;
-  const sent = Number((await db.query(`select count(*) from surveys where club_id = any($1) and (created_at at time zone 'Europe/Moscow')::date between $2 and $3`, [clubIds, from, to])).rows[0].count);
+    where s.club_id = any($1) and s.status = 'answered' and (s.answered_at >= ($2)::date::timestamp at time zone 'Europe/Moscow' and s.answered_at < (($3)::date + 1)::timestamp at time zone 'Europe/Moscow')`, [clubIds, from, to])).rows;
+  const sent = Number((await db.query(`select count(*) from surveys where club_id = any($1) and (created_at >= ($2)::date::timestamp at time zone 'Europe/Moscow' and created_at < (($3)::date + 1)::timestamp at time zone 'Europe/Moscow')`, [clubIds, from, to])).rows[0].count);
   const staff = new Map<string, number[]>();
   for (const r of rows) if (r.staff) staff.set(r.staff, [...(staff.get(r.staff) ?? []), r.score]);
   const lows = (await db.query(`select s.id, s.person_id as "personId", p.full_name as name, s.score, s.comment, s.answered_at as "answeredAt", t.done_at as "taskDoneAt", t.result as "taskResult"
     from surveys s join persons p on p.id = s.person_id left join tasks t on t.id = s.task_id
-    where s.club_id = any($1) and s.status = 'answered' and s.task_id is not null and (s.answered_at at time zone 'Europe/Moscow')::date between $2 and $3 order by s.answered_at desc limit 50`, [clubIds, from, to])).rows;
+    where s.club_id = any($1) and s.status = 'answered' and s.task_id is not null and (s.answered_at >= ($2)::date::timestamp at time zone 'Europe/Moscow' and s.answered_at < (($3)::date + 1)::timestamp at time zone 'Europe/Moscow') order by s.answered_at desc limit 50`, [clubIds, from, to])).rows;
   return { ...npsOf(rows.map((r) => r.score)), sent, answeredPct: sent ? Math.round((rows.length * 100) / sent) : null,
     byKind: ['first_visit', 'day30', 'quarterly'].map((k) => ({ kind: k, ...npsOf(rows.filter((r) => r.kind === k).map((r) => r.score)) })),
     byStaff: [...staff.entries()].map(([name, sc]) => ({ name, ...npsOf(sc) })).sort((a, b) => b.n - a.n), lows };
@@ -172,7 +172,7 @@ export function surveyRoutes(app: FastifyInstance, pool: pg.Pool) {
       await club(db, q.clubId);
       const recent = (await db.query(`select s.id, s.person_id as "personId", p.full_name as name, s.kind, s.status, s.score, s.comment, s.created_at as "createdAt", s.answered_at as "answeredAt",
           s.review_asked_at as "reviewAskedAt", u.full_name as staff from surveys s join persons p on p.id = s.person_id left join users u on u.id = s.staff_id
-        where s.club_id = $1 and (s.created_at at time zone 'Europe/Moscow')::date between $2 and $3 order by coalesce(s.answered_at, s.created_at) desc limit 200`, [q.clubId, q.from, q.to])).rows;
+        where s.club_id = $1 and (s.created_at >= ($2)::date::timestamp at time zone 'Europe/Moscow' and s.created_at < (($3)::date + 1)::timestamp at time zone 'Europe/Moscow') order by coalesce(s.answered_at, s.created_at) desc limit 200`, [q.clubId, q.from, q.to])).rows;
       return { report: await npsReport(db, [q.clubId!], q.from!, q.to!), settings: await surveySettings(db, q.clubId!), recent };
     });
   });

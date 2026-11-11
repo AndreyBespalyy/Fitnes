@@ -68,7 +68,7 @@ const fingerprint = (d: BankDoc) => createHash('sha256').update([d.date, d.numbe
 async function onlineByDay(db: Db, clubId: string, from: string, to: string) {
   return (await db.query(`select to_char((p.created_at at time zone c.timezone)::date, 'YYYY-MM-DD') as day, sum(p.amount_kop)::bigint as gross
     from payments p join clubs c on c.id = p.club_id where p.club_id = $1 and p.direction = 'in' and p.method in ('online', 'sbp')
-      and (p.created_at at time zone c.timezone)::date between $2 and $3 group by 1 order by 1`, [clubId, from, to])).rows.map((r) => ({ day: r.day as string, gross: Number(r.gross) }));
+      and (p.created_at >= ($2)::date::timestamp at time zone c.timezone and p.created_at < (($3)::date + 1)::timestamp at time zone c.timezone) group by 1 order by 1`, [clubId, from, to])).rows.map((r) => ({ day: r.day as string, gross: Number(r.gross) }));
 }
 
 async function autoMatch(db: Db, clubId: string, lineId: string) {

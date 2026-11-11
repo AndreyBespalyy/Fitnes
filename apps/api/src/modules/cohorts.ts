@@ -34,7 +34,12 @@ export async function cohortPeople(db: Db, clubId: string | null, fromMonth: str
       where m.starts_on <= $3::date),
     seen as (
       select distinct p.person_id, p.club_id, to_char(v.visited_at at time zone c.timezone, 'YYYY-MM') as month
-      from people p join visits v on v.person_id = p.person_id and v.club_id = p.club_id join clubs c on c.id = p.club_id),
+      from people p join visits v on v.person_id = p.person_id and v.club_id = p.club_id join clubs c on c.id = p.club_id
+      where v.visited_at >= to_date($2, 'YYYY-MM') - interval '1 day'),
+    -- месяцы с абонементом или посещением одним проходом, а не подзапросом на каждого клиента
+    months as (
+      select person_id, club_id, array_agg(distinct month) as months
+      from (select person_id, club_id, month from cover union select person_id, club_id, month from seen) x group by 1, 2),
     money as (
       select p.person_id, p.club_id, coalesce(sum(case when y.direction = 'in' then y.amount_kop else -y.amount_kop end), 0)::bigint as kop
       from people p join payments y on y.person_id = p.person_id and y.club_id = p.club_id and y.expense_id is null
@@ -50,10 +55,10 @@ export async function cohortPeople(db: Db, clubId: string | null, fromMonth: str
     select p.person_id as "personId", p.club_id as "clubId", p.cohort, p.product_name as tariff, p.promo_id is not null as promo,
       coalesce(u.full_name, 'Онлайн и импорт') as seller, coalesce(src.name, 'Источник не указан') as channel, coach.name as trainer,
       coalesce(money.kop, 0)::bigint as kop,
-      coalesce((select array_agg(distinct x.month) from (select month from cover where cover.person_id = p.person_id and cover.club_id = p.club_id
-        union select month from seen where seen.person_id = p.person_id and seen.club_id = p.club_id) x), '{}') as months
+      coalesce(months.months, '{}') as months
     from people p left join users u on u.id = p.created_by left join money on money.person_id = p.person_id and money.club_id = p.club_id
-      left join src on src.person_id = p.person_id and src.club_id = p.club_id left join coach on coach.person_id = p.person_id and coach.club_id = p.club_id`,
+      left join src on src.person_id = p.person_id and src.club_id = p.club_id left join coach on coach.person_id = p.person_id and coach.club_id = p.club_id
+      left join months on months.person_id = p.person_id and months.club_id = p.club_id`,
   [clubId, fromMonth, today])).rows.map((r) => ({ ...r, kop: Number(r.kop), months: r.months as string[] })) as {
     personId: string; clubId: string; cohort: string; tariff: string; promo: boolean; seller: string; channel: string; trainer: string | null; kop: number; months: string[] }[];
 }

@@ -210,7 +210,8 @@ export function acsRoutes(app: FastifyInstance, pool: pg.Pool) {
         left join users mb on mb.id = e.manual_by
         where e.club_id = $1 order by e.happened_at desc limit $2`, [clubId, Math.min(Number(limit) || 50, 200)])).rows;
       const inside = (await db.query(`select count(*)::int as n from visits where club_id = $1 and exit_at is null and visited_at > now() - interval '16 hours' and source <> 'import'`, [clubId])).rows[0].n;
-      const today = (await db.query(`select count(*)::int as n from visits v join clubs c on c.id = v.club_id where v.club_id = $1 and (v.visited_at at time zone c.timezone)::date = (now() at time zone c.timezone)::date`, [clubId])).rows[0].n;
+      const today = (await db.query(`select count(*)::int as n from visits v where v.club_id = $1
+        and v.visited_at >= (select (now() at time zone timezone)::date::timestamp at time zone timezone from clubs where id = $1)`, [clubId])).rows[0].n;
       const gateways = (await db.query(`select id, name, status, last_seen_at as "lastSeenAt", queued, extract(epoch from now() - last_seen_at)::int as ago from access_gateways where club_id = $1 order by name`, [clubId])).rows
         .map((g) => ({ ...g, online: g.lastSeenAt != null && g.ago < GW_ONLINE_SEC }));
       const points = (await db.query(`select id, name, direction, gateway_id as "gatewayId" from access_points where club_id = $1 and is_active order by name`, [clubId])).rows;
@@ -480,25 +481,26 @@ export function acsRoutes(app: FastifyInstance, pool: pg.Pool) {
       const tz = (await db.query('select timezone from clubs where id = $1', [clubId])).rows[0].timezone;
       const range = [clubId, from, to, tz];
       const local = (col: string) => `(${col} at time zone $4)::date`;
+      const inRange = (col: string) => `(${col} >= ($2)::date::timestamp at time zone $4 and ${col} < (($3)::date + 1)::timestamp at time zone $4)`;
       const summary = (await db.query(`select count(*)::int as visits, count(distinct person_id)::int as people,
           round(avg(extract(epoch from exit_at - visited_at) / 60) filter (where exit_at is not null))::int as "avgMinutes",
           count(*) filter (where exit_at is null)::int as "noExit"
-        from visits where club_id = $1 and ${local('visited_at')} between $2 and $3`, range)).rows[0];
+        from visits where club_id = $1 and ${inRange('visited_at')}`, range)).rows[0];
       const byDay = (await db.query(`select to_char(${local('visited_at')}, 'YYYY-MM-DD') as day, count(*)::int as visits from visits
-        where club_id = $1 and ${local('visited_at')} between $2 and $3 group by 1 order by 1`, range)).rows;
+        where club_id = $1 and ${inRange('visited_at')} group by 1 order by 1`, range)).rows;
       const byHour = (await db.query(`select extract(hour from visited_at at time zone $4)::int as hour, count(*)::int as visits from visits
-        where club_id = $1 and ${local('visited_at')} between $2 and $3 group by 1 order by 1`, range)).rows;
+        where club_id = $1 and ${inRange('visited_at')} group by 1 order by 1`, range)).rows;
       const manual = (await db.query(`select e.happened_at as at, e.direction, e.reason, e.manual_reason as "manualReason", mb.full_name as "manualBy", p.full_name as person, pt.name as point
         from access_events e left join users mb on mb.id = e.manual_by left join persons p on p.id = e.person_id left join access_points pt on pt.id = e.point_id
-        where e.club_id = $1 and e.mode = 'manual' and ${local('e.happened_at')} between $2 and $3 order by e.happened_at desc`, range)).rows;
+        where e.club_id = $1 and e.mode = 'manual' and ${inRange('e.happened_at')} order by e.happened_at desc`, range)).rows;
       const denials = (await db.query(`select reason_code as "reasonCode", count(*)::int as n, count(distinct coalesce(person_id::text, code))::int as people
-        from access_events where club_id = $1 and decision = 'deny' and ${local('happened_at')} between $2 and $3 group by 1 order by 2 desc`, range)).rows
+        from access_events where club_id = $1 and decision = 'deny' and ${inRange('happened_at')} group by 1 order by 2 desc`, range)).rows
         .map((r) => ({ ...r, title: REASON_TITLES[r.reasonCode] ?? r.reasonCode }));
-      const offline = (await db.query(`select count(*)::int as n from access_events where club_id = $1 and mode = 'offline' and ${local('happened_at')} between $2 and $3`, range)).rows[0].n;
+      const offline = (await db.query(`select count(*)::int as n from access_events where club_id = $1 and mode = 'offline' and ${inRange('happened_at')}`, range)).rows[0].n;
       const staff = (await db.query(`select u.full_name as name, to_char(${local('e.happened_at')}, 'YYYY-MM-DD') as day,
           min(e.happened_at) filter (where e.direction = 'in') as "firstIn", max(e.happened_at) filter (where e.direction = 'out') as "lastOut", count(*)::int as events
         from access_events e join users u on u.id = e.user_id
-        where e.club_id = $1 and e.decision = 'allow' and ${local('e.happened_at')} between $2 and $3 group by u.full_name, 2 order by 2 desc, 1`, range)).rows;
+        where e.club_id = $1 and e.decision = 'allow' and ${inRange('e.happened_at')} group by u.full_name, 2 order by 2 desc, 1`, range)).rows;
       return { summary, byDay, byHour, manual, denials, offline, staff };
     });
   });

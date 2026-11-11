@@ -194,7 +194,7 @@ export function goodsRoutes(app: FastifyInstance, pool: pg.Pool) {
       const today = await clubToday(db, clubId);
       const from = /^\d{4}-\d{2}-\d{2}$/.test(q.from ?? '') ? q.from! : `${today.slice(0, 7)}-01`;
       const to = /^\d{4}-\d{2}-\d{2}$/.test(q.to ?? '') ? q.to! : today;
-      const range = `s.club_id = $1 and s.status <> 'cancelled' and (s.created_at at time zone c.timezone)::date between $2 and $3`;
+      const range = `s.club_id = $1 and s.status <> 'cancelled' and (s.created_at >= ($2)::date::timestamp at time zone c.timezone and s.created_at < (($3)::date + 1)::timestamp at time zone c.timezone)`;
       const byGoods = (await db.query(`select i.goods_id as "goodsId", i.name, sum(i.qty)::int as qty, sum(i.sum_kop)::bigint as sum
         from goods_sale_items i join goods_sales s on s.id = i.sale_id join clubs c on c.id = s.club_id where ${range} group by i.goods_id, i.name order by sum desc`, [clubId, from, to])).rows.map((r) => ({ ...r, sum: Number(r.sum) }));
       const byMethod = (await db.query(`select coalesce(s.method, 'on_account') as method, count(*)::int as n, sum(s.total_kop)::bigint as sum

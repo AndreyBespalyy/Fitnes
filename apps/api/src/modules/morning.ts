@@ -33,11 +33,11 @@ export async function clubStats(db: Db, club: { id: string; name: string; timezo
   const from = `${day.slice(0, 8)}01`;
   const r = (await db.query(`
     select
-      (select coalesce(sum(case when direction = 'in' then amount_kop else -amount_kop end), 0) from payments where club_id = $1 and kind in ('charge', 'refund') and (created_at at time zone $2)::date = $3::date)::bigint as day,
-      (select coalesce(sum(case when direction = 'in' then amount_kop else -amount_kop end), 0) from payments where club_id = $1 and kind in ('charge', 'refund') and (created_at at time zone $2)::date between $4::date and $3::date)::bigint as mtd,
+      (select coalesce(sum(case when direction = 'in' then amount_kop else -amount_kop end), 0) from payments where club_id = $1 and kind in ('charge', 'refund') and (created_at >= ($3::date)::date::timestamp at time zone $2 and created_at < (($3::date)::date + 1)::timestamp at time zone $2))::bigint as day,
+      (select coalesce(sum(case when direction = 'in' then amount_kop else -amount_kop end), 0) from payments where club_id = $1 and kind in ('charge', 'refund') and (created_at >= ($4::date)::date::timestamp at time zone $2 and created_at < (($3::date)::date + 1)::timestamp at time zone $2))::bigint as mtd,
       (select sum(amount_kop) from plan_targets where club_id = $1 and month = $4::date and user_id is null)::bigint as plan,
-      (select count(*) from memberships where club_id = $1 and kind <> 'guest' and status <> 'cancelled' and renewed_from_id is null and (created_at at time zone $2)::date = $3::date)::int as "newSales",
-      (select count(*) from memberships where club_id = $1 and kind <> 'guest' and status <> 'cancelled' and renewed_from_id is not null and (created_at at time zone $2)::date = $3::date)::int as renewals,
+      (select count(*) from memberships where club_id = $1 and kind <> 'guest' and status <> 'cancelled' and renewed_from_id is null and (created_at >= ($3::date)::date::timestamp at time zone $2 and created_at < (($3::date)::date + 1)::timestamp at time zone $2))::int as "newSales",
+      (select count(*) from memberships where club_id = $1 and kind <> 'guest' and status <> 'cancelled' and renewed_from_id is not null and (created_at >= ($3::date)::date::timestamp at time zone $2 and created_at < (($3::date)::date + 1)::timestamp at time zone $2))::int as renewals,
       (select count(distinct m.person_id) from memberships m where m.club_id = $1 and m.status = 'active' and m.kind in ('term', 'visits') and m.ends_on = $3::date
          and not exists (select 1 from memberships n where n.person_id = m.person_id and n.club_id = $1 and n.status = 'active' and n.id <> m.id and coalesce(n.ends_on, $3::date + 1) > $3::date))::int as churned,
       (select count(*) from memberships m where m.club_id = $1 and m.status = 'active' and m.kind = 'term' and m.ends_on between $3::date + 1 and $3::date + 8
@@ -45,7 +45,7 @@ export async function clubStats(db: Db, club: { id: string; name: string; timezo
       (select count(*) from charges where club_id = $1 and status = 'due' and due_on <= $3::date)::int as "debtsCount",
       (select coalesce(sum(amount_kop), 0) from charges where club_id = $1 and status = 'due' and due_on <= $3::date)::bigint as "debtsKop",
       (select count(*) from charges where club_id = $1 and status = 'due' and autopay_error is not null)::int as "autopayFailed",
-      (select count(*) from surveys where club_id = $1 and task_id is not null and (answered_at at time zone $2)::date = $3::date)::int as "lowYesterday",
+      (select count(*) from surveys where club_id = $1 and task_id is not null and (answered_at >= ($3::date)::date::timestamp at time zone $2 and answered_at < (($3::date)::date + 1)::timestamp at time zone $2))::int as "lowYesterday",
       (select count(*) from surveys s join tasks t on t.id = s.task_id where s.club_id = $1 and t.done_at is null)::int as "lowOpen",
       (select count(*) from leads where club_id = $1 and first_response_at is null and first_response_due_at < now())::int as "missedResponse",
       (select count(*) from tasks where club_id = $1 and done_at is null and due_at < now())::int as "overdueTasks"`,
