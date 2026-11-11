@@ -15,6 +15,7 @@ import { TrainerPage } from './trainer.tsx';
 import { DeskPage } from './desk.tsx';
 import { LoadPage } from './load.tsx';
 import { CohortsPage } from './cohorts.tsx';
+import { PnlPage } from './pnl.tsx';
 import { ContractsAdminPage, SitePage } from './contracts.tsx';
 import { FiscalPage, LocalKktAgent } from './fiscal.tsx';
 import { FinancePage } from './finance.tsx';
@@ -91,7 +92,7 @@ function ChangePassword({ me, forced, onDone, onLogout }: { me: Me; forced?: boo
   );
 }
 
-type Tab = 'dash' | 'hot' | 'calls' | 'leads' | 'board' | 'tasks' | 'home' | 'clubs' | 'tariffs' | 'contracts' | 'site' | 'fiscal' | 'finance' | 'import' | 'chats' | 'access' | 'messaging' | 'pipelines' | 'staff' | 'stafftime' | 'config' | 'reviews' | 'onboarding' | 'help' | 'schedule' | 'retention' | 'shop' | 'corp' | 'trainer' | 'desk' | 'load' | 'cohorts' | 'profile';
+type Tab = 'dash' | 'hot' | 'calls' | 'leads' | 'board' | 'tasks' | 'home' | 'clubs' | 'tariffs' | 'contracts' | 'site' | 'fiscal' | 'finance' | 'import' | 'chats' | 'access' | 'messaging' | 'pipelines' | 'staff' | 'stafftime' | 'config' | 'reviews' | 'onboarding' | 'help' | 'schedule' | 'retention' | 'shop' | 'corp' | 'trainer' | 'desk' | 'load' | 'cohorts' | 'pnl' | 'profile';
 
 function Shell({ me, onLogout }: { me: Me; onLogout: () => void }) {
   const firstTab: Tab = 'dash';
@@ -140,6 +141,7 @@ function Shell({ me, onLogout }: { me: Me; onLogout: () => void }) {
     ['site', 'Сайт', can(me, 'site.manage')],
     ['load', 'Загрузка', can(me, 'dash.view') || can(me, 'schedule.manage')],
     ['cohorts', 'Удержание', can(me, 'dash.view') || can(me, 'finance.view')],
+    ['pnl', 'Прибыль', can(me, 'finance.view')],
     ['finance', 'Финансы', can(me, 'finance.view') || can(me, 'shifts.work') || can(me, 'approvals.decide')],
     ['fiscal', 'Касса', can(me, 'fiscal.manage') || can(me, 'memberships.manage')],
     ['messaging', 'Сообщения', can(me, 'messages.manage')],
@@ -192,6 +194,7 @@ function Shell({ me, onLogout }: { me: Me; onLogout: () => void }) {
         {tab === 'access' && <AccessPage me={me} clubs={clubs} clubId={clubId} openPerson={setPersonId} />}
         {tab === 'messaging' && <MessagingAdmin me={me} clubs={clubs} clubId={clubId} />}
         {tab === 'import' && <ImportPage clubs={clubs} clubId={clubId} />}
+        {tab === 'pnl' && <PnlPage me={me} clubs={clubs} clubId={clubId} />}
         {tab === 'cohorts' && <CohortsPage me={me} clubs={clubs} clubId={clubId} />}
         {tab === 'load' && <LoadPage me={me} clubs={clubs} clubId={clubId} />}
         {tab === 'desk' && <DeskPage me={me} clubs={clubs} clubId={clubId} openPerson={setPersonId} />}

@@ -44,6 +44,7 @@ import { trainerRoutes } from './modules/trainer.ts';
 import { frontDeskRoutes } from './modules/frontDesk.ts';
 import { loadRoutes } from './modules/load.ts';
 import { cohortRoutes } from './modules/cohorts.ts';
+import { pnlRoutes } from './modules/pnl.ts';
 import { loyaltyRoutes } from './modules/loyalty.ts';
 import { staffBotRoutes } from './modules/staffBot.ts';
 import { morningRoutes, startStaffBotWorker } from './modules/morning.ts';
@@ -142,6 +143,7 @@ export async function buildApp(pool: pg.Pool, opts: { webDist?: string; secureCo
   frontDeskRoutes(app, pool);
   loadRoutes(app, pool);
   cohortRoutes(app, pool);
+  pnlRoutes(app, pool);
   loyaltyRoutes(app, pool);
   staffBotRoutes(app, pool, { fetch: opts.fetch });
   morningRoutes(app, pool, { fetch: opts.fetch });

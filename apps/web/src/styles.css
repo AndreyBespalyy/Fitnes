@@ -240,3 +240,14 @@ a.btn{text-decoration:none;color:inherit}
 .fc-bar{width:70%;max-width:44px;background:var(--accent);border-radius:4px 4px 0 0}
 .heat.coh td,.heat.coh th{min-width:64px;padding:4px 6px;font-size:12px}
 .grid3{display:grid;gap:10px;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));align-items:start}
+/* Отчёт о прибыли */
+.pnl td,.pnl th{padding:6px 8px}
+.pnl .pnl-sec td{font-weight:700;color:var(--muted);text-transform:uppercase;font-size:11px;letter-spacing:.04em;padding-top:12px}
+.pnl .pnl-total td{border-top:1px solid var(--line)}
+.pnl td.ok{color:var(--ok)} .pnl td.bad{color:var(--bad)}
+.pnl-trend{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:8px;align-items:end}
+.pnl-col{display:grid;gap:4px;justify-items:center}
+.pnl-bars{display:flex;gap:2px;align-items:flex-end;height:124px}
+.pnl-bar{width:18px;border-radius:4px 4px 0 0;display:block}
+.pnl-bar.rev,.pnl-key.rev{background:var(--accent)} .pnl-bar.exp,.pnl-key.exp{background:var(--warm,#E3A64E)}
+.pnl-key{display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:4px;vertical-align:middle}
