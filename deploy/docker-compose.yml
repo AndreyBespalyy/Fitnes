@@ -21,8 +21,12 @@ services:
       OWNER_DATABASE_URL: postgres://fitnes_owner:${DB_OWNER_PASSWORD}@db:5432/fitnes
       DATABASE_URL: postgres://fitnes_app:${DB_APP_PASSWORD}@db:5432/fitnes
       COOKIE_SECURE: "1"
+      APP_VERSION: ${APP_VERSION:-}
+      BACKUP_DIR: /backups
     volumes:
       - storage:/data/storage
+      # Папка резервных копий сервера — только для чтения: раздел «Состояние системы» проверяет, что ночная копия сделана
+      - /opt/fitnes-backups:/backups:ro
     depends_on:
       db:
         condition: service_healthy

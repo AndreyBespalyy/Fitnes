@@ -215,7 +215,9 @@ async function systemPanel(db: Db, clubs: Club[]): Promise<Panel> {
       (select count(*) from users where status = 'active' and must_change_password)::int as "mustChange",
       (select count(*) from users u where u.status = 'active' and not exists (select 1 from user_assignments a where a.user_id = u.id and (a.active_to is null or a.active_to >= current_date)))::int as "noRole",
       (select count(*) from support_tickets where status = 'open')::int as tickets,
-      (select count(*) from import_batches where club_id = any($1) and status in ('draft', 'checked'))::int as imports`, [ids]);
+      (select count(*) from import_batches where club_id = any($1) and status in ('draft', 'checked'))::int as imports,
+      (select count(*) from monitor_state where scope in ('platform', app_tenant()::text) and status = 'bad')::int as "sysBad",
+      (select count(*) from monitor_state where scope in ('platform', app_tenant()::text) and status = 'warn')::int as "sysWarn"`, [ids]);
   return {
     tiles: [
       { label: 'Клубы', value: d.clubs, go: { tab: 'clubs' } },
@@ -224,12 +226,33 @@ async function systemPanel(db: Db, clubs: Club[]): Promise<Panel> {
       { label: 'Не сменили временный пароль', value: d.mustChange, tone: bad(d.mustChange, true), go: { tab: 'staff' } },
       { label: 'Открытые обращения в поддержку', value: d.tickets, tone: bad(d.tickets, true), go: { tab: 'help', p: { view: 'support' } } },
       { label: 'Перенос из 1С не завершён', value: d.imports, tone: bad(d.imports, true), go: { tab: 'import' } },
+      { label: 'Состояние системы', value: d.sysBad ? `сбоев: ${d.sysBad}` : d.sysWarn ? `внимание: ${d.sysWarn}` : 'в порядке',
+        sub: 'сервер, копии, чеки, рассылки, автосписания', tone: d.sysBad ? 'bad' : d.sysWarn ? 'warn' : 'ok', go: { tab: 'system' } },
     ],
     lists: [],
   };
 }
 
-export const ROLE_PANELS = ['club_today', 'retention', 'my_day', 'desk_day', 'fin_day', 'trainer_day', 'system'] as const;
+/* ---------- Защита данных (собственник, управляющий) ---------- */
+async function protectionPanel(db: Db): Promise<Panel> {
+  const d = await one(db, `select
+      (select count(*) from pd_alerts where reviewed_at is null)::int as alerts,
+      (select count(*) from export_requests where status = 'pending')::int as exports,
+      (select count(*) from pd_requests where status = 'open')::int as requests,
+      (select count(*) from pd_requests where status = 'open' and due_on < current_date + 3)::int as due,
+      (select coalesce(sum(n), 0) from pd_access_counters where kind = 'reveal' and hour >= date_trunc('day', now()))::int as reveals`, []);
+  return {
+    tiles: [
+      { label: 'Неразобранные сигналы', value: d.alerts, sub: 'всплески просмотров, поисков, номеров', tone: bad(d.alerts), go: { tab: 'privacy', p: { view: 'alerts' } } },
+      { label: 'Запросы на выгрузку', value: d.exports, tone: bad(d.exports, true), go: { tab: 'privacy', p: { view: 'exports' } } },
+      { label: 'Обращения клиентов по данным', value: d.requests, sub: d.due ? `срок истекает: ${d.due}` : 'срок ответа 10 рабочих дней', tone: d.due ? 'bad' : bad(d.requests, true), go: { tab: 'privacy', p: { view: 'requests' } } },
+      { label: 'Полных номеров открыто сегодня', value: d.reveals, sub: 'кнопка «Позвонить» и договоры', go: { tab: 'privacy', p: { view: 'activity' } } },
+    ],
+    lists: [],
+  };
+}
+
+export const ROLE_PANELS = ['club_today', 'retention', 'my_day', 'desk_day', 'fin_day', 'trainer_day', 'system', 'protection'] as const;
 export async function rolePanel(db: Db, ctx: Ctx, id: string, clubs: Club[]): Promise<Panel> {
   if (id === 'club_today') return clubToday(db, clubs);
   if (id === 'retention') return retentionPanel(db, clubs);
@@ -237,5 +260,6 @@ export async function rolePanel(db: Db, ctx: Ctx, id: string, clubs: Club[]): Pr
   if (id === 'desk_day') return deskDay(db, clubs);
   if (id === 'fin_day') return finDay(db, clubs);
   if (id === 'trainer_day') return trainerDay(db, ctx, clubs);
+  if (id === 'protection') return protectionPanel(db);
   return systemPanel(db, clubs);
 }

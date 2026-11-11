@@ -9,6 +9,7 @@ import { badRequest, forbidden } from '../errors.ts';
 import { PERMISSIONS as P } from '../roles.ts';
 import { toCsv, toXlsx, type Cell, type Table } from '../lib/xlsx.ts';
 import { daysBetween } from './memberships.ts';
+import { guardExport } from './privacy.ts';
 import { npsReport } from './surveys.ts';
 import { ROLE_PANELS, rolePanel } from './dashRoles.ts';
 
@@ -78,13 +79,14 @@ export const WIDGETS: W[] = [
   { id: 'desk_day', title: 'Ресепшн сегодня', description: 'Посещения, занятия, кассовая смена, кому предложить продление, должники, пришедшие сегодня', perm: P.acsWork },
   { id: 'fin_day', title: 'Финансы сегодня', description: 'Поступления и расходы, долги, неудачные автосписания, согласования, кассовые смены, сверка с банком', perm: P.financeView },
   { id: 'trainer_day', title: 'Мои занятия', description: 'Занятия сегодня и на неделю, кого записано, неотмеченные посещения, проведено за месяц', perm: P.scheduleBook },
-  { id: 'system', title: 'Система', description: 'Клубы, подключение, сотрудники без роли и с временным паролем, обращения в поддержку, перенос из 1С', perm: P.clubsManage, network: true },
+  { id: 'system', title: 'Система', description: 'Клубы, подключение, сотрудники без роли и с временным паролем, обращения в поддержку, перенос из 1С, состояние системы', perm: P.clubsManage, network: true },
+  { id: 'protection', title: 'Защита данных', description: 'Неразобранные сигналы о всплесках просмотров, запросы на большие выгрузки, обращения клиентов по персональным данным', perm: P.dataProtect },
   { id: 'my_plan', title: 'Мой план', description: 'Личный план на месяц и на сегодня, факт, процент, дефицит по категориям', perm: P.crmWork },
   { id: 'my_kpi', title: 'Мои показатели', description: 'Мои звонки, встречи, продажи и задачи за сегодня в сравнении с нормой', perm: P.crmWork },
 ];
 const ROLE_DEFAULTS: Record<string, string[]> = {
-  owner: ['day', 'clubs', 'plan', 'retention', 'risks', 'nps', 'funnel_sources', 'system'],
-  gm: ['club_today', 'day', 'plan', 'risks', 'retention', 'team', 'nps', 'kpi'],
+  owner: ['day', 'clubs', 'plan', 'retention', 'risks', 'nps', 'funnel_sources', 'system', 'protection'],
+  gm: ['club_today', 'day', 'plan', 'risks', 'retention', 'team', 'nps', 'kpi', 'protection'],
   rop: ['team', 'my_day', 'retention', 'funnel_managers', 'funnel_sources', 'kpi', 'my_plan'],
   manager: ['my_day', 'my_plan', 'my_kpi'],
   desk: ['desk_day'],
@@ -597,13 +599,15 @@ export function dashRoutes(app: FastifyInstance, pool: pg.Pool) {
         where p.kind in ('charge', 'refund') and p.club_id = any($1) and (p.created_at at time zone c.timezone)::date between $2 and $3
           and ($4::uuid is null or m.created_by = $4) and ($5::text is null or p.sale_category = $5)
         order by p.created_at limit 20000`, [clubs.map((c) => c.id), p.from, p.to, userId, q.category || null])).rows;
-      if (q.format === 'csv' || q.format === 'xlsx') await audit(db, ctx, 'report.exported', 'report', 'sales', null, { ...q, userId });
       return { from: p.from, to: p.to, rows: rows.map((r) => ({ ...r, amountKop: Number(r.kop), categoryName: CAT_NAME[r.category] ?? r.category })) };
     });
     if (q.format === 'csv' || q.format === 'xlsx') {
       const METHOD: Record<string, string> = { cash: 'наличные', card_terminal: 'карта (терминал)', sbp: 'СБП', online: 'онлайн', bank_transfer: 'перевод' };
       const t: Table = { title: `Продажи ${res.from}–${res.to}`, columns: ['Дата и время', 'Клуб', 'Клиент', 'Тариф', 'Категория', 'Менеджер', 'Сумма, ₽', 'Способ', 'Операция'],
         rows: res.rows.map((r) => [r.at, r.club, r.person, r.product, r.categoryName, r.seller, r.amountKop / 100, METHOD[r.method] ?? r.method, r.kind === 'refund' ? 'возврат' : 'оплата'] as Cell[]) };
+      // В отчёте имена клиентов: сверх лимита клуба — только с согласованием (защита базы), в конце файла — кто выгрузил
+      const sign = await guardExport(pool, ctx, { report: 'sales', title: t.title, clubId: q.clubId || null, params: { ...q, userId: own ? ctx.userId : q.userId || null }, rows: t.rows.length, format: q.format });
+      t.rows.push([], [sign]);
       return sendTable(reply, t, q.format, t.title);
     }
     return { ...res, total: res.rows.reduce((a, r) => a + r.amountKop, 0) };

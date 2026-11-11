@@ -8,6 +8,7 @@ import { can, requireCtx, requirePerm } from '../auth.ts';
 import { audit, withCtx, type Ctx, type Db } from '../db.ts';
 import { badRequest, forbidden, HttpError, notFound } from '../errors.ts';
 import { PERMISSIONS as P } from '../roles.ts';
+import { recordConsent } from './pd.ts';
 import { createLead, normalizePhone } from './crm.ts';
 import { decrypt, encrypt } from './fiscal.ts';
 import { addDays, clubToday } from './memberships.ts';
@@ -121,6 +122,9 @@ export async function handleInbound(db: Db, actor: Actor, ch: Channel, ev: Inbou
   if (personId && STOP.test(ev.text)) {
     await db.query('update persons set messaging_opt_out = true, messaging_changed_at = now() where id = $1', [personId]);
     await audit(db, actor, 'person.messaging_opt_out', 'person', personId, null, { via: ch.messenger });
+    if ((await db.query('select marketing_consent from persons where id = $1', [personId])).rows[0]?.marketing_consent) {
+      await recordConsent(db, actor, personId, { kind: 'marketing', granted: false, channel: 'messenger', note: `Клиент написал «${ev.text.trim().slice(0, 20)}»` });
+    }
   }
   // Автоответ в нерабочее время, не чаще раза в 12 часов
   let autoreplyId: string | null = null;
@@ -689,6 +693,10 @@ export function messagingRoutes(app: FastifyInstance, pool: pg.Pool, opts: { fet
       await db.query(`update persons set marketing_consent = coalesce($2, marketing_consent), messaging_opt_out = coalesce($3, messaging_opt_out), messaging_changed_at = now() where id = $1`,
         [id, b.marketingConsent ?? null, b.optOut ?? null]);
       await audit(db, ctx, 'person.messaging_changed', 'person', id, { marketingConsent: p.marketing_consent, optOut: p.messaging_opt_out }, b);
+      // Согласие на рекламу попадает в журнал согласий клиента (152-ФЗ, 38-ФЗ)
+      if (typeof b.marketingConsent === 'boolean' && b.marketingConsent !== p.marketing_consent) {
+        await recordConsent(db, ctx, id, { kind: 'marketing', granted: b.marketingConsent, channel: 'staff', note: 'Отметка в карточке клиента' });
+      }
       return { ok: true };
     });
   });

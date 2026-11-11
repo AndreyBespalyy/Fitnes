@@ -8,6 +8,7 @@ import { requireCtx, requirePerm } from '../auth.ts';
 import { audit, withCtx, type Ctx, type Db } from '../db.ts';
 import { badRequest, notFound } from '../errors.ts';
 import { PERMISSIONS as P } from '../roles.ts';
+import { guardReveal } from './privacy.ts';
 
 const MAX_UPLOAD = 15 * 1024 * 1024;
 export const UPLOAD_LIMIT = { bodyLimit: Math.ceil(MAX_UPLOAD * 1.4) + 4096 };
@@ -178,6 +179,8 @@ export function contractRoutes(app: FastifyInstance, pool: pg.Pool, storage: str
   app.get('/api/contracts/:id', async (req) => {
     const ctx = requirePerm(req, P.membershipsView);
     const { id } = req.params as { id: string };
+    // В договоре полный телефон и e-mail клиента — считается как раскрытие номера (защита базы)
+    await guardReveal(pool, ctx, {});
     return withCtx(pool, ctx, async (db) => {
       const c = await loadContract(db, id);
       const person = (await db.query(`select p.full_name as "fullName", to_char(p.birth_date, 'DD.MM.YYYY') as "birthDate",

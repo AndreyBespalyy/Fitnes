@@ -5,6 +5,7 @@ import { Fragment, useEffect, useState } from 'react';
 import { api, can, type Club, type Go, type Me } from './api.ts';
 import { errText, toast } from './ui.ts';
 import { rub } from './memberships.tsx';
+import { ExportButton } from './privacy.tsx';
 
 type Layout = { widgets: string[]; custom: boolean; role: string; available: { id: string; title: string; description: string }[]; canSetRoleDefaults: boolean; roles: string[] };
 type Metric = { id: string; name: string; definition: string; formula: string; source: string; delay: string };
@@ -416,7 +417,7 @@ function SalesReport({ clubId }: { clubId: string }) {
         <label className="row small">По <input type="date" value={f.to} onChange={(e) => setF({ ...f, to: e.target.value })} style={{ width: 'auto' }} /></label>
         <select aria-label="Категория" value={f.category} onChange={(e) => setF({ ...f, category: e.target.value })} style={{ width: 'auto' }}>
           <option value="">Все категории</option><option value="new">Новые клиенты</option><option value="renewal">Продления</option><option value="return">Возобновление бывших</option><option value="subscription">Подписки</option></select>
-        <a className="btn sm" href={`/api/reports/sales?${q}&format=xlsx`}>Скачать XLSX</a><a className="btn sm" href={`/api/reports/sales?${q}&format=csv`}>CSV</a>
+        <ExportButton url={`/api/reports/sales?${q}&format=xlsx`}>Скачать XLSX</ExportButton><ExportButton url={`/api/reports/sales?${q}&format=csv`}>CSV</ExportButton>
       </div>
       {err && <p className="err">{err}</p>}
       {d && <>

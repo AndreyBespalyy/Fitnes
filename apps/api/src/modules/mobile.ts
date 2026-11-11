@@ -5,6 +5,7 @@ import { can, requireCtx, requirePerm } from '../auth.ts';
 import { audit, withCtx, type Db } from '../db.ts';
 import { badRequest, notFound } from '../errors.ts';
 import { PERMISSIONS as P } from '../roles.ts';
+import { guardReveal } from './privacy.ts';
 import { loadVapid, sendPush, type PushPayload, type Vapid } from '../lib/webpush.ts';
 
 // Отправлять уведомления можно только в службы доставки браузеров и телефонов, а не на произвольный адрес
@@ -213,6 +214,7 @@ export function mobileRoutes(app: FastifyInstance, pool: pg.Pool, opts: { fetch?
     const ctx = requirePerm(req, P.personsView);
     if (!can(ctx, P.crmWork) && !can(ctx, P.messagesWork) && !can(ctx, P.acsWork)) throw badRequest('Звонки клиентам недоступны для вашей роли');
     const { id } = req.params as { id: string };
+    await guardReveal(pool, ctx, { personId: id });
     return withCtx(pool, ctx, async (db) => {
       const p = (await db.query('select id from persons where id = $1', [id])).rows[0];
       if (!p) throw notFound('Клиент не найден');
