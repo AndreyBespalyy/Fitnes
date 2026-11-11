@@ -2,7 +2,7 @@
 import { LoyaltySettings } from './loyalty.tsx';
 import { Fragment, useEffect, useState, type FormEvent } from 'react';
 import { PayLinkButton } from './payments.tsx';
-import { PayerPick, type PayerValue } from './familyCorp.tsx';
+import { PayerPick, SeatPick, SeatsLine, type PayerValue } from './familyCorp.tsx';
 import { api, can, type Club, type Me } from './api.ts';
 import { errText, toast } from './ui.ts';
 import { ContractLine, type ContractBrief } from './contracts.tsx';
@@ -16,11 +16,12 @@ export type Settings = {
 };
 export type Product = { id: string; clubId: string; kind: string; name: string; durationDays: number | null; visitsCount: number | null; validityDays: number | null;
   freezeAllowed: boolean; installmentsAllowed: boolean; isActive: boolean; priceKop: number | null;
-  networkAccess: boolean; accessFrom: string | null; accessTo: string | null; prices: { amountKop: number; validFrom: string }[] };
+  networkAccess: boolean; accessFrom: string | null; accessTo: string | null; familySeats: number | null; prices: { amountKop: number; validFrom: string }[] };
 type Charge = { id: string; kind: string; title: string; dueOn: string; amountKop: number; status: string; paidMethod: string | null; overdue: boolean; company?: string | null; invoice?: string | null };
 type Membership = { id: string; clubId: string; clubName: string; kind: string; productName: string; amountKop: number; startsOn: string; endsOn: string | null;
   visitsLeft: number | null; installments: number; nextChargeOn: string | null; status: string; state: string; access: boolean; reason: string; freezeAllowed: boolean;
-  freezes: { id: string; startsOn: string; endsOn: string; endedEarlyOn: string | null; days: number }[]; charges: Charge[]; contract: ContractBrief | null };
+  freezes: { id: string; startsOn: string; endsOn: string; endedEarlyOn: string | null; days: number }[]; charges: Charge[]; contract: ContractBrief | null;
+  familySeats?: number; seats?: { id: string; personId: string; name: string }[]; seatOf?: { membershipId: string; holderId: string; holderName: string } };
 
 export const KIND: Record<string, string> = { term: 'Абонемент на срок', subscription: 'Подписка', visits: 'Пакет посещений', personal: 'Персональные', guest: 'Гостевой' };
 const STATE: Record<string, [string, string]> = {
@@ -118,7 +119,7 @@ function Products({ club, manage }: { club: Club; manage: boolean }) {
   const [price, setPrice] = useState('');
   const [hist, setHist] = useState<string | null>(null);
   const kinds = club.salesModel === 'term' ? ['term', 'visits', 'personal', 'guest'] : ['subscription', 'visits', 'personal', 'guest'];
-  const [f, setF] = useState({ kind: kinds[0], name: '', price: '', durationDays: 30, visitsCount: 10, validityDays: 60, installmentsAllowed: false, freezeAllowed: true, networkAccess: false, accessFrom: '', accessTo: '' });
+  const [f, setF] = useState({ kind: kinds[0], name: '', price: '', durationDays: 30, visitsCount: 10, validityDays: 60, installmentsAllowed: false, freezeAllowed: true, networkAccess: false, accessFrom: '', accessTo: '', familySeats: 0 });
   const reload = () => api<Product[]>('GET', `/api/products?clubId=${club.id}`).then(setList).catch((x) => setErr(errText(x)));
   useEffect(() => { reload(); }, [club.id]);
   const act = async (fn: () => Promise<unknown>, ok: string) => { setErr(''); try { await fn(); toast(ok); reload(); return true; } catch (x) { setErr(errText(x)); return false; } };
@@ -131,11 +132,12 @@ function Products({ club, manage }: { club: Club; manage: boolean }) {
       validityDays: ['visits', 'personal', 'guest'].includes(f.kind) ? f.validityDays : undefined,
       installmentsAllowed: f.installmentsAllowed, freezeAllowed: f.kind === 'term' ? f.freezeAllowed : false,
       networkAccess: f.networkAccess, accessFrom: f.accessFrom || null, accessTo: f.accessTo || null,
+      familySeats: f.kind === 'term' && f.familySeats >= 2 ? f.familySeats : null,
     }), `Тариф «${f.name}» добавлен`);
     if (done) setF({ ...f, name: '', price: '' });
   };
   const base = (p: Product) => p.kind === 'term' ? `${p.durationDays} дн.` : p.kind === 'subscription' ? 'в месяц' : p.visitsCount ? `${p.visitsCount} зан., ${p.validityDays ?? 90} дн.` : `${p.validityDays ?? 1} дн.`;
-  const terms = (p: Product) => [base(p), p.accessFrom || p.accessTo ? `проход ${p.accessFrom ? `с ${p.accessFrom} ` : ''}${p.accessTo ? `до ${p.accessTo}` : ''}`.trim() : '', p.networkAccess ? 'все клубы сети' : ''].filter(Boolean).join(', ');
+  const terms = (p: Product) => [base(p), p.accessFrom || p.accessTo ? `проход ${p.accessFrom ? `с ${p.accessFrom} ` : ''}${p.accessTo ? `до ${p.accessTo}` : ''}`.trim() : '', p.networkAccess ? 'все клубы сети' : '', p.familySeats ? `на семью до ${p.familySeats} чел.` : ''].filter(Boolean).join(', ');
   return (
     <div className="card" style={{ display: 'grid', gap: 10 }}>
       <h2>Тарифы клуба</h2>
@@ -169,6 +171,7 @@ function Products({ club, manage }: { club: Club; manage: boolean }) {
             <label className="f">Название<input value={f.name} onChange={(e) => setF({ ...f, name: e.target.value })} placeholder="3 месяца безлимит" /></label>
             <label className="f">Цена, ₽{f.kind === 'subscription' ? ' в месяц' : ''}<input inputMode="decimal" value={f.price} onChange={(e) => setF({ ...f, price: e.target.value })} /></label>
             {f.kind === 'term' && <Num label="Срок, дней" value={f.durationDays} onChange={(v) => setF({ ...f, durationDays: v })} />}
+            {f.kind === 'term' && <Num label="Общий на семью, человек (0 — нет)" value={f.familySeats} onChange={(v) => setF({ ...f, familySeats: v })} />}
             {['visits', 'personal'].includes(f.kind) && <Num label="Занятий" value={f.visitsCount} onChange={(v) => setF({ ...f, visitsCount: v })} />}
             {['visits', 'personal', 'guest'].includes(f.kind) && <Num label="Действует, дней" value={f.validityDays} onChange={(v) => setF({ ...f, validityDays: v })} />}
           </div>
@@ -196,6 +199,7 @@ export function MembershipsBlock({ me, personId, homeClubId }: { me: Me; personI
   const [maxInst, setMaxInst] = useState(1);
   const [discount, setDiscount] = useState<SaleDiscountValue>({});
   const [payer, setPayer] = useState<PayerValue>({});
+  const [seatIds, setSeatIds] = useState<string[]>([]);
   const [freeze, setFreeze] = useState<{ id: string; days: number; startsOn: string } | null>(null);
   const [cancel, setCancel] = useState<{ id: string; reason: string } | null>(null);
   const [refund, setRefund] = useState<string | null>(null);
@@ -232,10 +236,11 @@ export function MembershipsBlock({ me, personId, homeClubId }: { me: Me; personI
           {prod?.installmentsAllowed && maxInst > 1 && (
             <label className="f">Оплата<select value={inst} onChange={(e) => setInst(Number(e.target.value))}>
               {Array.from({ length: maxInst }, (_, i) => i + 1).map((n) => <option key={n} value={n}>{n === 1 ? 'Сразу полностью' : `Рассрочка: ${n} ${n < 5 ? 'платежа' : 'платежей'} по ${rub(Math.floor((prod.priceKop ?? 0) / n))}`}</option>)}</select></label>)}
-          <PayerPick personId={personId} clubId={prod?.clubId} kind={prod?.kind} onChange={setPayer} />
+          {prod?.familySeats ? <SeatPick key={productId} personId={personId} clubId={prod.clubId} seats={prod.familySeats} onChange={setSeatIds} />
+            : <PayerPick personId={personId} clubId={prod?.clubId} kind={prod?.kind} onChange={setPayer} />}
           <SaleDiscount key={productId} personId={personId} product={prod} clubId={prod?.clubId} onChange={setDiscount} />
           <div className="row">
-            <button className="btn pri sm" disabled={!productId} onClick={() => act(() => api('POST', '/api/memberships', { personId, productId, installments: inst, ...discount, ...payer }), `Продано: ${prod?.name}. Платёж ждёт оплаты`)}>Оформить</button>
+            <button className="btn pri sm" disabled={!productId} onClick={() => act(() => api('POST', '/api/memberships', { personId, productId, installments: inst, ...discount, ...(prod?.familySeats ? { familyPersonIds: seatIds } : payer) }), `Продано: ${prod?.name}. Платёж ждёт оплаты`)}>Оформить</button>
             <button className="btn sm" onClick={() => setSell(false)}>Отмена</button>
           </div>
         </div>)}
@@ -245,7 +250,7 @@ export function MembershipsBlock({ me, personId, homeClubId }: { me: Me; personI
         return (
           <div key={m.id} className={`item ${m.state === 'debt_blocked' ? 'over' : ''}`} style={{ display: 'grid', gap: 6 }}>
             <div className="row between"><b>{m.productName}</b><span className={`chip ${cls}`}>{label}</span></div>
-            <div className="small">{m.clubName} · {rub(m.amountKop)}{m.kind === 'subscription' ? ' в месяц' : ''} · {d(m.startsOn)} — {d(m.endsOn)}
+            <div className="small">{m.clubName} · {m.seatOf ? 'место в семейном' : rub(m.amountKop)}{m.kind === 'subscription' ? ' в месяц' : ''} · {d(m.startsOn)} — {d(m.endsOn)}
               {m.visitsLeft !== null ? ` · осталось занятий: ${m.visitsLeft}` : ''}{m.nextChargeOn ? ` · следующее списание ${d(m.nextChargeOn)}` : ''}</div>
             <div className={`small ${m.access ? '' : 'bad'}`}>{m.access ? 'Проход открыт' : 'Проход закрыт'}: {m.reason}</div>
             {m.freezes.length > 0 && <div className="small">Заморозки: {m.freezes.map((f) => `${d(f.startsOn)} — ${d(f.endedEarlyOn ?? f.endsOn)}${f.endedEarlyOn ? ' (досрочно)' : ''}`).join(', ')}</div>}
@@ -263,7 +268,10 @@ export function MembershipsBlock({ me, personId, homeClubId }: { me: Me; personI
                       {can(me, 'memberships.sell') && <PayLinkButton chargeId={c.id} />}</span>}
                 </div>))}</div>)}
             {m.contract && <ContractLine me={me} c={m.contract} reload={reload} />}
-            {m.status === 'active' && (
+            {m.seatOf && <div className="small">Место в общем семейном абонементе. Купил и платит: <b>{m.seatOf.holderName}</b>. Срок, заморозка и продление — по основному абонементу.</div>}
+            {m.familySeats && m.status === 'active' && <SeatsLine membershipId={m.id} clubId={m.clubId} buyerId={personId} seats={m.familySeats} taken={m.seats ?? []} canEdit={canSell} reload={reload} />}
+            {m.seatOf && m.status === 'active' && canSell && <div className="row"><button className="btn sm" onClick={() => act(() => api('POST', `/api/memberships/${m.seatOf!.membershipId}/seats/${m.id}/remove`), 'Место освобождено')}>Освободить место</button></div>}
+            {m.status === 'active' && !m.seatOf && (
               <div className="row">
                 {canSell && ['active', 'expired', 'used_up', 'debt_grace'].includes(m.state) && m.kind !== 'subscription' &&
                   <button className="btn sm" onClick={() => act(() => api('POST', `/api/memberships/${m.id}/renew`, {}), 'Продление оформлено с даты окончания текущего')}>Продлить</button>}

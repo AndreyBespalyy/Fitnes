@@ -10,7 +10,7 @@ import { receiptForCharge } from './fiscal.ts';
 import { recordPayment } from './finance.ts';
 import { resolveDiscount, type DiscountInput } from './promos.ts';
 import { onReferralPurchase, referralDiscount } from './referrals.ts';
-import { resolvePayer, type PayerInput } from './familyCorp.ts';
+import { checkSeatHolders, createSeats, resolvePayer, seatsOf, type PayerInput } from './familyCorp.ts';
 import { creditTrainerOffer } from './trainer.ts';
 
 /* ---------- даты (строки YYYY-MM-DD, без часовых сдвигов) ---------- */
@@ -94,22 +94,25 @@ export async function personMemberships(db: Db, personId: string) {
     from memberships m join clubs c on c.id = m.club_id join products p on p.id = m.product_id
     where m.person_id = $1 order by m.starts_on desc`, [personId])).rows;
   if (!ms.length) return [];
-  const ids = ms.map((m) => m.id);
+  // Место в общем семейном абонементе живёт по основному: его платежи, заморозки и договор решают, пускать ли
+  const ids = [...new Set(ms.map((m) => m.parent_membership_id ?? m.id))];
   const [fr, ch, ct] = [await freezesOf(db, ids), await chargesOf(db, ids), await contractsByMembership(db, ids)];
+  const seats = await seatsOf(db, ms);
   const out = [];
   for (const m of ms) {
     const s = await getSettings(db, m.club_id);
     const today = await clubToday(db, m.club_id);
-    const f = fr.filter((x) => x.membership_id === m.id);
-    const c = ch.filter((x) => x.membership_id === m.id);
+    const key = m.parent_membership_id ?? m.id;
+    const f = fr.filter((x) => x.membership_id === key);
+    const c = ch.filter((x) => x.membership_id === key);
     out.push({
       id: m.id, clubId: m.club_id, clubName: m.club_name, kind: m.kind, productName: m.product_name, amountKop: Number(m.amount_kop),
       startsOn: m.starts_on, endsOn: m.ends_on, visitsLeft: m.visits_left, installments: m.installments, nextChargeOn: m.next_charge_on,
       status: m.status, freezeAllowed: m.freeze_allowed && s.freezeEnabled,
-      networkAccess: m.network_access, accessFrom: m.access_from ? String(m.access_from).slice(0, 5) : null, accessTo: m.access_to ? String(m.access_to).slice(0, 5) : null, ...membershipState(m, f, c, s, today, ct.get(m.id)?.status),
-      contract: ct.get(m.id) ?? null,
+      networkAccess: m.network_access, accessFrom: m.access_from ? String(m.access_from).slice(0, 5) : null, accessTo: m.access_to ? String(m.access_to).slice(0, 5) : null, ...membershipState(m, f, c, s, today, ct.get(key)?.status),
+      contract: m.parent_membership_id ? null : ct.get(m.id) ?? null, ...seats.get(m.id),
       freezes: f.map((x) => ({ id: x.id, startsOn: x.starts_on, endsOn: x.ends_on, endedEarlyOn: x.ended_early_on, days: x.days })),
-      charges: c.map((x) => ({ id: x.id, kind: x.kind, title: x.title, dueOn: x.due_on, amountKop: Number(x.amount_kop), status: x.status,
+      charges: m.parent_membership_id ? [] : c.map((x) => ({ id: x.id, kind: x.kind, title: x.title, dueOn: x.due_on, amountKop: Number(x.amount_kop), status: x.status,
         paidAt: x.paid_at, paidMethod: x.paid_method, overdue: x.status === 'due' && x.due_on < today, company: x.company_name ?? null, invoice: x.invoice_number ?? null })),
     });
   }
@@ -117,7 +120,7 @@ export async function personMemberships(db: Db, personId: string) {
 }
 
 /* ---------- продажа и продление ---------- */
-export type SaleInput = { personId?: string; productId?: string; startsOn?: string; installments?: number; renewFromId?: string; confirmDuplicate?: boolean } & DiscountInput & PayerInput;
+export type SaleInput = { personId?: string; productId?: string; startsOn?: string; installments?: number; renewFromId?: string; confirmDuplicate?: boolean; familyPersonIds?: string[] } & DiscountInput & PayerInput;
 
 async function currentPrice(db: Db, productId: string) {
   return (await db.query('select id, amount_kop from price_versions where product_id = $1 and valid_from <= now() order by valid_from desc limit 1', [productId])).rows[0];
@@ -153,6 +156,7 @@ export async function sellMembership(db: Db, ctx: Pick<Ctx, 'tenantId' | 'userId
   if (b.renewFromId) {
     const prev = await loadMembership(db, b.renewFromId);
     if (prev.person_id !== b.personId) throw badRequest('Абонемент другого клиента');
+    if (prev.parent_membership_id) throw badRequest('Это место в общем семейном абонементе: продлевается основной абонемент того, кто его купил');
     if (prev.club_id !== prod.club_id) throw badRequest('Продление оформляется в том же клубе');
     // Продление считается от даты окончания текущего абонемента: клиент не теряет дни
     if (prev.ends_on && prev.ends_on >= today) startsOn = addDays(prev.ends_on, 1);
@@ -183,6 +187,15 @@ export async function sellMembership(db: Db, ctx: Pick<Ctx, 'tenantId' | 'userId
   if (!disc.discountKop) { const rd = await referralDiscount(db, b.personId!, prod.club_id, category, listPrice); if (rd) Object.assign(disc, rd); }
   // Кто платит: сам клиент, семья (плательщик семьи, скидка второму и следующим) или компания (по счёту раз в месяц)
   const pay = await resolvePayer(db, b, { personId: b.personId!, clubId: prod.club_id, productKind: prod.kind, installments: n, today });
+  // Общий семейный абонемент: места для членов семьи. При продлении — те же люди, если не выбраны другие
+  let holders: string[] = [];
+  if (prod.family_seats) {
+    if (pay.companyId) throw badRequest('Общий семейный абонемент за счёт компании не продаётся');
+    pay.percent = 0; pay.label = null; // цена тарифа уже семейная
+    const ids = b.familyPersonIds ?? (renewedFrom ? (await db.query(`select person_id from memberships where parent_membership_id = $1 and status = 'active'`, [renewedFrom])).rows.map((r) => r.person_id as string) : []);
+    const g = await checkSeatHolders(db, { buyerId: b.personId!, clubId: prod.club_id, seats: prod.family_seats, personIds: ids });
+    holders = g.personIds; if (!pay.familyGroupId) pay.familyGroupId = g.groupId;
+  } else if (b.familyPersonIds?.length) throw badRequest('Места для членов семьи есть только в общем семейном тарифе');
   if (!disc.discountKop && pay.percent) Object.assign(disc, { discountKop: Math.round(listPrice * pay.percent / 100), label: pay.label });
   const amount = listPrice - disc.discountKop;
   let endsOn: string | null = null;
@@ -203,9 +216,16 @@ export async function sellMembership(db: Db, ctx: Pick<Ctx, 'tenantId' | 'userId
     [ctx.tenantId, prod.club_id, b.personId, prod.id, price.id, prod.kind, prod.name, amount, startsOn, endsOn, visits, n, nextCharge, renewedFrom, ctx.userId, category,
       prod.network_access ?? false, prod.access_from ?? null, prod.access_to ?? null, listPrice, disc.discountKop, disc.promoId, disc.requestId, pay.familyGroupId, pay.payerPersonId, pay.companyId])).rows[0].id;
 
+  // Долевая оплата: компания платит свою долю по счёту, остальное сотрудник платит сам в день покупки
+  if (pay.companyId && pay.sharePercent < 100) {
+    const corp = Math.round(amount * pay.sharePercent / 100);
+    const ins = 'insert into charges(tenant_id, club_id, membership_id, person_id, kind, title, due_on, amount_kop, company_id) values ($1,$2,$3,$4,$5,$6,$7,$8,$9)';
+    if (corp > 0) await db.query(ins, [ctx.tenantId, prod.club_id, id, b.personId, 'full', `${prod.name}: доля компании ${pay.sharePercent} %`, pay.dueOn ?? today, corp, pay.companyId]);
+    if (amount - corp > 0) await db.query(ins, [ctx.tenantId, prod.club_id, id, b.personId, 'full', `${prod.name}: доля сотрудника`, today, amount - corp, null]);
+  }
   // График платежей: первый платёж в день продажи, остальные помесячно
   const part = Math.floor(amount / n);
-  for (let i = 0; i < n; i++) {
+  for (let i = 0; i < (pay.companyId && pay.sharePercent < 100 ? 0 : n); i++) {
     const sum = i === n - 1 ? amount - part * (n - 1) : part;
     const kind = prod.kind === 'subscription' ? 'subscription' : n > 1 ? 'installment' : 'full';
     const title = prod.kind === 'subscription' ? `${prod.name}: первый месяц` : n > 1 ? `${prod.name}: платёж ${i + 1} из ${n}` : prod.name;
@@ -214,6 +234,7 @@ export async function sellMembership(db: Db, ctx: Pick<Ctx, 'tenantId' | 'userId
   }
   await db.query('insert into membership_operations(tenant_id, club_id, membership_id, kind, params, actor_id) values ($1,$2,$3,$4,$5,$6)',
     [ctx.tenantId, prod.club_id, id, renewedFrom ? 'renewal' : 'sale', JSON.stringify({ productId: prod.id, priceVersionId: price.id, amountKop: amount, listPriceKop: listPrice, discountKop: disc.discountKop, discount: disc.label, installments: n, startsOn, renewedFrom }), ctx.userId]);
+  if (holders.length) await createSeats(db, ctx, id, holders);
   await onReferralPurchase(db, ctx, { personId: b.personId!, clubId: prod.club_id, membershipId: id, category, amountKop: amount, discountKop: disc.discountKop });
   await creditTrainerOffer(db, b.personId!, prod.club_id, id, prod.kind);
   const contract = await createContract(db, ctx, id);
@@ -230,6 +251,7 @@ export async function freezeMembership(db: Db, ctx: Pick<Ctx, 'tenantId' | 'user
   const s = await getSettings(db, m.club_id);
   const today = await clubToday(db, m.club_id);
   if (m.status !== 'active') throw badRequest('Абонемент не действует');
+  if (m.parent_membership_id) throw badRequest('Это место в общем семейном абонементе: заморозка оформляется на основном абонементе и действует на всю семью');
   if (m.kind === 'subscription') throw badRequest('Подписку не замораживают: её можно приостановить отменой следующего списания (появится в шаге оплат)');
   if (!s.freezeEnabled) throw badRequest('В клубе заморозка отключена');
   if (!prod.freeze_allowed) throw badRequest('Для этого тарифа заморозка не предусмотрена');
@@ -262,6 +284,7 @@ export async function freezeMembership(db: Db, ctx: Pick<Ctx, 'tenantId' | 'user
 
 export async function unfreezeMembership(db: Db, ctx: Pick<Ctx, 'tenantId' | 'userId' | 'ip'>, id: string) {
   const m = await loadMembership(db, id);
+  if (m.parent_membership_id) throw badRequest('Это место в общем семейном абонементе: разморозка — на основном абонементе');
   const today = await clubToday(db, m.club_id);
   const f = (await freezesOf(db, [id])).find((x) => !x.ended_early_on && x.ends_on >= today);
   if (!f) throw badRequest('Действующей или будущей заморозки нет');
@@ -299,7 +322,7 @@ export async function payCharge(db: Db, ctx: { tenantId: string; userId: string 
 /* ---------- маршруты ---------- */
 const PRODUCT_SELECT = `select p.id, p.club_id as "clubId", p.kind, p.name, p.duration_days as "durationDays", p.visits_count as "visitsCount",
   p.validity_days as "validityDays", p.freeze_allowed as "freezeAllowed", p.installments_allowed as "installmentsAllowed", p.is_active as "isActive", p.sort,
-  p.network_access as "networkAccess", to_char(p.access_from, 'HH24:MI') as "accessFrom", to_char(p.access_to, 'HH24:MI') as "accessTo",
+  p.network_access as "networkAccess", p.family_seats as "familySeats", to_char(p.access_from, 'HH24:MI') as "accessFrom", to_char(p.access_to, 'HH24:MI') as "accessTo",
   (select amount_kop from price_versions v where v.product_id = p.id and v.valid_from <= now() order by v.valid_from desc limit 1)::bigint as "priceKop",
   coalesce((select json_agg(json_build_object('amountKop', v.amount_kop, 'validFrom', v.valid_from) order by v.valid_from desc)
      from price_versions v where v.product_id = p.id), '[]') as prices
@@ -308,7 +331,7 @@ const PRODUCT_SELECT = `select p.id, p.club_id as "clubId", p.kind, p.name, p.du
 const KINDS = ['term', 'subscription', 'visits', 'personal', 'guest'];
 type ProductIn = { clubId?: string; kind?: string; name?: string; durationDays?: number; visitsCount?: number; validityDays?: number;
   freezeAllowed?: boolean; installmentsAllowed?: boolean; isActive?: boolean; priceKop?: number;
-  networkAccess?: boolean; accessFrom?: string | null; accessTo?: string | null };
+  networkAccess?: boolean; accessFrom?: string | null; accessTo?: string | null; familySeats?: number | null };
 const TIME = /^([01]\d|2[0-3]):[0-5]\d$/;
 function checkAccessTimes(b: ProductIn) {
   for (const t of [b.accessFrom, b.accessTo]) if (t !== undefined && t !== null && t !== '' && !TIME.test(t)) throw badRequest('Время укажите в формате ЧЧ:ММ, например 07:00');
@@ -318,6 +341,10 @@ const timeOrNull = (t: string | null | undefined) => (t ? t : null);
 function checkProduct(b: ProductIn, kind: string) {
   if (kind === 'term' && !(Number.isInteger(b.durationDays) && b.durationDays! > 0)) throw badRequest('Укажите срок абонемента в днях');
   if ((kind === 'visits' || kind === 'personal') && !(Number.isInteger(b.visitsCount) && b.visitsCount! > 0)) throw badRequest('Укажите количество посещений');
+  if (b.familySeats != null) {
+    if (kind !== 'term') throw badRequest('Общий семейный тариф бывает только абонементом на срок');
+    if (!(Number.isInteger(b.familySeats) && b.familySeats >= 2 && b.familySeats <= 12)) throw badRequest('Человек в семейном тарифе: от 2 до 12');
+  }
 }
 
 export function membershipRoutes(app: FastifyInstance, pool: pg.Pool) {
@@ -379,10 +406,10 @@ export function membershipRoutes(app: FastifyInstance, pool: pg.Pool) {
       }
       if ((await db.query('select 1 from products where club_id = $1 and lower(name) = lower($2)', [b.clubId, b.name!.trim()])).rowCount) throw badRequest('Тариф с таким названием уже есть');
       const id = (await db.query(
-        `insert into products(tenant_id, club_id, kind, name, duration_days, visits_count, validity_days, freeze_allowed, installments_allowed, network_access, access_from, access_to)
-         values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) returning id`,
+        `insert into products(tenant_id, club_id, kind, name, duration_days, visits_count, validity_days, freeze_allowed, installments_allowed, network_access, access_from, access_to, family_seats)
+         values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) returning id`,
         [ctx.tenantId, b.clubId, b.kind, b.name!.trim(), b.kind === 'term' ? b.durationDays : null, ['visits', 'personal'].includes(b.kind!) ? b.visitsCount : null,
-          b.validityDays ?? null, b.freezeAllowed ?? b.kind === 'term', b.installmentsAllowed ?? false, b.networkAccess ?? false, timeOrNull(b.accessFrom), timeOrNull(b.accessTo)])).rows[0].id;
+          b.validityDays ?? null, b.freezeAllowed ?? b.kind === 'term', b.installmentsAllowed ?? false, b.networkAccess ?? false, timeOrNull(b.accessFrom), timeOrNull(b.accessTo), b.familySeats ?? null])).rows[0].id;
       await db.query('insert into price_versions(tenant_id, club_id, product_id, amount_kop, created_by) values ($1,$2,$3,$4,$5)', [ctx.tenantId, b.clubId, id, b.priceKop, ctx.userId]);
       const row = (await db.query(`${PRODUCT_SELECT} where p.id = $1`, [id])).rows[0];
       await audit(db, ctx, 'product.created', 'product', id, null, row);
@@ -402,6 +429,8 @@ export function membershipRoutes(app: FastifyInstance, pool: pg.Pool) {
       if (b.name !== undefined && !b.name.trim()) throw badRequest('Название не может быть пустым');
       checkProduct({ durationDays: before.durationDays, visitsCount: before.visitsCount, ...b }, before.kind);
       checkAccessTimes(b);
+      // Места на уже проданных абонементах не меняются: новое число мест — для новых продаж
+      if (b.familySeats !== undefined) await db.query('update products set family_seats = $2 where id = $1', [id, b.familySeats]);
       if (b.networkAccess !== undefined || b.accessFrom !== undefined || b.accessTo !== undefined) {
         await db.query(`update products set network_access = coalesce($2, network_access), access_from = case when $5 then $3::time else access_from end,
            access_to = case when $6 then $4::time else access_to end where id = $1`,

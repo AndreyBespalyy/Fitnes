@@ -9,7 +9,7 @@ import { rub, type Product } from './memberships.tsx';
 export type ContractBrief = { id: string; number: string; date: string; status: string; signMethod: string | null; signedAt: string | null;
   scanFileId: string | null; signatureFileId: string | null; hasLegalEntity: boolean; hasContractDoc: boolean };
 type LegalEntity = { fullName: string; inn: string; kpp: string | null; ogrn: string | null; address: string | null; bankName: string | null; bik: string | null;
-  account: string | null; corrAccount: string | null; signerName: string | null; signerBasis: string | null; contractPrefix: string };
+  account: string | null; corrAccount: string | null; signerName: string | null; signerBasis: string | null; contractPrefix: string; invoiceVat: string | null };
 type Doc = { id: string; kind: string; title: string; version: number; isCurrent: boolean; createdAt: string; fileId: string; fileName: string; sizeBytes: number; uploadedBy: string | null };
 type FullContract = { id: string; number: string; date: string; status: string; signMethod: string | null; signedAt: string | null; scanFileId: string | null; signatureFileId: string | null;
   legalEntity: LegalEntity | null; club: { name: string; address: string | null }; person: { fullName: string; birthDate: string | null; phone: string | null; email: string | null };
@@ -107,6 +107,8 @@ function LegalEntityForm({ club, manage }: { club: Club; manage: boolean }) {
       <div className="grid2" style={{ gridTemplateColumns: 'repeat(auto-fit,minmax(220px,1fr))' }}>
         {LE_LABELS.map(([k, label, ph]) => (
           <label key={k} className="f">{label}<input value={(le[k] as string | null) ?? ''} placeholder={ph} disabled={!manage} onChange={(e) => setLe({ ...le, [k]: e.target.value })} /></label>))}
+        <label className="f">НДС в счетах компаниям<select value={le.invoiceVat ?? ''} disabled={!manage} onChange={(e) => setLe({ ...le, invoiceVat: e.target.value || null })}>
+          <option value="">без НДС (УСН)</option>{['0', '5', '7', '10', '20', '22'].map((r) => <option key={r} value={r}>{r} %</option>)}</select></label>
       </div>
       {manage && <div><button className="btn pri">Сохранить реквизиты</button></div>}
     </form>

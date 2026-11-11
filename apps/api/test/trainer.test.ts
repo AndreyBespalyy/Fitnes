@@ -53,9 +53,9 @@ test('стол тренера: занятия, окна, клиенты с ос�
   assert.equal((await req('GET', `/api/trainer/desk?clubId=${centr}&trainerId=${ids['o.smirnov']}`, 'a.kim')).statusCode, 403); // чужой стол — только управляющему
   const d = (await req('GET', `/api/trainer/desk?clubId=${centr}`, 'a.kim')).json();
   assert.equal(d.trainer.id, ids['a.kim']);
-  const day0 = d.days[0];
-  assert.ok(day0.sessions.length >= 2);
-  assert.ok(day0.windows.length >= 1); // окна вокруг занятий
+  // Вечером «через 3 часа» уже завтра: считаем занятия по всем дням стола
+  assert.ok(d.days.flatMap((x: { sessions: unknown[] }) => x.sessions).length >= 2);
+  assert.ok(d.days.flatMap((x: { windows: unknown[] }) => x.windows).length >= 1); // окна вокруг занятий
   assert.equal(d.unmarked.length, 1); // прошедшее не отмечено
   const c = d.clients.find((x: { personId: string }) => x.personId === p.personId);
   assert.equal(c.visitsLeft, 10);

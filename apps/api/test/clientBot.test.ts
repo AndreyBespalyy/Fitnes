@@ -41,6 +41,9 @@ before(async () => {
   t = await setupTestApp({ fetch: fakeFetch });
   for (const l of ['a.bespalyy', 'o.smirnov', 'm.volkova']) ck[l] = (await login(t.app, l)).cookie!;
   centr = (await req('GET', '/api/clubs', 'a.bespalyy')).json().find((c: { name: string }) => c.name.includes('Центр')).id;
+  // Бот отвечает в любое время, а автоответ «мы закрыты» тесту мешает: клуб «работает» круглосуточно
+  await sql(`insert into club_msg_settings(club_id, tenant_id, work_from, work_to) select id, tenant_id, 0, 24 from clubs where id = $1
+    on conflict (club_id) do update set work_from = 0, work_to = 24`, [centr]);
   bot = (await req('POST', '/api/msg/channels', 'o.smirnov', { clubId: centr, kind: 'telegram_bot', messenger: 'telegram', name: 'Бот клуба', secret: '1:TOKEN' })).json().id;
 });
 after(async () => { await t.app.close(); await t.pool.end(); });

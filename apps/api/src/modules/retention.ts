@@ -15,6 +15,7 @@ import { clubToday } from './memberships.ts';
 import { processNewbies } from './newbie.ts';
 import { churnPlays, trackChurnOutcomes } from './churn.ts';
 import { processOnlineOrders } from './onlineBuy.ts';
+import { processCompanyInvoices } from './familyCorp.ts';
 import { conversationFor, deliver, queueMessage, renderTemplate } from './messaging.ts';
 import type { Fetch } from './msgProviders.ts';
 
@@ -186,6 +187,7 @@ export async function processRetention(pool: pg.Pool, f: Fetch | null) {
         await processNewbies(db, actor, c.id, c.today);
         await trackChurnOutcomes(db, c.id);
         await processOnlineOrders(db, f, actor, c.id);
+        await processCompanyInvoices(db, actor, c.id, c.today);
         // Предложения уходят только в рабочее время клуба
         if (c.h >= Math.max(11, c.wf) && c.h < c.wt) { await earlyRenewals(db, f, actor, c.id, c.today); await churnPlays(db, f, actor, c.id); }
         // Правила «если — то» управляющего: тоже только в рабочее время

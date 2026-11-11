@@ -3,6 +3,8 @@ import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import pg from 'pg';
 import { setupTestApp, login } from './helpers.ts';
+import { withCtx } from '../src/db.ts';
+import { processCompanyInvoices } from '../src/modules/familyCorp.ts';
 
 let t: Awaited<ReturnType<typeof setupTestApp>>;
 const ck: Record<string, Record<string, string>> = {};
@@ -97,4 +99,96 @@ test('компания: сотрудники с лимитом, продажа �
   const list = (await req('GET', `/api/companies?clubId=${centr}`, 'd.lis')).json();
   assert.equal(list.items[0].employees, 1);
   assert.equal(list.items[0].unpaidKop, 0);
+});
+
+test('общий семейный абонемент: один платит, у каждого своё место, сроки и долг — общие', async () => {
+  assert.match((await req('POST', '/api/products', 'o.smirnov', { clubId: centr, kind: 'visits', name: 'Семейный пакет', visitsCount: 10, priceKop: 100000, familySeats: 3 })).json().message, /только абонементом на срок/);
+  const pr = await req('POST', '/api/products', 'o.smirnov', { clubId: centr, kind: 'term', name: 'Семейный месяц на троих', durationDays: 30, priceKop: 1_200_000, familySeats: 3 });
+  assert.equal(pr.statusCode, 201, pr.body);
+  assert.equal(pr.json().familySeats, 3);
+  products = (await req('GET', `/api/products?clubId=${centr}`, 'm.volkova')).json();
+  const p = await lead('Отец Общий'); const s1 = await lead('Дочь Общая'); const s2 = await lead('Сын Общий'); const s3 = await lead('Мать Общая'); const x = await lead('Сосед Чужой');
+  assert.match((await sell(p, 'Семейный месяц на троих')).json().message, /сначала создайте семью/);
+  const g = (await req('POST', '/api/families', 'm.volkova', { clubId: centr, payerId: p })).json();
+  for (const id of [s1, s2, s3]) await req('POST', `/api/families/${g.id}/members`, 'm.volkova', { personId: id });
+  assert.match((await sell(p, 'Семейный месяц на троих', { familyPersonIds: [s1, x] })).json().message, /только членам семьи/);
+  assert.match((await sell(p, 'Семейный месяц на троих', { familyPersonIds: [s1, s2, s3] })).json().message, /не больше 2/);
+  assert.match((await sell(p, 'Месяц безлимит', { familyPersonIds: [s1] })).json().message, /только в общем семейном тарифе/);
+  const payers = (await req('GET', `/api/persons/${p}/payers?clubId=${centr}`, 'm.volkova')).json();
+  assert.deepEqual(payers.family.members.map((m: { name: string }) => m.name).sort(), ['Дочь Общая', 'Мать Общая', 'Сын Общий']);
+  const sold = await sell(p, 'Семейный месяц на троих', { familyPersonIds: [s1, s2] });
+  assert.equal(sold.statusCode, 201, sold.body);
+  const main = sold.json().id;
+  const ms = await sql(`select person_id, amount_kop, parent_membership_id, (select count(*)::int from charges c where c.membership_id = m.id) as ch from memberships m where m.id = $1 or m.parent_membership_id = $1 order by parent_membership_id nulls first`, [main]);
+  assert.deepEqual(ms.map((m) => [Number(m.amount_kop), m.ch]), [[1_200_000, 1], [0, 0], [0, 0]], 'платит один, места без платежей');
+  // Карточка члена семьи: место, без платежей, проход как у основного
+  const seat = (await req('GET', `/api/persons/${s1}/memberships`, 'd.lis')).json()[0];
+  assert.deepEqual([seat.seatOf.holderName, seat.charges.length, seat.access], ['Отец Общий', 0, true]);
+  const own = (await req('GET', `/api/persons/${p}/memberships`, 'd.lis')).json()[0];
+  assert.deepEqual([own.familySeats, own.seats.map((x: { name: string }) => x.name)], [3, ['Дочь Общая', 'Сын Общий']]);
+  // Долг основного закрывает проход всем
+  await sql(`update charges set due_on = current_date - 30 where membership_id = $1`, [main]);
+  assert.equal((await req('GET', `/api/persons/${s1}/memberships`, 'd.lis')).json()[0].access, false);
+  await sql(`update charges set due_on = current_date where membership_id = $1`, [main]);
+  // Заморозка: только на основном, переходит на места
+  assert.match((await req('POST', `/api/memberships/${seat.id}/freeze`, 'o.smirnov', { days: 7 })).json().message, /на основном абонементе/);
+  const before = (await sql(`select ends_on::text as e from memberships where id = $1`, [seat.id]))[0].e;
+  assert.equal((await req('POST', `/api/memberships/${main}/freeze`, 'o.smirnov', { days: 7 })).statusCode, 200);
+  const after = (await sql(`select ends_on::text as e from memberships where id = $1`, [seat.id]))[0].e;
+  assert.equal((new Date(after).getTime() - new Date(before).getTime()) / 86_400_000, 7);
+  assert.equal((await req('GET', `/api/persons/${s1}/memberships`, 'd.lis')).json()[0].state, 'frozen');
+  await req('POST', `/api/memberships/${main}/unfreeze`, 'o.smirnov');
+  // Места: занято всё — сначала освободить
+  assert.match((await req('POST', `/api/memberships/${main}/seats`, 'm.volkova', { personId: s3 })).json().message, /Все места заняты/);
+  const s2seat = own.seats.find((x: { name: string }) => x.name === 'Сын Общий').id;
+  assert.equal((await req('POST', `/api/memberships/${main}/seats/${s2seat}/remove`, 'm.volkova')).statusCode, 200);
+  assert.equal((await req('POST', `/api/memberships/${main}/seats`, 'm.volkova', { personId: s3 })).statusCode, 200);
+  assert.equal((await req('GET', `/api/persons/${s2}/memberships`, 'd.lis')).json()[0].state, 'cancelled');
+  // Продление основного: места у тех же людей
+  assert.match((await req('POST', '/api/memberships', 'm.volkova', { personId: s1, productId: prod('Семейный месяц на троих'), renewFromId: seat.id })).json().message, /продлевается основной/);
+  const ren = (await sell(p, 'Семейный месяц на троих', { renewFromId: main })).json();
+  const holders = await sql(`select pe.full_name from memberships m join persons pe on pe.id = m.person_id where m.parent_membership_id = $1 order by 1`, [ren.id]);
+  assert.deepEqual(holders.map((h) => h.full_name), ['Дочь Общая', 'Мать Общая']);
+  // Отмена основного отменяет места
+  assert.equal((await req('POST', `/api/memberships/${ren.id}/cancel`, 'o.smirnov', { reason: 'передумали' })).statusCode, 200);
+  assert.deepEqual((await sql(`select distinct status from memberships where parent_membership_id = $1`, [ren.id])).map((r) => r.status), ['cancelled']);
+});
+
+test('компания платит часть: доля компании в счёт, остальное сотрудник платит сам', async () => {
+  assert.match((await req('POST', '/api/companies', 'o.smirnov', { clubId: centr, name: 'ООО Доля', sharePercent: 5 })).json().message, /от 10 до 100/);
+  const c = (await req('POST', '/api/companies', 'o.smirnov', { clubId: centr, name: 'ООО Доля', inn: '7709876543', sharePercent: 60, discountPercent: 0, autoInvoice: true })).json();
+  const e = await lead('Сотрудник Долевой');
+  await req('POST', `/api/companies/${c.id}/employees`, 'm.volkova', { personId: e });
+  assert.equal((await req('GET', `/api/persons/${e}/payers?clubId=${centr}`, 'm.volkova')).json().companies[0].sharePercent, 60);
+  const m = (await sell(e, 'Месяц безлимит', { payer: 'company', companyId: c.id })).json();
+  const ch = await sql(`select id, amount_kop, company_id, title from charges where membership_id = $1 order by amount_kop desc`, [m.id]);
+  assert.deepEqual(ch.map((x) => [Number(x.amount_kop), x.company_id]), [[390000, c.id], [260000, null]]);
+  assert.equal((await req('POST', `/api/charges/${ch[0].id}/mark-paid`, 'd.lis', { method: 'card_terminal' })).json().error, 'company_pays');
+  assert.equal((await req('POST', `/api/charges/${ch[1].id}/mark-paid`, 'd.lis', { method: 'card_terminal' })).statusCode, 200, 'свою долю сотрудник платит на ресепшне');
+});
+
+test('счета компаниям сами в начале месяца, с НДС; о неоплаченном — одна задача', async () => {
+  const le = (await req('GET', `/api/clubs/${centr}/legal-entity`, 'o.smirnov')).json().legalEntity ?? { fullName: 'ООО «Фитнес Центр»', inn: '7700000001' };
+  assert.equal((await req('PUT', `/api/clubs/${centr}/legal-entity`, 'o.smirnov', { ...le, invoiceVat: '18' })).statusCode, 400);
+  assert.equal((await req('PUT', `/api/clubs/${centr}/legal-entity`, 'o.smirnov', { ...le, invoiceVat: '20' })).statusCode, 200);
+  const tenantId = (await sql('select tenant_id from clubs where id = $1', [centr]))[0].tenant_id;
+  const run = (today: string) => withCtx(t.pool, { tenantId, allClubs: true, clubIds: [] } as never, (db) => processCompanyInvoices(db, { tenantId, userId: null }, centr, today));
+  const next = new Date(); next.setUTCDate(1); next.setUTCMonth(next.getUTCMonth() + 1);
+  const first = `${next.toISOString().slice(0, 7)}-02`;
+  assert.deepEqual(await run(first), { issued: 1, overdue: 0 }, 'только компания с автовыставлением');
+  assert.deepEqual(await run(first), { issued: 0, overdue: 0 }, 'повторно не выставляется');
+  const inv = (await sql(`select i.* from company_invoices i join companies c on c.id = i.company_id where c.name = 'ООО Доля'`))[0];
+  assert.deepEqual([inv.auto, inv.vat_rate, Number(inv.amount_kop), Number(inv.vat_kop)], [true, 20, 390000, 65000]);
+  assert.equal((await sql(`select count(*)::int as n from tasks where title like 'Отправить компании «ООО Доля» счёт%'`))[0].n, 1);
+  const pr = (await req('GET', `/api/company-invoices/${inv.id}/print`, 'e.orlova')).body;
+  assert.match(pr, /В том числе НДС 20 %/);
+  assert.match(pr, /650,00 ₽/);
+  // Срок оплаты прошёл
+  const late = `${next.toISOString().slice(0, 7)}-28`;
+  assert.deepEqual(await run(late), { issued: 0, overdue: 1 });
+  assert.deepEqual(await run(late), { issued: 0, overdue: 0 }, 'одна задача на счёт');
+  assert.match((await sql(`select title from tasks where id = $1`, [(await sql('select overdue_task_id from company_invoices where id = $1', [inv.id]))[0].overdue_task_id]))[0].title, /не оплатила счёт/);
+  const d = (await req('GET', `/api/companies/${inv.company_id}`, 'o.smirnov')).json();
+  assert.equal(d.company.autoInvoice, true);
+  assert.equal(d.invoices[0].vatKop, 65000);
 });

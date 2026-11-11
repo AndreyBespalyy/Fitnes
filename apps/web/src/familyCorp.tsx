@@ -9,7 +9,8 @@ const ru = (d: string | null) => (d ? d.slice(0, 10).split('-').reverse().join('
 
 /* ---------- выбор плательщика в форме продажи ---------- */
 export type PayerValue = { payer?: 'self' | 'family' | 'company'; companyId?: string };
-type Payers = { family: { payerName: string; discountPercent: number; isPayer: boolean } | null; companies: { id: string; name: string; discountPercent: number }[] };
+type Payers = { family: { payerName: string; discountPercent: number; isPayer: boolean; members: { personId: string; name: string; relation: string | null }[] } | null;
+  companies: { id: string; name: string; discountPercent: number; sharePercent: number }[] };
 
 export function PayerPick({ personId, clubId, kind, onChange }: { personId: string; clubId?: string; kind?: string; onChange: (v: PayerValue) => void }) {
   const [p, setP] = useState<Payers | null>(null);
@@ -21,8 +22,53 @@ export function PayerPick({ personId, clubId, kind, onChange }: { personId: stri
     <label className="f">Кто платит<select value={v} onChange={(e) => pick(e.target.value)}>
       <option value="self">Сам клиент</option>
       {p.family && <option value="family">Семья: платит {p.family.payerName}{p.family.discountPercent ? `, семейная скидка ${p.family.discountPercent} %` : ''}</option>}
-      {p.companies.map((c) => <option key={c.id} value={`c:${c.id}`} disabled={kind === 'subscription'}>Компания «{c.name}» по счёту{c.discountPercent ? `, скидка ${c.discountPercent} %` : ''}{kind === 'subscription' ? ' (не для подписки)' : ''}</option>)}
-    </select>{v.startsWith('c:') && <span className="small">Клиент ничего не платит на ресепшне: сумма войдёт в счёт компании за месяц.</span>}</label>
+      {p.companies.map((c) => <option key={c.id} value={`c:${c.id}`} disabled={kind === 'subscription'}>Компания «{c.name}» по счёту{c.sharePercent < 100 ? ` (${c.sharePercent} % цены)` : ''}{c.discountPercent ? `, скидка ${c.discountPercent} %` : ''}{kind === 'subscription' ? ' (не для подписки)' : ''}</option>)}
+    </select>{v.startsWith('c:') && (() => { const c = p.companies.find((x) => `c:${x.id}` === v); return <span className="small">{c && c.sharePercent < 100
+      ? `Компания платит ${c.sharePercent} % по счёту за месяц, остальные ${100 - c.sharePercent} % клиент платит сам на ресепшне.`
+      : 'Клиент ничего не платит на ресепшне: сумма войдёт в счёт компании за месяц.'}</span>; })()}</label>
+  );
+}
+
+/* ---------- общий семейный абонемент: кому места ---------- */
+export function SeatPick({ personId, clubId, seats, onChange }: { personId: string; clubId: string; seats: number; onChange: (ids: string[]) => void }) {
+  const [p, setP] = useState<Payers | null>(null);
+  const [sel, setSel] = useState<string[]>([]);
+  useEffect(() => { setSel([]); onChange([]); api<Payers>('GET', `/api/persons/${personId}/payers?clubId=${clubId}`).then(setP).catch(() => setP(null)); }, [personId, clubId]);
+  if (!p) return null;
+  if (!p.family) return <div className="item small bad">Общий семейный абонемент оформляется на семью. Сначала создайте семью в блоке «Семья» ниже и добавьте её членов.</div>;
+  const toggle = (id: string) => { const n = sel.includes(id) ? sel.filter((x) => x !== id) : [...sel, id]; setSel(n); onChange(n); };
+  return (
+    <div className="f" style={{ display: 'grid', gap: 4 }}>
+      <span>Места в абонементе: покупатель и ещё до {seats - 1} чел. (выбрано {sel.length})</span>
+      {p.family.members.length === 0 ? <span className="small muted">В семье пока только этот клиент: добавьте членов семьи в блоке «Семья».</span>
+        : p.family.members.map((m) => <label key={m.personId} className="row small" style={{ gap: 6 }}>
+          <input type="checkbox" style={{ width: 'auto' }} checked={sel.includes(m.personId)} disabled={!sel.includes(m.personId) && sel.length >= seats - 1} onChange={() => toggle(m.personId)} />
+          {m.name}{m.relation ? <span className="muted"> · {m.relation}</span> : null}</label>)}
+      <span className="small muted">Платит покупатель, у каждого свой проход. Места можно поменять потом в карточке абонемента.</span>
+    </div>
+  );
+}
+
+/** Кто на местах общего абонемента: добавить из семьи, освободить место. */
+export function SeatsLine({ membershipId, clubId, buyerId, seats, taken, canEdit, reload }: { membershipId: string; clubId: string; buyerId: string; seats: number;
+  taken: { id: string; personId: string; name: string }[]; canEdit: boolean; reload: () => void }) {
+  const [fam, setFam] = useState<Payers['family']>(null);
+  const [pick, setPick] = useState('');
+  const [err, setErr] = useState('');
+  useEffect(() => { if (canEdit) api<Payers>('GET', `/api/persons/${buyerId}/payers?clubId=${clubId}`).then((x) => setFam(x.family)).catch(() => setFam(null)); }, [buyerId, clubId, taken.length]);
+  const run = async (f: () => Promise<unknown>, ok: string) => { setErr(''); try { await f(); toast(ok); setPick(''); reload(); } catch (x) { setErr(errText(x)); } };
+  const free = (fam?.members ?? []).filter((m) => !taken.some((t) => t.personId === m.personId));
+  return (
+    <div className="small" style={{ display: 'grid', gap: 4 }}>
+      <span>Общий на семью: занято мест {taken.length + 1} из {seats} (вместе с покупателем){taken.length ? ': ' : ''}
+        {taken.map((t, i) => <Fragment key={t.id}>{i ? ', ' : ''}{t.name}{canEdit && <button className="link" style={{ marginLeft: 4 }} aria-label={`Освободить место ${t.name}`}
+          onClick={() => run(() => api('POST', `/api/memberships/${membershipId}/seats/${t.id}/remove`), 'Место освобождено')}>×</button>}</Fragment>)}</span>
+      {err && <div className="err">{err}</div>}
+      {canEdit && taken.length + 1 < seats && free.length > 0 && <span className="row" style={{ gap: 6 }}>
+        <select value={pick} onChange={(e) => setPick(e.target.value)} style={{ width: 'auto' }} aria-label="Член семьи на свободное место">
+          <option value="">— член семьи на свободное место —</option>{free.map((m) => <option key={m.personId} value={m.personId}>{m.name}</option>)}</select>
+        <button className="btn sm" disabled={!pick} onClick={() => run(() => api('POST', `/api/memberships/${membershipId}/seats`, { personId: pick }), 'Место выдано')}>Дать место</button></span>}
+    </div>
   );
 }
 
@@ -93,18 +139,19 @@ export function FamilyBlock({ me, personId, clubId, openPerson }: { me: Me; pers
 /* ---------- раздел «Компании» ---------- */
 type CompanyRow = { id: string; name: string; inn: string | null; contractNumber: string | null; discountPercent: number; status: string; maxEmployees: number | null; employees: number; uninvoicedKop: number; unpaidKop: number };
 type Company = { id: string; clubId: string; name: string; inn: string | null; kpp: string | null; address: string | null; contactName: string | null; contactPhone: string | null; contactEmail: string | null;
-  contractNumber: string | null; contractDate: string | null; discountPercent: number; paymentDays: number; maxEmployees: number | null; status: string };
+  contractNumber: string | null; contractDate: string | null; discountPercent: number; paymentDays: number; maxEmployees: number | null; status: string;
+  sharePercent: number; autoInvoice: boolean; managerId: string | null; managerName?: string | null };
 type Detail = { company: Company; month: string; canManage: boolean;
   employees: { id: string; personId: string; name: string; position: string | null; addedAt: string; membership: string | null; visits: number; lastVisit: string | null }[];
-  invoices: { id: string; number: string; period: string; amountKop: number; dueOn: string; status: string; createdAt: string; paidAt: string | null }[];
+  invoices: { id: string; number: string; period: string; amountKop: number; dueOn: string; status: string; createdAt: string; paidAt: string | null; vatRate: number | null; vatKop: number; auto: boolean; overdue: boolean }[];
   pending: { id: string; title: string; amountKop: number; person: string; dueOn: string }[] };
-const EMPTY: Partial<Company> = { name: '', discountPercent: 10, paymentDays: 10, maxEmployees: null };
+const EMPTY: Partial<Company> = { name: '', discountPercent: 10, paymentDays: 10, maxEmployees: null, sharePercent: 100, autoInvoice: true, managerId: null };
 const INV: Record<string, [string, string]> = { issued: ['выставлен', 'warn'], paid: ['оплачен', 'ok'], cancelled: ['отменён', ''] };
 
 export function CompaniesPage({ me: _me, clubs, clubId, openPerson }: { me: Me; clubs: Club[]; clubId: string; openPerson: (id: string) => void }) {
   const [club, setClub] = useState(clubId !== 'all' ? clubId : clubs[0]?.id ?? '');
   useEffect(() => { if (clubId !== 'all') setClub(clubId); }, [clubId]);
-  const [list, setList] = useState<{ items: CompanyRow[]; canManage: boolean } | null>(null);
+  const [list, setList] = useState<{ items: CompanyRow[]; canManage: boolean; staff: { id: string; name: string }[] } | null>(null);
   const [open, setOpen] = useState<string | null>(null);
   const [form, setForm] = useState<Partial<Company> | null>(null);
   const [err, setErr] = useState('');
@@ -129,7 +176,7 @@ export function CompaniesPage({ me: _me, clubs, clubId, openPerson }: { me: Me; 
         </div>
       </div>
       {err && <div className="err">{err}</div>}
-      {form && <CompanyForm v={form} set={setForm} save={save} cancel={() => setForm(null)} />}
+      {form && <CompanyForm v={form} set={setForm} save={save} cancel={() => setForm(null)} staff={list?.staff ?? []} />}
       {!list ? <p className="muted">Загрузка…</p> : list.items.length === 0 ? <p className="muted">Компаний пока нет.</p> : (
         <div className="card"><div className="tbl"><table>
           <thead><tr><th>Компания</th><th>Договор</th><th>Скидка</th><th>Сотрудников</th><th>Ещё не в счёте</th><th>Счета не оплачены</th></tr></thead>
@@ -143,14 +190,19 @@ export function CompaniesPage({ me: _me, clubs, clubId, openPerson }: { me: Me; 
   );
 }
 
-function CompanyForm({ v, set, save, cancel }: { v: Partial<Company>; set: (x: Partial<Company>) => void; save: () => void; cancel: () => void }) {
+function CompanyForm({ v, set, save, cancel, staff }: { v: Partial<Company>; set: (x: Partial<Company>) => void; save: () => void; cancel: () => void; staff: { id: string; name: string }[] }) {
   const f = (k: keyof Company, label: string, type = 'text') => <label className="f">{label}<input type={type} value={(v[k] as string | number | null) ?? ''}
     onChange={(e) => set({ ...v, [k]: type === 'number' ? (e.target.value === '' ? null : Number(e.target.value)) : e.target.value })} /></label>;
   return (
     <div className="card" style={{ display: 'grid', gap: 8, maxWidth: 720 }}>
       <h2>{v.id ? 'Компания' : 'Новая компания'}</h2>
       <div className="grid2">{f('name', 'Название')}{f('inn', 'ИНН')}{f('kpp', 'КПП')}{f('address', 'Адрес')}{f('contactName', 'Контактное лицо')}{f('contactPhone', 'Телефон')}{f('contactEmail', 'E-mail для счетов')}
-        {f('contractNumber', 'Номер договора')}{f('contractDate', 'Дата договора', 'date')}{f('discountPercent', 'Скидка сотрудникам, %', 'number')}{f('paymentDays', 'Срок оплаты счёта, дней', 'number')}{f('maxEmployees', 'Сотрудников по договору, не больше', 'number')}</div>
+        {f('contractNumber', 'Номер договора')}{f('contractDate', 'Дата договора', 'date')}{f('discountPercent', 'Скидка сотрудникам, %', 'number')}{f('paymentDays', 'Срок оплаты счёта, дней', 'number')}{f('maxEmployees', 'Сотрудников по договору, не больше', 'number')}
+        {f('sharePercent', 'Компания платит, % цены (остальное — сотрудник)', 'number')}
+        <label className="f">Ответственный за компанию<select value={v.managerId ?? ''} onChange={(e) => set({ ...v, managerId: e.target.value || null })}>
+          <option value="">— кто создал компанию —</option>{staff.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}</select></label></div>
+      <label className="row" style={{ gap: 8 }}><input type="checkbox" style={{ width: 'auto' }} checked={!!v.autoInvoice} onChange={(e) => set({ ...v, autoInvoice: e.target.checked })} />
+        Выставлять счёт сам 1-го числа за прошлый месяц и ставить ответственному задачу отправить его</label>
       {v.id && <label className="row" style={{ gap: 8 }}><input type="checkbox" style={{ width: 'auto' }} checked={v.status === 'archived'} onChange={(e) => set({ ...v, status: e.target.checked ? 'archived' : 'active' })} />Договор закончился (в архив)</label>}
       <div className="row" style={{ gap: 6 }}><button className="btn sm pri" onClick={save}>Сохранить</button><button className="btn sm" onClick={cancel}>Отмена</button></div>
     </div>
@@ -178,7 +230,8 @@ function CompanyDetail({ id, openPerson, edit, reloadList }: { id: string; openP
     <div style={{ display: 'grid', gap: 10, padding: 12, background: 'var(--bg)' }}>
       {err && <div className="err">{err}</div>}
       <div className="row between" style={{ flexWrap: 'wrap', gap: 8 }}>
-        <span className="small">{c.contractNumber ? `Договор № ${c.contractNumber}${c.contractDate ? ` от ${ru(c.contractDate)}` : ''}` : 'Номер договора не указан'} · скидка {c.discountPercent} % · счёт оплачивается за {c.paymentDays} дн.
+        <span className="small">{c.contractNumber ? `Договор № ${c.contractNumber}${c.contractDate ? ` от ${ru(c.contractDate)}` : ''}` : 'Номер договора не указан'} · скидка {c.discountPercent} %{c.sharePercent < 100 ? ` · компания платит ${c.sharePercent} %, остальное сотрудник` : ''} · счёт оплачивается за {c.paymentDays} дн.
+          {c.autoInvoice ? ' · счёт выставляется сам 1-го числа' : ''}{c.managerName ? ` · ответственный ${c.managerName}` : ''}
           {c.contactName ? ` · ${c.contactName}` : ''}{c.contactPhone ? `, ${c.contactPhone}` : ''}{c.contactEmail ? `, ${c.contactEmail}` : ''}</span>
         {d.canManage && <button className="btn sm" onClick={() => edit(c)}>Изменить</button>}
       </div>
@@ -204,9 +257,10 @@ function CompanyDetail({ id, openPerson, edit, reloadList }: { id: string; openP
           {d.canManage && d.pending.length > 0 && <button className="btn sm pri" onClick={() => run(() => api('POST', `/api/companies/${id}/invoices`, { period: month }), 'Счёт выставлен')}>Выставить счёт за {month.split('-').reverse().join('.')}</button>}</div>
         {d.pending.length > 0 && <div className="small">Ещё не в счёте: {d.pending.map((p) => `${p.person} — ${p.title}, ${rub(p.amountKop)}`).join('; ')}</div>}
         {d.invoices.length === 0 ? <p className="muted" style={{ margin: 0 }}>Счетов пока нет.</p> : (
-          <div className="tbl"><table><thead><tr><th>Счёт</th><th>Месяц</th><th>Сумма</th><th>Оплатить до</th><th>Статус</th><th></th></tr></thead>
-            <tbody>{d.invoices.map((i) => { const [l, cls] = INV[i.status] ?? [i.status, '']; return <tr key={i.id}><td><b>{i.number}</b></td><td>{i.period.split('-').reverse().join('.')}</td><td>{rub(i.amountKop)}</td><td>{ru(i.dueOn)}</td>
-              <td><span className={`chip ${cls}`}>{l}</span></td>
+          <div className="tbl"><table><thead><tr><th>Счёт</th><th>Месяц</th><th>Сумма</th><th>НДС</th><th>Оплатить до</th><th>Статус</th><th></th></tr></thead>
+            <tbody>{d.invoices.map((i) => { const [l, cls] = INV[i.status] ?? [i.status, '']; return <tr key={i.id}><td><b>{i.number}</b>{i.auto && <div className="small muted">выставлен сам</div>}</td><td>{i.period.split('-').reverse().join('.')}</td><td>{rub(i.amountKop)}</td>
+              <td className="small">{i.vatRate == null ? 'без НДС' : `${i.vatRate} %: ${rub(i.vatKop)}`}</td><td>{ru(i.dueOn)}</td>
+              <td><span className={`chip ${i.overdue ? 'bad' : cls}`}>{i.overdue ? 'просрочен' : l}</span></td>
               <td className="row" style={{ gap: 6 }}><a className="btn sm" href={`/api/company-invoices/${i.id}/print`} target="_blank" rel="noreferrer">Печать</a>
                 {d.canManage && i.status === 'issued' && <><button className="btn sm pri" onClick={() => run(() => api('POST', `/api/company-invoices/${i.id}/paid`), 'Оплата счёта отмечена, абонементы оплачены')}>Оплачен</button>
                   <button className="btn sm" onClick={() => run(() => api('POST', `/api/company-invoices/${i.id}/cancel`), 'Счёт отменён')}>Отменить</button></>}</td></tr>; })}</tbody></table></div>)}

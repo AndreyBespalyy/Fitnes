@@ -43,6 +43,7 @@ export async function saveFile(db: Db, storage: string, ctx: Actor, clubId: stri
 const LE_FIELDS: [string, string][] = [
   ['fullName', 'full_name'], ['inn', 'inn'], ['kpp', 'kpp'], ['ogrn', 'ogrn'], ['address', 'address'], ['bankName', 'bank_name'], ['bik', 'bik'],
   ['account', 'account'], ['corrAccount', 'corr_account'], ['signerName', 'signer_name'], ['signerBasis', 'signer_basis'], ['contractPrefix', 'contract_prefix'],
+  ['invoiceVat', 'invoice_vat'],
 ];
 const LE_SELECT = `select ${LE_FIELDS.map(([k, c]) => `${c} as "${k}"`).join(', ')}, updated_at as "updatedAt" from legal_entities where club_id = $1`;
 export const getLegalEntity = async (db: Db, clubId: string) => (await db.query(LE_SELECT, [clubId])).rows[0] ?? null;
@@ -113,6 +114,7 @@ export function contractRoutes(app: FastifyInstance, pool: pg.Pool, storage: str
     const checks: [string, RegExp, string][] = [['kpp', /^\d{9}$/, 'КПП: 9 цифр'], ['ogrn', /^\d{13}(\d{2})?$/, 'ОГРН: 13 цифр (ОГРНИП: 15)'],
       ['bik', /^\d{9}$/, 'БИК: 9 цифр'], ['account', /^\d{20}$/, 'Расчётный счёт: 20 цифр'], ['corrAccount', /^\d{20}$/, 'Корр. счёт: 20 цифр']];
     for (const [k, re, msg] of checks) if (v[k] && !re.test(v[k]!)) throw badRequest(msg);
+    if (v.invoiceVat && !['0', '5', '7', '10', '20', '22'].includes(v.invoiceVat)) throw badRequest('НДС в счетах компаниям: без НДС, 0, 5, 7, 10, 20 или 22 %');
     return withCtx(pool, ctx, async (db) => {
       if (!(await db.query('select 1 from clubs where id = $1', [id])).rowCount) throw notFound('Клуб не найден');
       const before = await getLegalEntity(db, id);
