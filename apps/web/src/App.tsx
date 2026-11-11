@@ -24,6 +24,8 @@ import { AccessPage } from './access.tsx';
 import { ChatsPage, MessagingAdmin } from './chat.tsx';
 import { StaffTimePage } from './staff.tsx';
 import { LoginSecurity } from './loginSecurity.tsx';
+import { ReportProblem } from './report.tsx';
+import { UsagePage } from './usage.tsx';
 import { ConfigPage } from './config.tsx';
 import { ReviewsPage } from './insights.tsx';
 import { OfflineBar, ProfilePage, registerServiceWorker, StaffSessions } from './mobile.tsx';
@@ -93,7 +95,7 @@ function ChangePassword({ me, forced, onDone, onLogout }: { me: Me; forced?: boo
   );
 }
 
-type Tab = 'dash' | 'hot' | 'calls' | 'leads' | 'board' | 'tasks' | 'home' | 'clubs' | 'tariffs' | 'contracts' | 'site' | 'fiscal' | 'finance' | 'import' | 'chats' | 'access' | 'messaging' | 'pipelines' | 'staff' | 'stafftime' | 'config' | 'reviews' | 'onboarding' | 'help' | 'schedule' | 'retention' | 'shop' | 'corp' | 'trainer' | 'desk' | 'load' | 'cohorts' | 'pnl' | 'profile';
+type Tab = 'dash' | 'hot' | 'calls' | 'leads' | 'board' | 'tasks' | 'home' | 'clubs' | 'tariffs' | 'contracts' | 'site' | 'fiscal' | 'finance' | 'import' | 'chats' | 'access' | 'messaging' | 'pipelines' | 'staff' | 'stafftime' | 'config' | 'reviews' | 'onboarding' | 'help' | 'schedule' | 'retention' | 'shop' | 'corp' | 'trainer' | 'desk' | 'load' | 'cohorts' | 'pnl' | 'usage' | 'profile';
 
 function Shell({ me, onLogout }: { me: Me; onLogout: () => void }) {
   const firstTab: Tab = 'dash';
@@ -154,10 +156,14 @@ function Shell({ me, onLogout }: { me: Me; onLogout: () => void }) {
     ['stafftime', 'График и зарплата', true],
     ['config', 'Настройки клуба', can(me, 'config.manage')],
     ['onboarding', 'Подключение клубов', can(me, 'clubs.manage')],
+    ['usage', 'Использование', me.allClubs && (can(me, '*') || me.roles.some((r) => r.code === 'admin'))],
     ['help', 'Помощь', true],
     ['profile', 'Профиль', true],
   ];
   const visible = tabs.filter((t) => t[2]);
+  const tabLabel = tabs.find((t) => t[0] === tab)?.[1] ?? tab;
+  // Статистика использования: какой раздел открыли (без содержимого экрана)
+  useEffect(() => { api('POST', '/api/usage/view', { tab, label: tabLabel }).catch(() => null); }, [tab]);
   // Нижняя панель на телефоне: главные разделы роли под большим пальцем, остальное — в «Ещё»
   const PRIMARY: Tab[] = ['dash', 'desk', 'trainer', 'hot', 'tasks', 'chats', 'home', 'schedule', 'access', 'finance'];
   const bottom = PRIMARY.filter((k) => visible.some((v) => v[0] === k)).slice(0, 4);
@@ -196,6 +202,7 @@ function Shell({ me, onLogout }: { me: Me; onLogout: () => void }) {
         {tab === 'messaging' && <MessagingAdmin me={me} clubs={clubs} clubId={clubId} />}
         {tab === 'import' && <ImportPage clubs={clubs} clubId={clubId} />}
         {tab === 'pnl' && <PnlPage me={me} clubs={clubs} clubId={clubId} />}
+        {tab === 'usage' && <UsagePage tabs={tabs.map(([k, l]) => [k, l])} />}
         {tab === 'cohorts' && <CohortsPage me={me} clubs={clubs} clubId={clubId} />}
         {tab === 'load' && <LoadPage me={me} clubs={clubs} clubId={clubId} />}
         {tab === 'desk' && <DeskPage me={me} clubs={clubs} clubId={clubId} openPerson={setPersonId} />}
@@ -214,6 +221,7 @@ function Shell({ me, onLogout }: { me: Me; onLogout: () => void }) {
         {tab === 'help' && <HelpPage me={me} clubs={clubs} clubId={clubId} page={tab} />}
         {tab === 'reviews' && <ReviewsPage me={me} clubs={clubs} clubId={clubId} openPerson={setPersonId} />}
         {tab === 'profile' && <ProfilePage me={me} passwordForm={<ChangePassword me={me} onDone={() => { alertOk('Пароль изменён'); setTab(firstTab); }} />} />}
+        <ReportProblem tab={tab} tabLabel={tabLabel} clubId={clubId} openHelp={() => go({ tab: 'help', p: { view: 'support' } })} />
       </main>
       <nav className="bottom-nav" aria-label="Главные разделы">
         {bottom.map((k) => <button key={k} aria-pressed={tab === k && !more} onClick={() => setTab(k)}><span aria-hidden="true">{icon[k]}</span>{short[k]}</button>)}

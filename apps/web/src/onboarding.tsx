@@ -108,8 +108,8 @@ const DOCS = import.meta.glob('../../../docs/03_Инструкции/*.md', { qu
 const GUIDES = Object.entries(DOCS).map(([path, text]) => ({ id: path.split('/').pop()!.replace(/\.md$/, ''), title: (text.match(/^#\s+(.+)$/m)?.[1] ?? path).replace(/\s*\(шаг[^)]*\)\s*$/i, ''), text }))
   .sort((a, b) => a.title.localeCompare(b.title, 'ru'));
 
-type Ticket = { id: string; number: number; subject: string; kind: string; status: string; clubName: string | null; author: string; authorId: string; escalatedAt: string | null; createdAt: string; updatedAt: string; messages: number };
-type TicketFull = Ticket & { canAnswer: boolean; messagesList: { id: string; body: string; fromSupport: boolean; createdAt: string; author: string }[] };
+type Ticket = { id: string; number: number; subject: string; kind: string; status: string; clubName: string | null; author: string; authorId: string; escalatedAt: string | null; createdAt: string; updatedAt: string; messages: number; page?: string | null };
+type TicketFull = Ticket & { techLog?: { at: string; kind: string; text: string }[] | null; clientInfo?: string | null; appVersion?: string | null; canAnswer: boolean; messagesList: { id: string; body: string; fromSupport: boolean; createdAt: string; author: string }[] };
 const KIND: Record<string, string> = { question: 'Вопрос', bug: 'Ошибка', idea: 'Предложение', access: 'Доступ' };
 const STATUS: Record<string, [string, string]> = { open: ['ждёт ответа', 'warn'], answered: ['есть ответ', 'ok'], closed: ['закрыто', ''] };
 
@@ -187,6 +187,10 @@ function Support({ me, clubs, clubId, page }: { me: Me; clubs: Club[]; clubId: s
                 <div style={{ whiteSpace: 'pre-wrap' }}>{m.body}</div>
               </div>
             ))}
+            {cur.canAnswer && (cur.techLog?.length || cur.clientInfo) && <details><summary className="small">Технические сведения{cur.page ? ` · раздел ${cur.page}` : ''}</summary>
+              <div className="small muted">{cur.appVersion ? `Версия ${cur.appVersion} · ` : ''}{cur.clientInfo}</div>
+              {(cur.techLog ?? []).map((e, i) => <div key={i} className="small" style={{ fontFamily: 'var(--mono, monospace)' }}>{dt(e.at)} · {e.kind} · {e.text}</div>)}
+            </details>}
             {cur.status !== 'closed' && <>
               <textarea rows={3} placeholder="Ответ" value={reply} onChange={(e) => setReply(e.target.value)} />
               <div className="row" style={{ gap: 6, flexWrap: 'wrap' }}>

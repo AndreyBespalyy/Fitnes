@@ -178,6 +178,17 @@ const TICKET = `select t.id, t.number, t.subject, t.kind, t.status, t.page, t.cl
   from support_tickets t join users u on u.id = t.author_id left join clubs c on c.id = t.club_id`;
 const answerer = (ctx: Ctx) => can(ctx, P.supportAnswer);
 
+/** Технические сведения из экрана: только время, вид, короткий текст без данных клиентов (адреса запросов — без параметров) */
+function cleanTechLog(x: unknown) {
+  if (!Array.isArray(x)) return null;
+  const out = x.slice(-30).filter((e) => e && typeof e === 'object').map((e) => {
+    const r = e as Record<string, unknown>;
+    return { at: String(r.at ?? '').slice(0, 30), kind: String(r.kind ?? '').slice(0, 20),
+      text: String(r.text ?? '').replace(/\?[^\s]*/g, '').replace(/\+?\d[\d\s()-]{9,}\d/g, '[номер]').replace(/[\w.+-]+@[\w-]+\.[\w.]+/g, '[почта]').slice(0, 300) };
+  });
+  return out.length ? out : null;
+}
+
 export function onboardingRoutes(app: FastifyInstance, pool: pg.Pool) {
   app.get('/api/onboarding', async (req) => {
     const ctx = requirePerm(req, P.clubsManage);
@@ -272,7 +283,7 @@ export function onboardingRoutes(app: FastifyInstance, pool: pg.Pool) {
 
   app.post('/api/support', async (req, reply) => {
     const ctx = requireCtx(req);
-    const b = (req.body ?? {}) as { subject?: string; body?: string; kind?: string; clubId?: string; page?: string; clientInfo?: string };
+    const b = (req.body ?? {}) as { subject?: string; body?: string; kind?: string; clubId?: string; page?: string; clientInfo?: string; techLog?: unknown; appVersion?: string };
     const subject = b.subject?.trim(); const body = b.body?.trim();
     if (!subject) throw badRequest('Коротко напишите, о чём вопрос');
     if (!body) throw badRequest('Опишите вопрос подробнее');
@@ -281,8 +292,9 @@ export function onboardingRoutes(app: FastifyInstance, pool: pg.Pool) {
       const clubId = b.clubId && b.clubId !== 'all' && (await db.query('select 1 from clubs where id = $1', [b.clubId])).rowCount ? b.clubId : null;
       await db.query('select pg_advisory_xact_lock(hashtext($1))', [`support:${ctx.tenantId}`]);
       const number = (await db.query('select coalesce(max(number), 0) + 1 as n from support_tickets')).rows[0].n;
-      const id = (await db.query(`insert into support_tickets(tenant_id, club_id, number, author_id, subject, kind, page, client_info) values ($1,$2,$3,$4,$5,$6,$7,$8) returning id`,
-        [ctx.tenantId, clubId, number, ctx.userId, subject.slice(0, 200), kind, b.page?.slice(0, 60) ?? null, b.clientInfo?.slice(0, 300) ?? null])).rows[0].id;
+      const id = (await db.query(`insert into support_tickets(tenant_id, club_id, number, author_id, subject, kind, page, client_info, tech_log, app_version) values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) returning id`,
+        [ctx.tenantId, clubId, number, ctx.userId, subject.slice(0, 200), kind, b.page?.slice(0, 60) ?? null, b.clientInfo?.slice(0, 300) ?? null,
+          JSON.stringify(cleanTechLog(b.techLog)), b.appVersion?.slice(0, 40) ?? null])).rows[0].id;
       await db.query('insert into support_messages(tenant_id, ticket_id, author_id, body) values ($1,$2,$3,$4)', [ctx.tenantId, id, ctx.userId, body.slice(0, 5000)]);
       await audit(db, ctx, 'support.created', 'support_ticket', id, null, { number, subject, kind });
       return (await db.query(`${TICKET} where t.id = $1`, [id])).rows[0];
@@ -304,7 +316,8 @@ export function onboardingRoutes(app: FastifyInstance, pool: pg.Pool) {
       const t = await loadTicket(db, ctx, id);
       const messages = (await db.query(`select m.id, m.body, m.from_support as "fromSupport", m.created_at as "createdAt", coalesce(u.full_name, 'Поддержка платформы') as author
         from support_messages m left join users u on u.id = m.author_id where m.ticket_id = $1 order by m.created_at`, [id])).rows;
-      return { ...t, messagesList: messages, canAnswer: answerer(ctx) };
+      const tech = answerer(ctx) ? (await db.query(`select tech_log as "techLog", client_info as "clientInfo", app_version as "appVersion" from support_tickets where id = $1`, [id])).rows[0] : {};
+      return { ...t, ...tech, messagesList: messages, canAnswer: answerer(ctx) };
     });
   });
 

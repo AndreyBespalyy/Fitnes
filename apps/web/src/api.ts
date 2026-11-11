@@ -60,6 +60,16 @@ if (typeof window !== 'undefined') {
   window.addEventListener('offline', () => setOffline(true, net.savedAt));
 }
 
+/** Последние сбои на экране для «Сообщить о проблеме»: без тел запросов и без параметров адреса */
+export type TechEntry = { at: string; kind: 'api' | 'js' | 'offline'; text: string };
+const tech: TechEntry[] = [];
+export const noteTech = (kind: TechEntry['kind'], text: string) => { tech.push({ at: new Date().toISOString(), kind, text: text.slice(0, 300) }); if (tech.length > 30) tech.shift(); };
+export const techLog = () => [...tech];
+if (typeof window !== 'undefined') {
+  window.addEventListener('error', (e) => noteTech('js', `${e.message} (${String(e.filename ?? '').split('/').pop()}:${e.lineno})`));
+  window.addEventListener('unhandledrejection', (e) => { const r = e.reason as { message?: string } | undefined; if (!(r instanceof ApiError)) noteTech('js', String(r?.message ?? r)); });
+}
+
 export async function api<T>(method: string, url: string, body?: unknown): Promise<T> {
   const path = url.split('?')[0];
   const q = method === 'POST' ? QUEUEABLE.find(([r]) => r.test(path)) : undefined;
@@ -77,12 +87,16 @@ export async function api<T>(method: string, url: string, body?: unknown): Promi
       writeQ([...readQ(), { id: `${Date.now()}-${Math.random()}`, method, url, body, label: q[1], at: new Date().toISOString() }]);
       return { ok: true, queued: true } as T;
     }
+    noteTech('offline', `${method} ${url.split('?')[0]}`);
     throw new ApiError(0, 'offline', 'Нет связи с сервером');
   }
   if (res.headers.get('X-Offline')) setOffline(true, res.headers.get('X-Saved-At'));
   else setOffline(false);
   const data = await res.json().catch(() => ({}));
-  if (!res.ok) throw new ApiError(res.status, data.error ?? 'error', data.message ?? 'Ошибка связи с сервером');
+  if (!res.ok) {
+    if (!url.startsWith('/api/usage')) noteTech('api', `${method} ${url.split('?')[0]} → ${res.status} ${data.error ?? ''}: ${data.message ?? ''}`);
+    throw new ApiError(res.status, data.error ?? 'error', data.message ?? 'Ошибка связи с сервером');
+  }
   return data as T;
 }
 
