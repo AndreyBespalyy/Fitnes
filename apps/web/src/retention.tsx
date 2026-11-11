@@ -1,4 +1,5 @@
 // Возврат бывших клиентов (группы, кампании) и досрочное продление.
+import { NewbieView } from './newbie.tsx';
 import { useEffect, useState } from 'react';
 import { api, type Club, type Me, navParams } from './api.ts';
 import { dt, errText, toast } from './ui.ts';
@@ -18,7 +19,7 @@ const DEFAULT_TEXT = '{имя}, давно не виделись! В клубе 
 export function RetentionPage({ me: _me, clubs, clubId, openPerson }: { me: Me; clubs: Club[]; clubId: string; openPerson: (id: string) => void }) {
   const [club, setClub] = useState(clubId !== 'all' ? clubId : clubs[0]?.id ?? '');
   useEffect(() => { if (clubId !== 'all') setClub(clubId); }, [clubId]);
-  const [view, setView] = useState<'groups' | 'campaigns' | 'early' | 'surveys'>(() => (['groups', 'campaigns', 'early', 'surveys'].includes(navParams('retention').view) ? navParams('retention').view as 'groups' : 'groups'));
+  const [view, setView] = useState<'groups' | 'campaigns' | 'early' | 'surveys' | 'newbie'>(() => (['groups', 'campaigns', 'early', 'surveys', 'newbie'].includes(navParams('retention').view) ? navParams('retention').view as 'groups' : 'groups'));
   const [groups, setGroups] = useState<Group[] | null>(null);
   const [draft, setDraft] = useState<{ monthsFrom: number; monthsTo: number | null; product: string } | null>(null);
   const [campaigns, setCampaigns] = useState<Campaign[]>([]);
@@ -35,6 +36,7 @@ export function RetentionPage({ me: _me, clubs, clubId, openPerson }: { me: Me; 
           <button aria-pressed={view === 'campaigns'} onClick={() => setView('campaigns')}>Кампании</button>
           <button aria-pressed={view === 'early'} onClick={() => setView('early')}>Досрочное продление</button>
           <button aria-pressed={view === 'surveys'} onClick={() => setView('surveys')}>Опросы после визита</button>
+          <button aria-pressed={view === 'newbie'} onClick={() => setView('newbie')}>Новички: первые 30 дней</button>
         </div>
         {clubId === 'all' && <select value={club} onChange={(e) => setClub(e.target.value)}>{clubs.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}</select>}
       </div>
@@ -72,6 +74,7 @@ export function RetentionPage({ me: _me, clubs, clubId, openPerson }: { me: Me; 
       )}
       {view === 'early' && <EarlyView club={club} openPerson={openPerson} />}
       {view === 'surveys' && <SurveysView club={club} openPerson={openPerson} />}
+      {view === 'newbie' && <NewbieView club={club} openPerson={openPerson} />}
       {open && <CampaignDrawer id={open} onClose={() => { setOpen(null); loadCampaigns(); }} openPerson={openPerson} />}
     </>
   );

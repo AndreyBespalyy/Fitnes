@@ -195,3 +195,4 @@ a.btn{text-decoration:none;color:inherit}
 .kpi-c .go{position:absolute;right:10px;top:8px;color:var(--muted);font-size:18px;line-height:1}
 .kpi-c.click:hover .go{color:var(--accent)}
 .kpi-c.click .lbl{padding-right:14px}
+.kpi-c.on{border-color:var(--accent);background:var(--accent-soft)}

@@ -9,6 +9,7 @@ import { audit, withCtx, type Ctx, type Db } from '../db.ts';
 import { badRequest, notFound } from '../errors.ts';
 import { PERMISSIONS as P } from '../roles.ts';
 import { clubToday } from './memberships.ts';
+import { processNewbies } from './newbie.ts';
 import { conversationFor, deliver, queueMessage, renderTemplate } from './messaging.ts';
 import type { Fetch } from './msgProviders.ts';
 
@@ -177,6 +178,7 @@ export async function processRetention(pool: pg.Pool, f: Fetch | null) {
     for (const c of clubs) {
       await withCtx(pool, sys, async (db) => {
         await trackResults(db, actor, c.id);
+        await processNewbies(db, actor, c.id, c.today);
         // Предложения уходят только в рабочее время клуба
         if (c.h >= Math.max(11, c.wf) && c.h < c.wt) await earlyRenewals(db, f, actor, c.id, c.today);
       }).catch((e) => console.error('Удержание:', (e as Error).message));

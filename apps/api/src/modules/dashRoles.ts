@@ -71,6 +71,8 @@ async function retentionPanel(db: Db, clubs: Club[]): Promise<Panel> {
       (select count(*) from campaign_members cm join retention_campaigns rc on rc.id = cm.campaign_id where rc.club_id = any($1) and rc.status = 'running' and cm.replied_at is not null)::int as replied,
       (select count(*) from campaign_members cm join retention_campaigns rc on rc.id = cm.campaign_id where rc.club_id = any($1) and rc.status = 'running' and cm.bought_membership_id is not null)::int as bought,
       (select count(*) from surveys s join tasks t on t.id = s.task_id where s.club_id = any($1) and t.done_at is null)::int as "lowOpen",
+      (select count(*) from newbie_programs where club_id = any($1) and status = 'active')::int as newbies,
+      (select count(distinct p.id) from newbie_programs p join newbie_steps s on s.program_id = p.id where p.club_id = any($1) and p.status = 'active' and s.kind = 'visits' and s.status = 'task')::int as "newbieRisk",
       (select count(distinct m.person_id) from memberships m where m.club_id = any($1) and m.kind <> 'guest' and m.status <> 'cancelled' and m.ends_on between current_date - 90 and current_date - 1
          and not exists (select 1 from memberships n where n.person_id = m.person_id and n.club_id = m.club_id and n.status = 'active' and coalesce(n.ends_on, current_date) >= current_date))::int as former`, [ids]);
   const sc = (await db.query(`select score from surveys where club_id = any($1) and status = 'answered' and answered_at > now() - interval '30 days'`, [ids])).rows.map((r) => r.score as number);
@@ -82,6 +84,7 @@ async function retentionPanel(db: Db, clubs: Club[]): Promise<Panel> {
       { label: 'Кампании возврата идут', value: d.campaigns, sub: `ответили ${d.replied}, купили ${d.bought}`, go: { tab: 'retention', p: { view: 'campaigns' } } },
       { label: 'Индекс лояльности, 30 дней', value: nps === null ? '—' : nps > 0 ? `+${nps}` : String(nps), sub: `оценок ${sc.length}`, tone: nps === null ? undefined : nps >= 50 ? 'ok' : nps >= 0 ? 'warn' : 'bad', go: { tab: 'retention', p: { view: 'surveys' } } },
       { label: 'Недовольные ждут звонка', value: d.lowOpen, tone: bad(d.lowOpen), go: { tab: 'tasks', p: { scope: 'all' } } },
+      { label: 'Новички: первые 30 дней', value: d.newbies, sub: d.newbieRisk ? `мало ходят: ${d.newbieRisk}` : 'все ходят', tone: d.newbieRisk ? 'warn' : undefined, go: { tab: 'retention', p: { view: 'newbie' } } },
       { label: 'Ушли за последние 3 месяца', value: d.former, sub: 'кого вернуть', tone: bad(d.former, true), go: { tab: 'retention', p: { view: 'groups' } } },
     ],
     lists: [],
