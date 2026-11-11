@@ -1,6 +1,6 @@
 // Шаг 18, часть 3. Обзоры менеджеров, рекомендации с обратной связью, прогноз плана, план до клиентов, оценка звонков по стандарту.
 import { useEffect, useState } from 'react';
-import { api, can, type Club, type Me } from './api.ts';
+import { api, can, type Club, type Me, navParams } from './api.ts';
 import { dt, errText, toast } from './ui.ts';
 import { rub } from './memberships.tsx';
 
@@ -26,7 +26,7 @@ export function ReviewsPage({ me, clubs, clubId, openPerson }: { me: Me; clubs: 
   const leader = can(me, 'dash.view') || can(me, 'ai.review');
   const tabs: [string, string, boolean][] = [['my', 'Мой обзор', can(me, 'crm.work')], ['team', 'Отдел', leader], ['forecast', 'Прогноз плана', can(me, 'dash.view') || can(me, 'plan.manage')],
     ['recs', 'Рекомендации', true], ['quality', 'Качество звонков', can(me, 'ai.review')]];
-  const [tab, setTab] = useState(leader ? 'team' : 'my');
+  const [tab, setTab] = useState(() => (tabs.some((t) => t[0] === navParams('reviews').tab && t[2]) ? navParams('reviews').tab : leader ? 'team' : 'my'));
   const [person, setPerson] = useState<{ id: string; name: string } | null>(null);
   const club = clubs.find((c) => c.id === clubId) ?? (clubs.length === 1 ? clubs[0] : null);
   if (!club) return <div className="card"><p style={{ margin: 0 }}>Выберите клуб вверху страницы.</p></div>;

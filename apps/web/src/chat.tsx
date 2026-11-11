@@ -1,7 +1,7 @@
 // Шаг 10. Переписка с клиентами: единое окно (Telegram и WhatsApp), чат в карточке клиента,
 // настройки: каналы, шаблоны, автосообщения, рабочее время и автоответ.
 import { useEffect, useRef, useState, type FormEvent } from 'react';
-import { api, can, type Club, type Me } from './api.ts';
+import { api, can, type Club, type Me, navParams } from './api.ts';
 import { dt, errText, toast } from './ui.ts';
 import { Md } from './fiscal.tsx';
 import guide from '../../../docs/03_Инструкции/Мессенджеры_Telegram_WhatsApp.md?raw';
@@ -34,7 +34,7 @@ const who = (c: Conv) => c.personName ?? c.title;
 /* ---------------- окно переписки ---------------- */
 export function ChatsPage({ me, clubs, clubId, openPerson }: { me: Me; clubs: Club[]; clubId: string; openPerson: (id: string) => void }) {
   const [list, setList] = useState<Conv[]>([]);
-  const [filter, setFilter] = useState('all');
+  const [filter, setFilter] = useState(() => navParams('chats').filter ?? 'all');
   const [open, setOpen] = useState<string | null>(null);
   const [q, setQ] = useState('');
   const load = () => api<Conv[]>('GET', `/api/msg/conversations?filter=${filter}${clubId !== 'all' ? `&clubId=${clubId}` : ''}`).then(setList).catch(() => {});

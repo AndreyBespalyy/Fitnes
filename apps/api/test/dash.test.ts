@@ -28,7 +28,7 @@ test('рабочий стол: стандартные наборы ролей, �
   assert.ok(own.widgets.includes('clubs'));
   assert.equal(own.canSetRoleDefaults, true);
   const mgr = (await req('GET', '/api/dash/layout', 'm.volkova')).json();
-  assert.deepEqual(mgr.widgets, ['my_plan', 'my_kpi']);
+  assert.deepEqual(mgr.widgets, ['my_day', 'my_plan', 'my_kpi']);
   assert.ok(!mgr.available.some((w: { id: string }) => w.id === 'day'));
   assert.equal((await req('GET', '/api/dash/widget/day', 'm.volkova')).statusCode, 403);
   // управляющий не видит «сравнение клубов» (только свой клуб) и не задаёт наборы для ролей сети

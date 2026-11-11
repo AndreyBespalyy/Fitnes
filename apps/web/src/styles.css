@@ -188,3 +188,10 @@ a.btn{text-decoration:none;color:inherit}
 .week7 .cls.cancelled{opacity:.55;text-decoration:line-through}
 .week7 .cls.done{background:var(--surface-2)}
 @media (max-width:900px){.week7{grid-template-columns:1fr}}
+/* Кликабельные окна рабочего стола: ведут в раздел с нужным фильтром */
+.click{cursor:pointer;position:relative;transition:border-color .12s,box-shadow .12s}
+.click:hover,.click:focus-visible{border-color:var(--accent);box-shadow:0 1px 0 var(--accent)}
+.click:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+.kpi-c .go{position:absolute;right:10px;top:8px;color:var(--muted);font-size:18px;line-height:1}
+.kpi-c.click:hover .go{color:var(--accent)}
+.kpi-c.click .lbl{padding-right:14px}

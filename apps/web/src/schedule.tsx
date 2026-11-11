@@ -1,6 +1,6 @@
 // Расписание занятий и запись клиентов: неделя по дням, запись с листом ожидания, отметка посещения, настройка залов, занятий и правил.
 import { useEffect, useState } from 'react';
-import { api, can, type Club, type Me } from './api.ts';
+import { api, can, type Club, type Me, navParams } from './api.ts';
 import { errText, toast } from './ui.ts';
 
 type Session = { id: string; typeName: string; kind: 'group' | 'personal'; roomName: string | null; trainerId: string | null; trainerName: string | null; localStart: string; localEnd: string;
@@ -21,11 +21,11 @@ const STATUS: Record<string, [string, string]> = { booked: ['записан', 'a
 export function SchedulePage({ me, clubs, clubId, openPerson }: { me: Me; clubs: Club[]; clubId: string; openPerson: (id: string) => void }) {
   const [club, setClub] = useState(clubId !== 'all' ? clubId : clubs[0]?.id ?? '');
   useEffect(() => { if (clubId !== 'all') setClub(clubId); }, [clubId]);
-  const [week, setWeek] = useState(monday(iso(new Date())));
+  const [week, setWeek] = useState(() => monday(navParams('schedule').date ?? iso(new Date())));
   const [list, setList] = useState<Session[]>([]);
   const [setup, setSetup] = useState<Setup | null>(null);
   const [trainer, setTrainer] = useState('');
-  const [open, setOpen] = useState<string | null>(null);
+  const [open, setOpen] = useState<string | null>(() => navParams('schedule').session ?? null);
   const [view, setView] = useState<'week' | 'new' | 'setup'>('week');
   const manage = can(me, 'schedule.manage');
   const isTrainer = me.roles.some((r) => r.code === 'trainer');
@@ -33,7 +33,7 @@ export function SchedulePage({ me, clubs, clubId, openPerson }: { me: Me; clubs:
   const loadSetup = () => club && api<Setup>('GET', `/api/schedule/setup?clubId=${club}`).then(setSetup).catch((x) => toast(errText(x)));
   useEffect(() => { load(); }, [club, week, trainer]);
   useEffect(() => { loadSetup(); }, [club]);
-  useEffect(() => { if (isTrainer && !trainer) setTrainer(me.id); }, []);
+  useEffect(() => { if ((isTrainer || navParams('schedule').mine) && !trainer) setTrainer(me.id); }, []);
   if (!club) return <p className="muted">Клубов нет.</p>;
   const today = iso(new Date());
   return (

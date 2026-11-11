@@ -5,7 +5,7 @@ import { CallsPage } from './calls.tsx';
 import { HotPage } from './hot.tsx';
 import { DashPage } from './dash.tsx';
 import { useEffect, useState, type FormEvent } from 'react';
-import { api, ApiError, can, clearDeviceData, MODEL, MODEL_SHORT, type Club, type Me, type Person, type RoleDef, type Staff } from './api.ts';
+import { api, ApiError, can, clearDeviceData, setNavIntent, type Go, MODEL, MODEL_SHORT, type Club, type Me, type Person, type RoleDef, type Staff } from './api.ts';
 import { errText, toast as alertOk } from './ui.ts';
 import { BoardPage, LeadsPage, PersonCard, PipelinesAdmin, TasksPage } from './crm.tsx';
 import { TariffsPage } from './memberships.tsx';
@@ -89,12 +89,17 @@ function ChangePassword({ me, forced, onDone, onLogout }: { me: Me; forced?: boo
 type Tab = 'dash' | 'hot' | 'calls' | 'leads' | 'board' | 'tasks' | 'home' | 'clubs' | 'tariffs' | 'contracts' | 'site' | 'fiscal' | 'finance' | 'import' | 'chats' | 'access' | 'messaging' | 'pipelines' | 'staff' | 'stafftime' | 'config' | 'reviews' | 'onboarding' | 'privacy' | 'system' | 'help' | 'schedule' | 'retention' | 'profile';
 
 function Shell({ me, onLogout }: { me: Me; onLogout: () => void }) {
-  const isAdmin = can(me, 'clubs.manage') || can(me, 'staff.manage');
-  const firstTab: Tab = can(me, 'dash.view') || can(me, 'crm.work') ? 'dash' : can(me, 'crm.work') ? 'tasks' : can(me, 'leads.create') ? 'leads' : isAdmin ? 'clubs' : 'home';
-  const urlTab = new URLSearchParams(location.search).get('tab') as Tab | null;
+  const firstTab: Tab = 'dash';
+  const urlQs = new URLSearchParams(location.search);
+  const urlTab = urlQs.get('tab') as Tab | null;
+  // Ссылка из сводки или уведомления: ?tab=finance&view=debts — раздел откроется сразу с нужным фильтром
+  if (urlTab && [...urlQs.keys()].length > 1) setNavIntent({ tab: urlTab, p: Object.fromEntries([...urlQs.entries()].filter(([k]) => k !== 'tab')) });
   const [tab, setTabState] = useState<Tab>(urlTab ?? firstTab);
   const [more, setMore] = useState(false);
-  const setTab = (t: Tab) => { setTabState(t); setMore(false); window.scrollTo(0, 0); };
+  const setTab = (t: Tab) => { setNavIntent(null); setTabState(t); setMore(false); window.scrollTo(0, 0); };
+  /** Переход с рабочего стола: раздел с фильтром */
+  const go = (g: Go) => {
+    setNavIntent(g); setTabState(g.tab as Tab); setMore(false); window.scrollTo(0, 0); };
   // Нажали на уведомление — открываем нужный раздел
   useEffect(() => {
     registerServiceWorker((url) => { const t = new URL(url, location.origin).searchParams.get('tab') as Tab | null; if (t) setTab(t); });
@@ -110,7 +115,7 @@ function Shell({ me, onLogout }: { me: Me; onLogout: () => void }) {
   const logout = async () => { await api('POST', '/api/auth/logout').catch(() => {}); clearDeviceData(); onLogout(); };
   const roleNames = me.roles.map((r) => r.name).join(', ');
   const tabs: [Tab, string, boolean][] = [
-    ['dash', 'Рабочий стол', can(me, 'dash.view') || can(me, 'crm.work')],
+    ['dash', 'Рабочий стол', true],
     ['tasks', 'Задачи', can(me, 'crm.work')],
     ['hot', 'Кому звонить', can(me, 'crm.work')],
     ['calls', 'Звонки', can(me, 'crm.work')],
@@ -163,7 +168,7 @@ function Shell({ me, onLogout }: { me: Me; onLogout: () => void }) {
         <div className={`tabs main-tabs ${more ? 'open' : ''}`} role="group" aria-label="Разделы">
           {visible.map(([k, t]) => <button key={k} aria-pressed={tab === k} onClick={() => setTab(k)}>{t}</button>)}
         </div>
-        {tab === 'dash' && <DashPage me={me} clubs={clubs} clubId={clubId} openPerson={setPersonId} />}
+        {tab === 'dash' && <DashPage me={me} clubs={clubs} clubId={clubId} openPerson={setPersonId} go={go} canGo={(t) => visible.some((v) => v[0] === t)} pickClub={setClubId} />}
         {tab === 'hot' && <HotPage me={me} clubs={clubs} clubId={clubId} openPerson={setPersonId} />}
         {tab === 'calls' && <CallsPage me={me} clubs={clubs} clubId={clubId} openPerson={setPersonId} />}
         {tab === 'tasks' && <TasksPage key={ver} me={me} clubId={clubId} openPerson={setPersonId} />}

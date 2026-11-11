@@ -1,7 +1,7 @@
 /// <reference types="vite/client" />
 // Шаг 18, часть 4. Подключение клуба по чек-листу, демо-клуб, тариф платформы; раздел «Помощь»: инструкции и обращения в поддержку.
 import { useEffect, useState } from 'react';
-import { api, can, type Club, type Me } from './api.ts';
+import { api, can, type Club, type Me, navParams } from './api.ts';
 import { dt, errText, toast } from './ui.ts';
 import { Md } from './fiscal.tsx';
 
@@ -114,7 +114,7 @@ const KIND: Record<string, string> = { question: 'Вопрос', bug: 'Ошиб�
 const STATUS: Record<string, [string, string]> = { open: ['ждёт ответа', 'warn'], answered: ['есть ответ', 'ok'], closed: ['закрыто', ''] };
 
 export function HelpPage({ me, clubs, clubId, page }: { me: Me; clubs: Club[]; clubId: string; page: string }) {
-  const [view, setView] = useState<'guides' | 'support'>('guides');
+  const [view, setView] = useState<'guides' | 'support'>(() => (navParams('help').view === 'support' ? 'support' : 'guides'));
   const [q, setQ] = useState('');
   const [open, setOpen] = useState<string | null>(null);
   const found = GUIDES.filter((g) => !q.trim() || g.text.toLowerCase().includes(q.trim().toLowerCase()));

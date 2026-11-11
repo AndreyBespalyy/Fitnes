@@ -1,6 +1,6 @@
 // Возврат бывших клиентов (группы, кампании) и досрочное продление.
 import { useEffect, useState } from 'react';
-import { api, type Club, type Me } from './api.ts';
+import { api, type Club, type Me, navParams } from './api.ts';
 import { dt, errText, toast } from './ui.ts';
 
 type Group = { key: string; title: string; monthsFrom: number; monthsTo: number | null; count: number; message: number; call: number; products: [string, number][] };
@@ -18,7 +18,7 @@ const DEFAULT_TEXT = '{имя}, давно не виделись! В клубе 
 export function RetentionPage({ me: _me, clubs, clubId, openPerson }: { me: Me; clubs: Club[]; clubId: string; openPerson: (id: string) => void }) {
   const [club, setClub] = useState(clubId !== 'all' ? clubId : clubs[0]?.id ?? '');
   useEffect(() => { if (clubId !== 'all') setClub(clubId); }, [clubId]);
-  const [view, setView] = useState<'groups' | 'campaigns' | 'early' | 'surveys'>('groups');
+  const [view, setView] = useState<'groups' | 'campaigns' | 'early' | 'surveys'>(() => (['groups', 'campaigns', 'early', 'surveys'].includes(navParams('retention').view) ? navParams('retention').view as 'groups' : 'groups'));
   const [groups, setGroups] = useState<Group[] | null>(null);
   const [draft, setDraft] = useState<{ monthsFrom: number; monthsTo: number | null; product: string } | null>(null);
   const [campaigns, setCampaigns] = useState<Campaign[]>([]);

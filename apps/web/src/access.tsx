@@ -2,7 +2,7 @@
 // а в карточке клиента — карты, браслеты, QR и посещения. Модель турникета подключим на финише.
 import { useEffect, useState, type FormEvent } from 'react';
 import qrcode from 'qrcode-generator';
-import { api, can, type Club, type Me, type Person } from './api.ts';
+import { api, can, type Club, type Me, type Person, navParams } from './api.ts';
 import { dt, errText, toast } from './ui.ts';
 import { Md } from './fiscal.tsx';
 import guide from '../../../docs/03_Инструкции/Турникеты_и_шлюз.md?raw';
@@ -29,7 +29,7 @@ export function AccessPage({ me, clubs, clubId, openPerson }: { me: Me; clubs: C
   const views: [string, string, boolean][] = [
     ['desk', 'Ресепшн', can(me, 'acs.work')], ['report', 'Отчёт', can(me, 'acs.manage')], ['setup', 'Настройка', can(me, 'acs.manage')], ['guide', 'Инструкция', true]];
   const allowed = views.filter((v) => v[2]);
-  const [view, setView] = useState(allowed[0][0]);
+  const [view, setView] = useState(() => { const v = navParams('access').view; return allowed.some((a) => a[0] === v) ? v : allowed[0][0]; });
   if (!club) return <p className="muted">Клубов нет.</p>;
   return (
     <div className="acs" style={{ display: 'grid', gap: 14 }}>

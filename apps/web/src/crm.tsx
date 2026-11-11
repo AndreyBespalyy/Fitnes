@@ -1,6 +1,6 @@
 import { DialButton } from './mobile.tsx';
 import { useEffect, useState, type FormEvent } from 'react';
-import { api, can, type Club, type Me } from './api.ts';
+import { api, can, type Club, type Me, navParams } from './api.ts';
 import { dt, errText, fromLocal, localInput, toast } from './ui.ts';
 import { MembershipsBlock } from './memberships.tsx';
 import { PersonChats } from './chat.tsx';
@@ -44,6 +44,9 @@ export function LeadsPage({ me, clubs, clubId, openPerson }: { me: Me; clubs: Cl
   const [form, setForm] = useState({ fullName: '', phone: '', sourceId: '', comment: '' });
   const [err, setErr] = useState('');
   const club = useClubChoice(clubs, clubId);
+  // С рабочего стола: «лиды ждут первого ответа»
+  const [noResp, setNoResp] = useState(() => navParams('leads').filter === 'noresponse');
+  const shownLeads = noResp ? leads.filter((l) => !l.respondedAt) : leads;
   const reload = () => api<Lead[]>('GET', `/api/leads${clubId !== 'all' ? `?clubId=${clubId}` : ''}`).then(setLeads).catch((x) => setErr(errText(x)));
   useEffect(() => { reload(); }, [clubId]);
   useEffect(() => { api<Source[]>('GET', '/api/lead-sources').then((s) => setSources(s.filter((x) => x.isActive))).catch(() => {}); }, []);
@@ -71,9 +74,10 @@ export function LeadsPage({ me, clubs, clubId, openPerson }: { me: Me; clubs: Cl
         <p className="small" style={{ margin: 0 }}>Если клиент с таким телефоном уже есть в сети, второй клиент не создаётся: обращение добавится к его карточке.</p>
       </form>
       {err && <div className="err">{err}</div>}
+      <div className="tabs" role="group" aria-label="Какие лиды"><button aria-pressed={!noResp} onClick={() => setNoResp(false)}>Все</button><button aria-pressed={noResp} onClick={() => setNoResp(true)}>Ждут первого ответа ({leads.filter((l) => !l.respondedAt).length})</button></div>
       <div className="card"><div className="tbl"><table>
         <thead><tr><th>Когда</th><th>Клиент</th><th>Источник</th><th>Ответственный</th><th>Первый ответ</th>{clubId === 'all' && <th>Клуб</th>}</tr></thead>
-        <tbody>{leads.map((l) => (
+        <tbody>{shownLeads.map((l) => (
           <tr key={l.id}>
             <td className="num">{dt(l.createdAt)}</td>
             <td><button className="btn sm" onClick={() => openPerson(l.personId)}>{l.personName}</button> {l.isRepeat && <span className="chip">повторно</span>}
@@ -142,7 +146,7 @@ export function BoardPage({ clubs, clubId, openPerson }: { clubs: Club[]; clubId
 /* ---------- Задачи ---------- */
 export function TasksPage({ me, clubId, openPerson }: { me: Me; clubId: string; openPerson: (id: string) => void }) {
   const [tasks, setTasks] = useState<Task[]>([]);
-  const [scope, setScope] = useState<'mine' | 'all'>('mine');
+  const [scope, setScope] = useState<'mine' | 'all'>(() => (navParams('tasks').scope === 'all' && can(me, 'crm.view_all') ? 'all' : 'mine'));
   const [doing, setDoing] = useState<Task | null>(null);
   const [call, setCall] = useState<string | null>(null);
   const reload = () => api<Task[]>('GET', `/api/tasks?scope=${scope}${clubId !== 'all' ? `&clubId=${clubId}` : ''}`).then(setTasks).catch(() => setTasks([]));

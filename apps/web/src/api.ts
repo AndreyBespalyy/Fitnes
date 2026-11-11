@@ -89,3 +89,10 @@ export async function api<T>(method: string, url: string, body?: unknown): Promi
 export const MODEL: Record<string, string> = { term: 'Абонементы на срок', subscription: 'Подписка (ежемесячное списание)' };
 export const MODEL_SHORT: Record<string, string> = { term: 'абонементы', subscription: 'подписка' };
 export const can = (me: Me, p: string) => me.permissions.includes('*') || me.permissions.includes(p);
+
+/* ---------- Переходы с рабочего стола: раздел + фильтр, который раздел применит при открытии ---------- */
+export type Go = { tab: string; p?: Record<string, string> };
+let navIntent: Go | null = null;
+export const setNavIntent = (g: Go | null) => { navIntent = g; };
+/** Параметры перехода для раздела (или пустой объект). Читать в начальном значении состояния раздела */
+export const navParams = (tab: string): Record<string, string> => (navIntent?.tab === tab ? navIntent.p ?? {} : {});
