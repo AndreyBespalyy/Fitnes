@@ -53,6 +53,9 @@ async function hotList(db: Db, ctx: Ctx, q: { clubId?: string; kind?: string; se
   const rows = (await db.query(
     `${LIST_SELECT} where ($1::uuid is null or s.club_id = $1) and ($2::text is null or s.kind = $2) and s.segment = any($3)
        and ($4::uuid is null or s.owner_id = $4 or s.owner_id is null)
+       and p.merged_into_id is null
+       -- стоп-лист отдела продаж: «не звонить», отказ, отложено до даты и т. п. (salesOps.ts)
+       and not exists (select 1 from person_call_blocks cb where cb.person_id = s.person_id and cb.removed_at is null and (cb.until is null or cb.until > current_date))
      order by (s.segment = 'hot') desc, s.score desc limit $5`,
     [q.clubId || null, q.kind && KINDS.includes(q.kind as Kind) ? q.kind : null, segs, mine ? q.userId ?? ctx.userId : null, q.limit ?? 200])).rows;
   return rows.map((r) => ({ ...r, phone: maskPhone(r.phone), kindName: KIND_NAME[r.kind as Kind], priority: Math.round(r.score * 100) }));

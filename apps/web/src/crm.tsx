@@ -12,12 +12,13 @@ import { PersonChats } from './chat.tsx';
 import { PersonPasses } from './access.tsx';
 import { PersonCards } from './payments.tsx';
 import { CallDialog, PersonCalls } from './calls.tsx';
+import { PersonCallFlags, TakeLeadButton } from './salesOps.tsx';
 
 type Stage = { id: string; name: string; kind: 'open' | 'won' | 'lost'; openCount?: number };
 type Pipeline = { id: string; clubId: string; name: string; purpose: string; isDefaultForLeads: boolean; isActive: boolean; stages: Stage[] };
 type Source = { id: string; code: string; name: string; channel: string; isActive: boolean; hasApiKey: boolean };
 type Lead = { id: string; createdAt: string; clubName: string; personId: string; personName: string; sourceName: string | null; comment: string | null;
-  isRepeat: boolean; assigneeName: string | null; dueAt: string; respondedAt: string | null; responseState: 'in_time' | 'late' | 'overdue' | 'waiting' };
+  isRepeat: boolean; assigneeName: string | null; dueAt: string; respondedAt: string | null; takenAt?: string | null; responseState: 'in_time' | 'late' | 'overdue' | 'waiting' };
 type Opp = { id: string; stageId: string; personId: string; personName: string; ownerName: string | null; nextTaskAt: string | null; overdue: boolean };
 type Task = { id: string; kind: string; title: string; dueAt: string; doneAt: string | null; result: string | null; personId: string | null; personName: string | null;
   opportunityId: string | null; assigneeName: string | null; overdue: boolean; callId: string | null };
@@ -87,7 +88,8 @@ export function LeadsPage({ me, clubs, clubId, openPerson }: { me: Me; clubs: Cl
             <td><button className="btn sm" onClick={() => openPerson(l.personId)}>{l.personName}</button> {l.isRepeat && <span className="chip">повторно</span>}
               {l.comment && <div className="small">{l.comment}</div>}</td>
             <td>{l.sourceName ?? '—'}</td><td>{l.assigneeName ?? <span className="chip bad">не назначен</span>}</td>
-            <td><span className={`chip ${RESPONSE[l.responseState][1]}`}>{RESPONSE[l.responseState][0]}</span><div className="small">до {dt(l.dueAt)}</div></td>
+            <td><span className={`chip ${RESPONSE[l.responseState][1]}`}>{RESPONSE[l.responseState][0]}</span><div className="small">до {dt(l.dueAt)}</div>
+              {!l.respondedAt && (l.takenAt ? <div className="small muted">в работе</div> : can(me, 'crm.work') && <TakeLeadButton leadId={l.id} onDone={reload} />)}</td>
             {clubId === 'all' && <td>{l.clubName}</td>}
           </tr>))}</tbody>
       </table></div>{leads.length === 0 && <p className="muted">Лидов пока нет.</p>}
@@ -267,6 +269,7 @@ export function PersonCard({ me, id, onClose }: { me: Me; id: string; onClose: (
           {can(me, 'memberships.view') && <PersonCards me={me} personId={card.person.id} autopayEnabled={card.person.autopayEnabled} />}
           {can(me, 'messages.work') && <PersonChats me={me} personId={card.person.id} homeClubId={card.person.homeClubId}
             marketingConsent={card.person.marketingConsent} optOut={card.person.messagingOptOut} reload={reload} />}
+          {can(me, 'persons.view') && <PersonCallFlags personId={card.person.id} />}
           {can(me, 'persons.view') && <UpsellBlock personId={card.person.id} clubId={card.person.homeClubId} />}
           <MembershipsBlock me={me} personId={card.person.id} homeClubId={card.person.homeClubId} />
           {can(me, 'memberships.view') && <FamilyBlock me={me} personId={card.person.id} clubId={card.person.homeClubId} />}
