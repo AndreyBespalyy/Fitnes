@@ -18,7 +18,7 @@ const DEFAULT_TEXT = '{имя}, давно не виделись! В клубе 
 export function RetentionPage({ me: _me, clubs, clubId, openPerson }: { me: Me; clubs: Club[]; clubId: string; openPerson: (id: string) => void }) {
   const [club, setClub] = useState(clubId !== 'all' ? clubId : clubs[0]?.id ?? '');
   useEffect(() => { if (clubId !== 'all') setClub(clubId); }, [clubId]);
-  const [view, setView] = useState<'groups' | 'campaigns' | 'early'>('groups');
+  const [view, setView] = useState<'groups' | 'campaigns' | 'early' | 'surveys'>('groups');
   const [groups, setGroups] = useState<Group[] | null>(null);
   const [draft, setDraft] = useState<{ monthsFrom: number; monthsTo: number | null; product: string } | null>(null);
   const [campaigns, setCampaigns] = useState<Campaign[]>([]);
@@ -34,6 +34,7 @@ export function RetentionPage({ me: _me, clubs, clubId, openPerson }: { me: Me; 
           <button aria-pressed={view === 'groups'} onClick={() => setView('groups')}>Бывшие клиенты</button>
           <button aria-pressed={view === 'campaigns'} onClick={() => setView('campaigns')}>Кампании</button>
           <button aria-pressed={view === 'early'} onClick={() => setView('early')}>Досрочное продление</button>
+          <button aria-pressed={view === 'surveys'} onClick={() => setView('surveys')}>Опросы после визита</button>
         </div>
         {clubId === 'all' && <select value={club} onChange={(e) => setClub(e.target.value)}>{clubs.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}</select>}
       </div>
@@ -70,6 +71,7 @@ export function RetentionPage({ me: _me, clubs, clubId, openPerson }: { me: Me; 
         </div>
       )}
       {view === 'early' && <EarlyView club={club} openPerson={openPerson} />}
+      {view === 'surveys' && <SurveysView club={club} openPerson={openPerson} />}
       {open && <CampaignDrawer id={open} onClose={() => { setOpen(null); loadCampaigns(); }} openPerson={openPerson} />}
     </>
   );
@@ -177,6 +179,76 @@ function EarlyView({ club, openPerson }: { club: string; openPerson: (id: string
             <td><span className={`chip ${o.renewed ? 'ok' : ST[o.status][1]}`}>{o.renewed ? 'продлил' : ST[o.status][0]}</span>{o.repliedAt && !o.renewed && <div className="small">ответил</div>}{o.reason && <div className="small muted">{o.reason}</div>}</td>
           </tr>)}
             {!e.offers.length && <tr><td colSpan={4} className="small muted">Предложений пока не было</td></tr>}</tbody></table></div>
+      </div>
+    </div>
+  );
+}
+
+type SurveySettings = { enabled: boolean; firstVisit: boolean; day30: boolean; quarterly: boolean; question: string; lowMax: number; highMin: number; taskHours: number; yandexUrl: string | null; gisUrl: string | null };
+type SurveyData = {
+  settings: SurveySettings;
+  report: { index: number | null; n: number; sent: number; answeredPct: number | null; promoters: number; passives: number; detractors: number;
+    byKind: { kind: string; index: number | null; n: number }[]; byStaff: { name: string; index: number | null; n: number }[] };
+  recent: { id: string; personId: string; name: string; kind: string; status: string; score: number | null; comment: string | null; createdAt: string; answeredAt: string | null; reviewAskedAt: string | null; staff: string | null }[];
+};
+const KIND: Record<string, string> = { first_visit: 'после первого визита', day30: 'через месяц', quarterly: 'раз в квартал' };
+const iso = (d: Date) => d.toISOString().slice(0, 10);
+function SurveysView({ club, openPerson }: { club: string; openPerson: (id: string) => void }) {
+  const [days, setDays] = useState(30);
+  const [d, setD] = useState<SurveyData | null>(null);
+  const [s, setS] = useState<SurveySettings | null>(null);
+  const load = () => api<SurveyData>('GET', `/api/surveys?clubId=${club}&from=${iso(new Date(Date.now() - days * 86400_000))}&to=${iso(new Date())}`).then((r) => { setD(r); setS(r.settings); }).catch((x) => toast(errText(x)));
+  useEffect(() => { load(); }, [club, days]);
+  if (!d || !s) return <p className="muted">Загрузка…</p>;
+  const save = async () => { try { await api('PUT', '/api/surveys/settings', { clubId: club, ...s }); toast('Сохранено'); load(); } catch (x) { toast(errText(x)); } };
+  const sign = (v: number | null) => (v == null ? '—' : v > 0 ? `+${v}` : String(v));
+  const r = d.report;
+  return (
+    <div className="grid2">
+      <div style={{ display: 'grid', gap: 12, alignContent: 'start' }}>
+        <div className="card">
+          <div className="row between" style={{ flexWrap: 'wrap', gap: 8 }}>
+            <h2>Индекс лояльности</h2>
+            <select value={days} onChange={(e) => setDays(Number(e.target.value))} style={{ width: 'auto' }}><option value={7}>7 дней</option><option value={30}>30 дней</option><option value={90}>90 дней</option><option value={365}>год</option></select>
+          </div>
+          <div className="row" style={{ gap: 16, alignItems: 'baseline', flexWrap: 'wrap' }}>
+            <b style={{ fontSize: 32 }} className={r.index == null ? '' : r.index >= 50 ? 'ok' : r.index >= 0 ? 'warn' : 'bad'}>{sign(r.index)}</b>
+            <span className="small muted">оценок {r.n} из {r.sent}{r.answeredPct != null ? ` (${r.answeredPct}%)` : ''} · довольных {r.promoters} · нейтральных {r.passives} · недовольных {r.detractors}</span>
+          </div>
+          <p className="small muted">Индекс = доля поставивших {s.highMin}–10 минус доля поставивших 0–{s.lowMax}, от −100 до +100.</p>
+          <div className="small">{r.byKind.map((k) => <span key={k.kind} style={{ marginRight: 12 }}>{KIND[k.kind]}: <b>{sign(k.index)}</b> <span className="muted">({k.n})</span></span>)}</div>
+          {r.byStaff.length > 0 && <div className="tbl" style={{ marginTop: 8 }}><table><thead><tr><th>Продавал абонемент</th><th className="num">Индекс</th><th className="num">Оценок</th></tr></thead>
+            <tbody>{r.byStaff.map((x) => <tr key={x.name}><td>{x.name}</td><td className="num">{sign(x.index)}</td><td className="num">{x.n}</td></tr>)}</tbody></table></div>}
+        </div>
+        <div className="card">
+          <h2>Ответы</h2>
+          <div className="tbl"><table><thead><tr><th>Клиент</th><th>Оценка</th><th className="hide-narrow">Когда</th></tr></thead>
+            <tbody>{d.recent.map((x) => <tr key={x.id}>
+              <td><button className="btn sm" onClick={() => openPerson(x.personId)}>{x.name}</button><div className="small muted">{KIND[x.kind]}</div></td>
+              <td>{x.score != null ? <b className={x.score <= s.lowMax ? 'bad' : x.score >= s.highMin ? 'ok' : ''}>{x.score}</b> : <span className="small muted">{x.status === 'expired' ? 'не ответил' : 'ждём ответа'}</span>}
+                {x.comment && <div className="small">«{x.comment}»</div>}{x.reviewAskedAt && <div className="small muted">попросили отзыв</div>}</td>
+              <td className="small hide-narrow">{dt(x.answeredAt ?? x.createdAt)}</td>
+            </tr>)}
+              {!d.recent.length && <tr><td colSpan={3} className="small muted">Опросов за период не было</td></tr>}</tbody></table></div>
+        </div>
+      </div>
+      <div className="card" style={{ display: 'grid', gap: 6, alignContent: 'start' }}>
+        <h2>Настройки опроса</h2>
+        <p className="small muted" style={{ margin: 0 }}>Клиент отвечает цифрой от 0 до 10 в мессенджере. Низкая оценка — задача управляющему разобраться, высокая — просьба оставить отзыв на картах. Один клиент получает не больше одного опроса в месяц; кто отказался от сообщений, опросы не получает.</p>
+        <label className="row" style={{ gap: 8 }}><input type="checkbox" style={{ width: 'auto' }} checked={s.enabled} onChange={(x) => setS({ ...s, enabled: x.target.checked })} /> Отправлять опросы</label>
+        <label className="row" style={{ gap: 8 }}><input type="checkbox" style={{ width: 'auto' }} checked={s.firstVisit} onChange={(x) => setS({ ...s, firstVisit: x.target.checked })} /> После первого визита</label>
+        <label className="row" style={{ gap: 8 }}><input type="checkbox" style={{ width: 'auto' }} checked={s.day30} onChange={(x) => setS({ ...s, day30: x.target.checked })} /> Через 30 дней после первой покупки</label>
+        <label className="row" style={{ gap: 8 }}><input type="checkbox" style={{ width: 'auto' }} checked={s.quarterly} onChange={(x) => setS({ ...s, quarterly: x.target.checked })} /> Раз в квартал действующим клиентам</label>
+        <label className="f">Текст вопроса<textarea rows={4} value={s.question} onChange={(x) => setS({ ...s, question: x.target.value })} /></label>
+        <div className="row" style={{ gap: 8 }}>
+          <label className="f">Недоволен — до<input type="number" min={0} max={9} value={s.lowMax} onChange={(x) => setS({ ...s, lowMax: Number(x.target.value) })} /></label>
+          <label className="f">Доволен — от<input type="number" min={1} max={10} value={s.highMin} onChange={(x) => setS({ ...s, highMin: Number(x.target.value) })} /></label>
+          <label className="f">Срок задачи, ч<input type="number" min={1} max={168} value={s.taskHours} onChange={(x) => setS({ ...s, taskHours: Number(x.target.value) })} /></label>
+        </div>
+        <label className="f">Ссылка на клуб в Яндекс Картах<input placeholder="https://yandex.ru/maps/org/…" value={s.yandexUrl ?? ''} onChange={(x) => setS({ ...s, yandexUrl: x.target.value })} /></label>
+        <label className="f">Ссылка на клуб в 2ГИС<input placeholder="https://2gis.ru/…" value={s.gisUrl ?? ''} onChange={(x) => setS({ ...s, gisUrl: x.target.value })} /></label>
+        {!s.yandexUrl && !s.gisUrl && <p className="small warn" style={{ margin: 0 }}>Пока ссылок нет, довольным клиентам просто приходит «спасибо» без просьбы об отзыве.</p>}
+        <button className="btn pri" onClick={save}>Сохранить</button>
       </div>
     </div>
   );
