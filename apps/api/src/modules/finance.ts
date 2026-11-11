@@ -351,7 +351,7 @@ export function financeRoutes(app: FastifyInstance, pool: pg.Pool) {
       return {
         month: r.month, inflowKop: inflow, refundsKop: refunds, expensesKop: expenses, netKop: inflow - refunds - expenses,
         inflowByMethod: group((x) => x.direction === 'in', (x) => METHOD[x.method] ?? x.method),
-        inflowByCategory: group((x) => x.direction === 'in', (x) => CAT_NAME[x.sale_category] ?? (x.sale_category === 'goods' ? 'Товары и услуги' : 'Прочее')),
+        inflowByCategory: group((x) => x.direction === 'in', (x) => CAT_NAME[x.sale_category] ?? ({ goods: 'Товары и услуги', deposit: 'Пополнение депозита', gift: 'Подарочные сертификаты' } as Record<string, string>)[x.sale_category] ?? 'Прочее'),
         expensesByCategory: group((x) => x.kind === 'expense', (x) => x.expense_name ?? x.expense_category),
       };
     });

@@ -2,6 +2,7 @@
 import { Fragment, useEffect, useState } from 'react';
 import { api, type Club, type Me } from './api.ts';
 import { dt, errText, toast } from './ui.ts';
+import { GiftsView } from './gifts.tsx';
 
 type Goods = { id: string; name: string; kind: 'goods' | 'service'; category: string | null; priceKop: number; stock: number | null; minStock: number | null; isActive: boolean; sort: number; low: boolean };
 type Person = { id: string; fullName: string; phone: string | null };
@@ -12,12 +13,12 @@ type Report = {
 };
 const rub = (k: number) => `${Math.round(k / 100).toLocaleString('ru-RU')} ₽`;
 const toKop = (s: string) => Math.round(Number(s.replace(',', '.').replace(/\s/g, '')) * 100);
-const METHOD: Record<string, string> = { cash: 'Наличные', card_terminal: 'Карта', on_account: 'На счёт' };
+const METHOD: Record<string, string> = { cash: 'Наличные', card_terminal: 'Карта', on_account: 'На счёт', deposit: 'С депозита' };
 
 export function ShopPage({ me: _me, clubs, clubId, openPerson }: { me: Me; clubs: Club[]; clubId: string; openPerson: (id: string) => void }) {
   const [club, setClub] = useState(clubId !== 'all' ? clubId : clubs[0]?.id ?? '');
   useEffect(() => { if (clubId !== 'all') setClub(clubId); }, [clubId]);
-  const [view, setView] = useState<'sell' | 'stock' | 'report'>('sell');
+  const [view, setView] = useState<'sell' | 'stock' | 'report' | 'gifts'>('sell');
   const [data, setData] = useState<{ items: Goods[]; canManage: boolean; canSell: boolean } | null>(null);
   const load = () => club && api<NonNullable<typeof data>>('GET', `/api/goods?clubId=${club}`).then(setData).catch((x) => toast(errText(x)));
   useEffect(() => { load(); }, [club]);
@@ -29,6 +30,7 @@ export function ShopPage({ me: _me, clubs, clubId, openPerson }: { me: Me; clubs
           {data?.canSell && <button aria-pressed={view === 'sell'} onClick={() => setView('sell')}>Продажа</button>}
           <button aria-pressed={view === 'stock'} onClick={() => setView('stock')}>Товары и остатки</button>
           <button aria-pressed={view === 'report'} onClick={() => setView('report')}>Отчёт</button>
+          <button aria-pressed={view === 'gifts'} onClick={() => setView('gifts')}>Сертификаты</button>
         </div>
         {clubId === 'all' && <select value={club} onChange={(e) => setClub(e.target.value)} style={{ width: 'auto' }}>{clubs.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}</select>}
       </div>
@@ -36,6 +38,7 @@ export function ShopPage({ me: _me, clubs, clubId, openPerson }: { me: Me; clubs
         {view === 'sell' && data.canSell && <Sell club={club} items={data.items.filter((g) => g.isActive)} onSold={load} />}
         {view === 'stock' && <Stock club={club} items={data.items} manage={data.canManage} reload={load} />}
         {view === 'report' && <ReportView club={club} openPerson={openPerson} />}
+        {view === 'gifts' && <GiftsView club={club} openPerson={openPerson} />}
       </>}
     </>
   );
@@ -60,7 +63,7 @@ function Sell({ club, items, onSold }: { club: string; items: Goods[]; onSold: (
     setErr(''); setBusy(true);
     try {
       const r = await api<{ totalKop: number; receiptId: string | null }>('POST', '/api/goods/sales', { clubId: club, personId: person?.id ?? null, method, items: lines.map((l) => ({ goodsId: l.g.id, qty: l.qty })) });
-      toast(method ? `Продано на ${rub(r.totalKop)}${r.receiptId ? ', чек отправлен в кассу' : ''}` : `Записано на счёт клиента: ${rub(r.totalKop)}`);
+      toast(method === 'deposit' ? `Оплачено с депозита: ${rub(r.totalKop)}` : method ? `Продано на ${rub(r.totalKop)}${r.receiptId ? ', чек отправлен в кассу' : ''}` : `Записано на счёт клиента: ${rub(r.totalKop)}`);
       setCart({}); setPerson(null); setQ(''); onSold();
     } catch (x) { setErr(errText(x)); } finally { setBusy(false); }
   };
@@ -97,8 +100,9 @@ function Sell({ club, items, onSold }: { club: string; items: Goods[]; onSold: (
           <button className="btn pri" disabled={!lines.length || busy} onClick={() => pay('card_terminal')}>Карта</button>
           <button className="btn pri" disabled={!lines.length || busy} onClick={() => pay('cash')}>Наличные</button>
           <button className="btn" disabled={!lines.length || busy || !person} onClick={() => pay(null)} title={person ? '' : 'Сначала выберите клиента'}>На счёт клиента</button>
+          <button className="btn" disabled={!lines.length || busy || !person} onClick={() => pay('deposit')} title={person ? '' : 'Сначала выберите клиента'}>С депозита</button>
         </div>
-        <p className="small muted" style={{ margin: 0 }}>Наличные — только при открытой кассовой смене. «На счёт» — клиент оплатит позже: долг виден в его карточке и в «Финансах».</p>
+        <p className="small muted" style={{ margin: 0 }}>Наличные — только при открытой кассовой смене. «На счёт» — клиент оплатит позже: долг виден в его карточке и в «Финансах». «С депозита» — списать с внутреннего счёта клиента.</p>
       </div>
     </div>
   );

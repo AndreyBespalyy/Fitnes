@@ -25,7 +25,7 @@ const STATE: Record<string, [string, string]> = {
   active: ['действует', 'ok'], debt_grace: ['долг', 'warn'], debt_blocked: ['проход закрыт: долг', 'bad'], frozen: ['заморожен', 'acc'],
   unsigned: ['проход закрыт: нет подписи', 'bad'], not_started: ['ещё не начался', ''], expired: ['закончился', ''], used_up: ['посещения закончились', ''], cancelled: ['расторгнут', 'bad'],
 };
-const PAY: Record<string, string> = { online: 'онлайн',  cash: 'наличные', card_terminal: 'карта (терминал)', sbp: 'СБП' };
+const PAY: Record<string, string> = { online: 'онлайн',  cash: 'наличные', card_terminal: 'карта (терминал)', sbp: 'СБП', deposit: 'с депозита', gift: 'подарочный сертификат' };
 export const rub = (kop: number | null | undefined) => (kop === null || kop === undefined ? '—' : `${(kop / 100).toLocaleString('ru-RU')} ₽`);
 const d = (s: string | null) => (s ? s.split('-').reverse().join('.') : '—');
 const toKop = (s: string) => Math.round(Number(s.replace(',', '.').replace(/\s/g, '')) * 100);
@@ -249,6 +249,7 @@ export function MembershipsBlock({ me, personId, homeClubId }: { me: Me; personI
                     : <span className="row"><span className={`chip ${c.overdue ? 'bad' : 'warn'}`}>{c.overdue ? 'просрочен' : 'к оплате'}</span>
                       {canManage && <><button className="btn sm" onClick={() => act(() => api('POST', `/api/charges/${c.id}/mark-paid`, { method: 'card_terminal' }), 'Оплата картой отмечена')}>Картой</button>
                         <button className="btn sm" onClick={() => act(() => api('POST', `/api/charges/${c.id}/mark-paid`, { method: 'cash' }), 'Оплата наличными отмечена')}>Наличными</button></>}
+                      {(can(me, 'memberships.sell') || can(me, 'shifts.work')) && <button className="btn sm" title="Списать с депозита клиента" onClick={() => act(() => api('POST', `/api/charges/${c.id}/pay-deposit`), 'Оплачено с депозита')}>С депозита</button>}
                       {can(me, 'memberships.sell') && <PayLinkButton chargeId={c.id} />}</span>}
                 </div>))}</div>)}
             {m.contract && <ContractLine me={me} c={m.contract} reload={reload} />}

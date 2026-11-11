@@ -10,6 +10,7 @@ import { PERMISSIONS as P } from '../roles.ts';
 import { recordPayment } from './finance.ts';
 import { receiptForGoods } from './fiscal.ts';
 import { clubToday } from './memberships.ts';
+import { depositSpend } from './gifts.ts';
 
 const METHODS = ['cash', 'card_terminal'];
 type GoodsIn = { clubId?: string; name?: string; kind?: string; category?: string | null; priceKop?: number; minStock?: number | null; isActive?: boolean; sort?: number };
@@ -27,7 +28,9 @@ export async function sellGoods(db: Db, ctx: Pick<Ctx, 'tenantId' | 'userId' | '
   const items = (b.items ?? []).filter((i) => i && i.goodsId);
   if (!items.length) throw badRequest('Добавьте товар или услугу');
   const onAccount = !b.method;
-  if (!onAccount && !METHODS.includes(b.method!)) throw badRequest('Выберите способ оплаты');
+  const fromDeposit = b.method === 'deposit';
+  if (!onAccount && !fromDeposit && !METHODS.includes(b.method!)) throw badRequest('Выберите способ оплаты');
+  if (fromDeposit && !b.personId) throw badRequest('С депозита можно оплатить только клиенту: найдите его карточку');
   if (onAccount && !b.personId) throw badRequest('На счёт можно записать только клиенту: найдите его карточку');
   if (b.personId && !(await db.query('select 1 from persons where id = $1', [b.personId])).rowCount) throw badRequest('Клиент не найден');
   const lines: { g: { id: string; club_id: string; name: string; kind: string; stock: number | null; price_kop: string }; qty: number }[] = [];
@@ -57,7 +60,9 @@ export async function sellGoods(db: Db, ctx: Pick<Ctx, 'tenantId' | 'userId' | '
     if (l.g.kind === 'goods') await move(db, ctx, l.g, 'sale', -l.qty, { saleId });
   }
   let receiptId: string | null = null;
-  if (!onAccount) {
+  // С депозита: деньги пришли при пополнении (там и чек), второй платёж в журнал не пишется
+  if (fromDeposit) await depositSpend(db, ctx, { clubId: b.clubId, personId: b.personId!, amountKop: total, goodsSaleId: saleId, comment: `Покупка: ${title}` });
+  else if (!onAccount) {
     await recordPayment(db, ctx as never, { clubId: b.clubId, direction: 'in', kind: 'charge', amountKop: total, method: b.method!, personId: b.personId ?? null, saleCategory: 'goods' });
     receiptId = await receiptForGoods(db, ctx, { clubId: b.clubId, personId: b.personId ?? null, saleId, method: b.method!,
       items: lines.map((l) => ({ name: l.g.name, priceKop: Number(l.g.price_kop), quantity: l.qty, sumKop: Number(l.g.price_kop) * l.qty, commodity: l.g.kind === 'goods' })) });
