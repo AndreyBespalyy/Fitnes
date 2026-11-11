@@ -101,6 +101,15 @@ export async function timesheet(db: Db, clubId: string, from: string, to: string
 type Item = { code: string; title: string; basis: string; amountKop: number };
 
 /** Расчёт зарплаты за месяц: каждая строка с расшифровкой, по которой сотрудник может проверить сумму. */
+/** Стоимость проведённых персональных тренировок по тренерам: цена пакета клиента ÷ число тренировок в пакете */
+export async function personalValue(db: Db, clubId: string, from: string, to: string) {
+  return (await db.query(`select s.trainer_id as "userId", count(*)::int as n, coalesce(sum(m.amount_kop::numeric / nullif(p.visits_count, 0)), 0)::bigint as "valueKop"
+    from class_bookings b join class_sessions s on s.id = b.session_id join class_types t on t.id = s.type_id join clubs c on c.id = s.club_id
+      join memberships m on m.id = b.membership_id join products p on p.id = m.product_id
+    where s.club_id = $1 and t.kind = 'personal' and s.status = 'done' and s.trainer_id is not null and (b.status = 'attended' or b.charged)
+      and (s.starts_at at time zone c.timezone)::date between $2 and $3 group by s.trainer_id`, [clubId, from, to])).rows.map((r) => ({ userId: r.userId as string, n: r.n as number, valueKop: Number(r.valueKop) }));
+}
+
 export async function calcPayroll(db: Db, clubId: string, month: string, today: string) {
   const mi = monthInfo(month, today);
   const schemes = (await db.query(
@@ -112,6 +121,7 @@ export async function calcPayroll(db: Db, clubId: string, month: string, today: 
   const sales = await salesFact(db, [clubId], mi.from, mi.to);
   const plan = await targets(db, [clubId], month);
   const done = await trainerSessions(db, clubId, mi.from, mi.to);
+  const personal = await personalValue(db, clubId, mi.from, mi.to);
   const lines: { userId: string; items: Item[]; totalKop: number }[] = [];
   for (const u of userIds) {
     const s = schemes.find((x) => x.user_id === u);
@@ -128,9 +138,20 @@ export async function calcPayroll(db: Db, clubId: string, month: string, today: 
       if (s.kind === 'trainer') {
         const manual = adj.filter((a) => a.user_id === u && a.kind === 'sessions').reduce((x, a) => x + Number(a.quantity ?? 0), 0);
         const sch = done.find((x) => x.userId === u);
-        const n = manual + (sch?.n ?? 0);
-        const parts = [sch ? `по расписанию ${sch.n} (групповых ${sch.group}, персональных ${sch.personal})` : '', manual ? `вручную ${manual}` : ''].filter(Boolean).join(', ');
-        items.push({ code: 'sessions', title: 'Проведённые занятия', basis: `${rub(rate)} за занятие × ${n}${parts ? `: ${parts}` : ''}`, amountKop: Math.round(rate * n) });
+        const model = (s.trainer_model ?? 'per_session') as 'per_session' | 'percent' | 'rent';
+        if (model === 'per_session') {
+          const n = manual + (sch?.n ?? 0);
+          const parts = [sch ? `по расписанию ${sch.n} (групповых ${sch.group}, персональных ${sch.personal})` : '', manual ? `вручную ${manual}` : ''].filter(Boolean).join(', ');
+          items.push({ code: 'sessions', title: 'Проведённые занятия', basis: `${rub(rate)} за занятие × ${n}${parts ? `: ${parts}` : ''}`, amountKop: Math.round(rate * n) });
+        } else {
+          // Процент или аренда: групповые и внесённые вручную — по ставке за занятие, персональные — процент от их стоимости по пакету клиента
+          const groupN = (sch?.group ?? 0) + manual;
+          if (rate > 0 || groupN) items.push({ code: 'sessions', title: 'Групповые занятия', basis: `${rub(rate)} за занятие × ${groupN}${manual ? ` (вручную ${manual})` : ''}`, amountKop: Math.round(rate * groupN) });
+          const pv = personal.find((x) => x.userId === u) ?? { n: 0, valueKop: 0 };
+          const tp = Number(s.trainer_percent);
+          items.push({ code: 'personal', title: 'Персональные тренировки', basis: `${String(tp).replace('.', ',')} % от стоимости ${pv.n} проведённых персональных (${rub(pv.valueKop)} по ценам пакетов клиентов)`, amountKop: Math.round((pv.valueKop * tp) / 100) });
+          if (model === 'rent' && Number(s.rent_kop) > 0) items.push({ code: 'rent', title: 'Аренда зала', basis: `аренда за месяц по договору с тренером`, amountKop: -Number(s.rent_kop) });
+        }
       }
       const pct = Number(s.sales_percent);
       const mySales = sales.filter((x) => x.userId === u).reduce((a, x) => a + x.kop, 0);
@@ -323,21 +344,76 @@ export function staffTimeRoutes(app: FastifyInstance, pool: pg.Pool) {
     });
   });
 
+  /* ---------- нагрузка от нормы (FR-STAFF-06): сколько должен и сколько сделал ---------- */
+  app.get('/api/staff-time/load', async (req) => {
+    const ctx = requireCtx(req);
+    const q = req.query as { clubId?: string; month?: string; mine?: string };
+    const clubId = requireClub(ctx, q.clubId);
+    if (!/^\d{4}-\d{2}$/.test(q.month ?? '')) throw badRequest('Укажите месяц');
+    const all = (can(ctx, P.staffSchedule) || can(ctx, P.payrollManage) || can(ctx, P.dashView)) && !q.mine;
+    return withCtx(pool, ctx, async (db) => {
+      const today = await clubToday(db, clubId);
+      const mi = monthInfo(q.month!, today);
+      const to = mi.current ? today : mi.to;
+      const staff = (await db.query(`select distinct u.id, u.full_name as name,
+          (select r.name from user_assignments a2 join roles r on r.code = a2.role_code where a2.user_id = u.id and (a2.club_id = $1 or a2.club_id is null) order by r.sort limit 1) as role,
+          (select a2.role_code from user_assignments a2 join roles r on r.code = a2.role_code where a2.user_id = u.id and (a2.club_id = $1 or a2.club_id is null) order by r.sort limit 1) as code
+        from users u join user_assignments a on a.user_id = u.id where a.club_id = $1 and u.status = 'active' and ($2::uuid is null or u.id = $2) order by 2`, [clubId, all ? null : ctx.userId])).rows;
+      if (!staff.length) return { month: q.month, rows: [] };
+      const ids = staff.map((x) => x.id as string);
+      const ts = await timesheet(db, clubId, mi.from, to, ids, today);
+      const schemes = (await db.query(`select distinct on (user_id) user_id, sessions_norm from pay_schemes where club_id = $1 and valid_from <= $2 order by user_id, valid_from desc`, [clubId, mi.to])).rows;
+      const done = await trainerSessions(db, clubId, mi.from, to);
+      const sales = await salesFact(db, [clubId], mi.from, to);
+      const plan = await targets(db, [clubId], q.month!);
+      // Норма за прошедшую часть месяца — пропорционально дням
+      const share = mi.current ? mi.passed / mi.days : 1;
+      const pct = (f: number, p: number) => (p > 0 ? Math.round((f * 100) / p) : null);
+      const rows = staff.map((u) => {
+        const t = ts[u.id]?.totals;
+        const metrics: { name: string; plan: string; fact: string; pct: number | null }[] = [];
+        if (t && t.plannedMin) metrics.push({ name: 'Часы по графику', plan: hours(t.plannedMin), fact: hours(t.workedMin), pct: pct(t.workedMin, t.plannedMin) });
+        if (t && t.shifts) metrics.push({ name: 'Смены', plan: String(t.shifts), fact: String(t.workedShifts), pct: pct(t.workedShifts, t.shifts) });
+        const norm = schemes.find((x) => x.user_id === u.id)?.sessions_norm as number | null | undefined;
+        const d = done.find((x) => x.userId === u.id);
+        if (u.code === 'trainer' || d || norm) {
+          const planN = norm ? Math.round(norm * share) : 0;
+          metrics.push({ name: 'Проведено занятий', plan: norm ? `${planN} из ${norm} в месяц` : 'норма не задана', fact: String(d?.n ?? 0), pct: norm ? pct(d?.n ?? 0, planN) : null });
+        }
+        const myPlan = plan.filter((x) => x.userId === u.id).reduce((a, x) => a + x.amountKop, 0);
+        const mySales = sales.filter((x) => x.userId === u.id).reduce((a, x) => a + x.kop, 0);
+        if (myPlan || mySales) {
+          const planNow = Math.round(myPlan * share);
+          metrics.push({ name: 'Продажи', plan: myPlan ? `${rub(planNow)} из ${rub(myPlan)}` : 'план не задан', fact: rub(mySales), pct: myPlan ? pct(mySales, planNow) : null });
+        }
+        const issues = [t?.lateCount ? `опозданий ${t.lateCount}` : '', t?.absentDays ? `прогулов ${t.absentDays}` : '', t?.earlyMin ? `ушёл раньше на ${hours(t.earlyMin)}` : '', t?.overtimeMin ? `переработка ${hours(t.overtimeMin)}` : ''].filter(Boolean);
+        const worst = metrics.map((m) => m.pct).filter((x): x is number => x !== null);
+        const level = worst.length ? Math.min(...worst) : null;
+        return { userId: u.id, name: u.name, role: u.role, metrics, issues, level, light: level === null ? 'none' : level >= 95 ? 'green' : level >= 80 ? 'yellow' : 'red' };
+      });
+      return { month: q.month, from: mi.from, to, rows };
+    });
+  });
+
   /* ---------- зарплата ---------- */
   app.get('/api/payroll/schemes', async (req) => {
     const ctx = requirePerm(req, P.payrollManage);
     const clubId = requireClub(ctx, (req.query as { clubId?: string }).clubId);
     return withCtx(pool, ctx, async (db) => (await db.query(
       `select s.id, s.user_id as "userId", u.full_name as "name", to_char(s.valid_from, 'YYYY-MM-DD') as "validFrom", s.kind, s.rate_kop::bigint as "rateKop", s.sales_percent::float as "salesPercent",
-         s.plan_bonus_kop::bigint as "planBonusKop", s.plan_bonus_threshold as "planBonusThreshold"
+         s.plan_bonus_kop::bigint as "planBonusKop", s.plan_bonus_threshold as "planBonusThreshold", s.trainer_model as "trainerModel", s.trainer_percent::float as "trainerPercent",
+         s.rent_kop::bigint as "rentKop", s.sessions_norm as "sessionsNorm"
        from pay_schemes s join users u on u.id = s.user_id where s.club_id = $1 order by u.full_name, s.valid_from desc`, [clubId])).rows
-      .map((r) => ({ ...r, rateKop: Number(r.rateKop), planBonusKop: Number(r.planBonusKop) })));
+      .map((r) => ({ ...r, rateKop: Number(r.rateKop), planBonusKop: Number(r.planBonusKop), rentKop: Number(r.rentKop) })));
   });
 
   app.post('/api/payroll/schemes', async (req, reply) => {
     const ctx = requirePerm(req, P.payrollManage);
-    const b = (req.body ?? {}) as { clubId?: string; userId?: string; validFrom?: string; kind?: string; rateKop?: number; salesPercent?: number; planBonusKop?: number; planBonusThreshold?: number };
+    const b = (req.body ?? {}) as { clubId?: string; userId?: string; validFrom?: string; kind?: string; rateKop?: number; salesPercent?: number; planBonusKop?: number; planBonusThreshold?: number; trainerModel?: string; trainerPercent?: number; rentKop?: number; sessionsNorm?: number | null };
     const clubId = requireClub(ctx, b.clubId);
+    const model = b.kind === 'trainer' ? b.trainerModel ?? 'per_session' : 'per_session';
+    if (!['per_session', 'percent', 'rent'].includes(model)) throw badRequest('Выберите модель оплаты тренера');
+    if (b.sessionsNorm != null && !(Number.isInteger(b.sessionsNorm) && b.sessionsNorm >= 1 && b.sessionsNorm <= 1000)) throw badRequest('Норма занятий — целое число от 1 до 1000');
     if (!['salary', 'hourly', 'shift', 'trainer'].includes(b.kind ?? '')) throw badRequest('Выберите вид оплаты');
     if (!isDate(b.validFrom)) throw badRequest('С какой даты действует схема?');
     const n = (v: unknown, max: number) => { const x = Number(v ?? 0); if (!Number.isFinite(x) || x < 0 || x > max) throw badRequest('Проверьте суммы и проценты'); return x; };
@@ -346,10 +422,13 @@ export function staffTimeRoutes(app: FastifyInstance, pool: pg.Pool) {
       const closed = (await db.query(`select 1 from payroll_periods where club_id = $1 and status = 'approved' and month >= date_trunc('month', $2::date)`, [clubId, b.validFrom])).rowCount;
       if (closed) throw badRequest('За этот месяц ведомость уже утверждена: схема может действовать только со следующего');
       const id = (await db.query(
-        `insert into pay_schemes(tenant_id, club_id, user_id, valid_from, kind, rate_kop, sales_percent, plan_bonus_kop, plan_bonus_threshold, created_by) values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+        `insert into pay_schemes(tenant_id, club_id, user_id, valid_from, kind, rate_kop, sales_percent, plan_bonus_kop, plan_bonus_threshold, created_by, trainer_model, trainer_percent, rent_kop, sessions_norm)
+         values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
          on conflict (club_id, user_id, valid_from) do update set kind = excluded.kind, rate_kop = excluded.rate_kop, sales_percent = excluded.sales_percent,
-           plan_bonus_kop = excluded.plan_bonus_kop, plan_bonus_threshold = excluded.plan_bonus_threshold returning id`,
-        [ctx.tenantId, clubId, b.userId, b.validFrom, b.kind, Math.round(n(b.rateKop, 1e11)), n(b.salesPercent, 100), Math.round(n(b.planBonusKop, 1e11)), Math.round(n(b.planBonusThreshold ?? 100, 200)) || 100, ctx.userId])).rows[0].id;
+           plan_bonus_kop = excluded.plan_bonus_kop, plan_bonus_threshold = excluded.plan_bonus_threshold, trainer_model = excluded.trainer_model,
+           trainer_percent = excluded.trainer_percent, rent_kop = excluded.rent_kop, sessions_norm = excluded.sessions_norm returning id`,
+        [ctx.tenantId, clubId, b.userId, b.validFrom, b.kind, Math.round(n(b.rateKop, 1e11)), n(b.salesPercent, 100), Math.round(n(b.planBonusKop, 1e11)), Math.round(n(b.planBonusThreshold ?? 100, 200)) || 100, ctx.userId,
+          model, n(b.trainerPercent, 100), Math.round(n(b.rentKop, 1e11)), b.sessionsNorm ?? null])).rows[0].id;
       await audit(db, ctx, 'payroll.scheme_saved', 'user', b.userId!, null, b);
       return { id };
     });

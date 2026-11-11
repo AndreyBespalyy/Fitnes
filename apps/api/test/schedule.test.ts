@@ -120,6 +120,21 @@ test('персональные: остаток пакета резервируе
   const item = line.items.find((i: { code: string }) => i.code === 'sessions');
   assert.equal(item.amountKop, 150_000);
   assert.match(item.basis, /по расписанию 1/);
+  // Аренда: 50 % от стоимости персональной по цене пакета клиента минус аренда зала; норма занятий — в нагрузке
+  const one = Number((await sql(`select m.amount_kop / p.visits_count as v from memberships m join products p on p.id = m.product_id where m.id = $1`, [p.membershipId]))[0].v);
+  assert.equal((await req('POST', '/api/payroll/schemes', 'o.smirnov', { clubId: centr, userId: ids['a.kim'], validFrom: `${month}-01`, kind: 'trainer', rateKop: 0, trainerModel: 'rent', trainerPercent: 50, rentKop: 1_000_000, sessionsNorm: 40 })).statusCode, 201);
+  assert.equal((await req('POST', '/api/payroll/schemes', 'o.smirnov', { clubId: centr, userId: ids['a.kim'], validFrom: `${month}-01`, kind: 'trainer', trainerModel: 'lease' })).statusCode, 400);
+  const pr2 = (await req('POST', '/api/payroll/calculate', 'o.smirnov', { clubId: centr, month })).json();
+  const l2 = pr2.lines.find((l: { userId: string }) => l.userId === ids['a.kim']);
+  // Персональными засчитываются проведённое и поздно отменённое (списанное) занятие
+  const pers = l2.items.find((i: { code: string }) => i.code === 'personal');
+  assert.ok(pers.amountKop > 0 && pers.amountKop % Math.round(one / 2) <= 1, JSON.stringify(pers));
+  assert.equal(l2.items.find((i: { code: string }) => i.code === 'rent').amountKop, -1_000_000);
+  const load = (await req('GET', `/api/staff-time/load?clubId=${centr}&month=${month}`, 'o.smirnov')).json();
+  const kim = load.rows.find((r: { userId: string }) => r.userId === ids['a.kim']);
+  assert.match(kim.metrics.find((m: { name: string }) => m.name === 'Проведено занятий').plan, /из 40 в месяц/);
+  const mine = (await req('GET', `/api/staff-time/load?clubId=${centr}&month=${month}`, 'a.kim')).json();
+  assert.equal(mine.rows.length, 1);
   // История клиента
   const hist = (await req('GET', `/api/persons/${p.personId}/bookings`, 'd.lis')).json();
   assert.equal(hist.length, 2);

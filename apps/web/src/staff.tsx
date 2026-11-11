@@ -15,7 +15,36 @@ type Line = { userId: string; name: string; items: Item[]; totalKop: number };
 type Payroll = { period: { status: string; calculatedAt: string | null; approvedAt: string | null; approvedBy: string | null } | null; lines: Line[]; totalKop: number };
 
 const ABS: Record<string, string> = { vacation: 'Отпуск', sick: 'Больничный', dayoff: 'Отгул', unpaid: 'Без сохранения' };
-const KIND: Record<string, string> = { salary: 'Оклад в месяц', hourly: 'Ставка за час', shift: 'Ставка за смену', trainer: 'За занятие (тренер)' };
+const KIND: Record<string, string> = { salary: 'Оклад в месяц', hourly: 'Ставка за час', shift: 'Ставка за смену', trainer: 'Тренер' };
+const TMODEL: Record<string, string> = { per_session: 'за занятие', percent: '% от персональных', rent: 'аренда зала' };
+const LIGHT: Record<string, [string, string]> = { green: ['в норме', 'ok'], yellow: ['ниже нормы', 'warn'], red: ['сильно ниже', 'bad'], none: ['нет нормы', ''] };
+
+/** Нагрузка от нормы: сколько должен сделать и сколько сделал (FR-STAFF-06) */
+function LoadView({ club, mine }: { club: Club; mine?: boolean }) {
+  const [month, setMonth] = useState(thisMonth());
+  type Row = { userId: string; name: string; role: string; metrics: { name: string; plan: string; fact: string; pct: number | null }[]; issues: string[]; light: string };
+  const [d, setD] = useState<{ rows: Row[]; from: string; to: string } | null>(null);
+  const [err, setErr] = useState('');
+  useEffect(() => { api<{ rows: Row[]; from: string; to: string }>('GET', `/api/staff-time/load?clubId=${club.id}&month=${month}${mine ? '&mine=1' : ''}`).then(setD).catch((x) => setErr(errText(x))); }, [club.id, month, mine]);
+  const rows = mine ? d?.rows.slice(0, 1) ?? [] : d?.rows ?? [];
+  return (
+    <div className="card" style={{ display: 'grid', gap: 8 }}>
+      <div className="row between" style={{ flexWrap: 'wrap', gap: 8 }}>
+        <h2 style={{ margin: 0 }}>{mine ? 'Моя нагрузка' : 'Нагрузка от нормы'}</h2>
+        <input type="month" aria-label="Месяц" value={month} onChange={(e) => e.target.value && setMonth(e.target.value)} style={{ width: 'auto' }} />
+      </div>
+      <p className="small muted" style={{ margin: 0 }}>Норма за прошедшие дни месяца: часы и смены — по графику, занятия — по норме в схеме оплаты тренера, продажи — по личному плану.</p>
+      {err && <div className="err">{err}</div>}
+      <div className="tbl"><table><thead><tr>{!mine && <th>Сотрудник</th>}<th>Показатель</th><th>Норма</th><th>Сделано</th><th className="num">%</th></tr></thead>
+        <tbody>{rows.map((r) => r.metrics.length ? r.metrics.map((m, i) => (
+          <tr key={r.userId + m.name}>
+            {!mine && i === 0 && <td rowSpan={r.metrics.length}><b>{r.name}</b><div className="small muted">{r.role}</div><span className={`chip ${LIGHT[r.light][1]}`}>{LIGHT[r.light][0]}</span>{r.issues.length > 0 && <div className="small">{r.issues.join(', ')}</div>}</td>}
+            <td>{m.name}</td><td className="small">{m.plan}</td><td className="num">{m.fact}</td><td className={`num ${m.pct === null ? '' : m.pct >= 95 ? 'ok' : m.pct >= 80 ? 'warn' : 'bad'}`}>{m.pct === null ? '—' : `${m.pct} %`}</td>
+          </tr>)) : !mine ? <tr key={r.userId}><td><b>{r.name}</b><div className="small muted">{r.role}</div></td><td colSpan={4} className="small muted">Нет графика, нормы занятий и плана продаж</td></tr> : null)}
+          {mine && !rows[0]?.metrics.length && <tr><td colSpan={4} className="small muted">Норма не задана: нет графика, нормы занятий и личного плана</td></tr>}</tbody></table></div>
+    </div>
+  );
+}
 const ST: Record<string, [string, string]> = { ok: ['норма', 'ok'], late: ['опоздание', 'warn'], absent: ['не пришёл', 'bad'], no_out: ['нет ухода', 'warn'], extra: ['вне графика', ''], absence: ['', ''], planned: ['по графику', ''] };
 const h = (min: number) => `${Math.floor(min / 60)}:${String(min % 60).padStart(2, '0')}`;
 const iso = (d: Date) => d.toISOString().slice(0, 10);
@@ -26,14 +55,15 @@ const thisMonth = () => new Date().toISOString().slice(0, 7);
 
 export function StaffTimePage({ me, clubs, clubId }: { me: Me; clubs: Club[]; clubId: string }) {
   const manage = can(me, 'staff.schedule'); const pay = can(me, 'payroll.manage');
-  const tabs: [string, string, boolean][] = [['my', 'Моё', true], ['schedule', 'График', manage || can(me, 'staff.view')], ['timesheet', 'Табель', manage || pay], ['payroll', 'Зарплата', pay]];
+  const tabs: [string, string, boolean][] = [['my', 'Моё', true], ['schedule', 'График', manage || can(me, 'staff.view')], ['timesheet', 'Табель', manage || pay], ['load', 'Нагрузка', manage || pay || can(me, 'dash.view')], ['payroll', 'Зарплата', pay]];
   const [tab, setTab] = useState(() => (tabs.some((t) => t[0] === navParams('stafftime').tab && t[2]) ? navParams('stafftime').tab : manage ? 'schedule' : 'my'));
   const club = clubs.find((c) => c.id === clubId) ?? (clubs.length === 1 ? clubs[0] : null);
   return (
     <div style={{ display: 'grid', gap: 12 }}>
       <div className="tabs" role="group" aria-label="Персонал">{tabs.filter((t) => t[2]).map(([k, t]) => <button key={k} aria-pressed={tab === k} onClick={() => setTab(k)}>{t}</button>)}</div>
       {!club ? <div className="card"><p style={{ margin: 0 }}>Выберите клуб вверху страницы.</p></div> : <>
-        {tab === 'my' && <MyPage club={club} />}
+        {tab === 'my' && <><MyPage club={club} /><LoadView club={club} mine /></>}
+        {tab === 'load' && <LoadView club={club} />}
         {tab === 'schedule' && <Schedule club={club} />}
         {tab === 'timesheet' && <Timesheet club={club} canFix={manage} />}
         {tab === 'payroll' && <PayrollPage club={club} />}
@@ -218,9 +248,9 @@ function Timesheet({ club, canFix }: { club: Club; canFix: boolean }) {
 function PayrollPage({ club }: { club: Club }) {
   const [month, setMonth] = useState(thisMonth());
   const [p, setP] = useState<Payroll | null>(null);
-  const [schemes, setSchemes] = useState<{ id: string; userId: string; name: string; validFrom: string; kind: string; rateKop: number; salesPercent: number; planBonusKop: number; planBonusThreshold: number }[]>([]);
+  const [schemes, setSchemes] = useState<{ id: string; userId: string; name: string; validFrom: string; kind: string; rateKop: number; salesPercent: number; planBonusKop: number; planBonusThreshold: number; trainerModel: string; trainerPercent: number; rentKop: number; sessionsNorm: number | null }[]>([]);
   const [staff, setStaff] = useState<{ id: string; fullName: string }[]>([]);
-  const [sf, setSf] = useState<{ userId: string; kind: string; rate: string; pct: string; bonus: string; threshold: string; validFrom: string } | null>(null);
+  const [sf, setSf] = useState<{ userId: string; kind: string; rate: string; pct: string; bonus: string; threshold: string; validFrom: string; model: string; tpct: string; rent: string; norm: string } | null>(null);
   const [af, setAf] = useState<{ userId: string; kind: string; quantity: string; amount: string; reason: string } | null>(null);
   const [err, setErr] = useState('');
   const load = () => {
@@ -237,7 +267,7 @@ function PayrollPage({ club }: { club: Club }) {
   const kop = (s: string) => Math.round(Number(s.replace(/\s/g, '').replace(',', '.') || 0) * 100);
   const saveScheme = async (e: FormEvent) => {
     e.preventDefault(); setErr('');
-    try { await api('POST', '/api/payroll/schemes', { clubId: club.id, userId: sf!.userId, validFrom: sf!.validFrom, kind: sf!.kind, rateKop: kop(sf!.rate), salesPercent: Number(sf!.pct.replace(',', '.') || 0), planBonusKop: kop(sf!.bonus), planBonusThreshold: Number(sf!.threshold) || 100 }); setSf(null); toast('Схема сохранена'); load(); } catch (x) { setErr(errText(x)); }
+    try { await api('POST', '/api/payroll/schemes', { clubId: club.id, userId: sf!.userId, validFrom: sf!.validFrom, kind: sf!.kind, rateKop: kop(sf!.rate), salesPercent: Number(sf!.pct.replace(',', '.') || 0), planBonusKop: kop(sf!.bonus), planBonusThreshold: Number(sf!.threshold) || 100, trainerModel: sf!.model, trainerPercent: Number(sf!.tpct.replace(',', '.') || 0), rentKop: kop(sf!.rent), sessionsNorm: sf!.norm.trim() ? Number(sf!.norm) : null }); setSf(null); toast('Схема сохранена'); load(); } catch (x) { setErr(errText(x)); }
   };
   const saveAdj = async (e: FormEvent) => {
     e.preventDefault(); setErr('');
@@ -249,7 +279,7 @@ function PayrollPage({ club }: { club: Club }) {
       <div className="row between" style={{ flexWrap: 'wrap', gap: 8, alignItems: 'end' }}>
         <label className="f" style={{ maxWidth: 200 }}>Месяц<input type="month" value={month} onChange={(e) => e.target.value && setMonth(e.target.value)} /></label>
         <div className="row" style={{ flexWrap: 'wrap' }}>
-          <button className="btn sm" onClick={() => setSf({ userId: staff[0]?.id ?? '', kind: 'salary', rate: '', pct: '0', bonus: '0', threshold: '100', validFrom: `${month}-01` })}>Схема оплаты</button>
+          <button className="btn sm" onClick={() => setSf({ userId: staff[0]?.id ?? '', kind: 'salary', rate: '', pct: '0', bonus: '0', threshold: '100', validFrom: `${month}-01`, model: 'per_session', tpct: '50', rent: '0', norm: '' })}>Схема оплаты</button>
           {!approved && <button className="btn sm" onClick={() => setAf({ userId: staff[0]?.id ?? '', kind: 'bonus', quantity: '', amount: '', reason: '' })}>Премия, удержание, занятия</button>}
           {!approved && <button className="btn sm pri" onClick={() => run('calculate')}>Рассчитать</button>}
           {!approved && p?.period?.calculatedAt && <button className="btn sm" onClick={() => run('approve')}>Утвердить</button>}
@@ -262,7 +292,11 @@ function PayrollPage({ club }: { club: Club }) {
           <div className="grid2" style={{ gridTemplateColumns: 'repeat(auto-fit,minmax(150px,1fr))', alignItems: 'end' }}>
             <label className="f">Сотрудник<select value={sf.userId} onChange={(e) => setSf({ ...sf, userId: e.target.value })}>{staff.map((u) => <option key={u.id} value={u.id}>{u.fullName}</option>)}</select></label>
             <label className="f">Вид<select value={sf.kind} onChange={(e) => setSf({ ...sf, kind: e.target.value })}>{Object.entries(KIND).map(([k, v]) => <option key={k} value={k}>{v}</option>)}</select></label>
-            <label className="f">Сумма, ₽<input inputMode="decimal" value={sf.rate} onChange={(e) => setSf({ ...sf, rate: e.target.value })} /></label>
+            {sf.kind === 'trainer' && <label className="f">Модель тренера<select value={sf.model} onChange={(e) => setSf({ ...sf, model: e.target.value })}><option value="per_session">Ставка за занятие (штат)</option><option value="percent">Процент от персональных</option><option value="rent">Аренда зала</option></select></label>}
+            <label className="f">{sf.kind === 'trainer' ? (sf.model === 'per_session' ? 'За занятие, ₽' : 'За групповое занятие, ₽') : 'Сумма, ₽'}<input inputMode="decimal" value={sf.rate} onChange={(e) => setSf({ ...sf, rate: e.target.value })} /></label>
+            {sf.kind === 'trainer' && sf.model !== 'per_session' && <label className="f">% от стоимости персональных<input inputMode="decimal" value={sf.tpct} onChange={(e) => setSf({ ...sf, tpct: e.target.value })} /></label>}
+            {sf.kind === 'trainer' && sf.model === 'rent' && <label className="f">Аренда в месяц, ₽<input inputMode="decimal" value={sf.rent} onChange={(e) => setSf({ ...sf, rent: e.target.value })} /></label>}
+            {sf.kind === 'trainer' && <label className="f">Норма занятий в месяц<input inputMode="numeric" placeholder="не задана" value={sf.norm} onChange={(e) => setSf({ ...sf, norm: e.target.value })} /></label>}
             <label className="f">% от личных продаж<input inputMode="decimal" value={sf.pct} onChange={(e) => setSf({ ...sf, pct: e.target.value })} /></label>
             <label className="f">Премия за план, ₽<input inputMode="decimal" value={sf.bonus} onChange={(e) => setSf({ ...sf, bonus: e.target.value })} /></label>
             <label className="f">Премия от, % плана<input inputMode="numeric" value={sf.threshold} onChange={(e) => setSf({ ...sf, threshold: e.target.value })} /></label>
@@ -287,7 +321,7 @@ function PayrollPage({ club }: { club: Club }) {
         {p.lines.map((l) => <PayLine key={l.userId} title={l.name} items={l.items} totalKop={l.totalKop} />)}
       </> : <div className="card small muted">Ведомость за месяц ещё не рассчитана. Задайте схемы оплаты и нажмите «Рассчитать».</div>}
       {schemes.length > 0 && <div className="card"><b>Схемы оплаты</b><div className="tbl"><table><thead><tr><th>Сотрудник</th><th>С</th><th>Вид</th><th>Сумма</th><th>% продаж</th><th>Премия за план</th></tr></thead>
-        <tbody>{schemes.map((s) => <tr key={s.id}><td>{s.name}</td><td className="num">{s.validFrom.split('-').reverse().join('.')}</td><td>{KIND[s.kind]}</td><td className="num">{rub(s.rateKop)}</td><td className="num">{s.salesPercent ? `${s.salesPercent} %` : '—'}</td><td className="num">{s.planBonusKop ? `${rub(s.planBonusKop)} от ${s.planBonusThreshold} %` : '—'}</td></tr>)}</tbody></table></div></div>}
+        <tbody>{schemes.map((s) => <tr key={s.id}><td>{s.name}</td><td className="num">{s.validFrom.split('-').reverse().join('.')}</td><td>{KIND[s.kind]}{s.kind === 'trainer' ? `: ${TMODEL[s.trainerModel]}${s.trainerModel !== 'per_session' ? `, ${s.trainerPercent} %` : ''}${s.trainerModel === 'rent' ? `, аренда ${rub(s.rentKop)}` : ''}${s.sessionsNorm ? `, норма ${s.sessionsNorm}` : ''}` : ''}</td><td className="num">{rub(s.rateKop)}</td><td className="num">{s.salesPercent ? `${s.salesPercent} %` : '—'}</td><td className="num">{s.planBonusKop ? `${rub(s.planBonusKop)} от ${s.planBonusThreshold} %` : '—'}</td></tr>)}</tbody></table></div></div>}
     </>
   );
 }
