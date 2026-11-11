@@ -10,6 +10,7 @@ import { receiptForCharge } from './fiscal.ts';
 import { recordPayment } from './finance.ts';
 import { resolveDiscount, type DiscountInput } from './promos.ts';
 import { onReferralPurchase, referralDiscount } from './referrals.ts';
+import { resolvePayer, type PayerInput } from './familyCorp.ts';
 
 /* ---------- даты (строки YYYY-MM-DD, без часовых сдвигов) ---------- */
 const D = (s: string) => new Date(`${s}T00:00:00Z`);
@@ -33,6 +34,7 @@ export type Settings = {
   freezeEnabled: boolean; freezeMaxDaysPerYear: number; freezeMaxTimesPerYear: number; freezeMinDays: number; freezePaid: boolean; freezePriceKop: number;
   installmentsEnabled: boolean; installmentsMaxPayments: number; overdueBlockAfterDays: number;
   subscriptionRetryAttempts: number; subscriptionRetryIntervalDays: number; renewalReminderDays: number; contractRequiredForAccess: boolean;
+  familyDiscountPercent: number; familyMaxMembers: number;
 };
 const SETTINGS_COLS: [keyof Settings, string, 'bool' | 'int'][] = [
   ['freezeEnabled', 'freeze_enabled', 'bool'], ['freezeMaxDaysPerYear', 'freeze_max_days_per_year', 'int'], ['freezeMaxTimesPerYear', 'freeze_max_times_per_year', 'int'],
@@ -41,6 +43,7 @@ const SETTINGS_COLS: [keyof Settings, string, 'bool' | 'int'][] = [
   ['overdueBlockAfterDays', 'overdue_block_after_days', 'int'], ['subscriptionRetryAttempts', 'subscription_retry_attempts', 'int'],
   ['subscriptionRetryIntervalDays', 'subscription_retry_interval_days', 'int'], ['renewalReminderDays', 'renewal_reminder_days', 'int'],
   ['contractRequiredForAccess', 'contract_required_for_access', 'bool'],
+  ['familyDiscountPercent', 'family_discount_percent', 'int'], ['familyMaxMembers', 'family_max_members', 'int'],
 ];
 
 export async function getSettings(db: Db, clubId: string): Promise<Settings> {
@@ -81,8 +84,8 @@ const freezesOf = async (db: Db, ids: string[]) => (await db.query(
   `select id, membership_id, to_char(starts_on, 'YYYY-MM-DD') as starts_on, to_char(ends_on, 'YYYY-MM-DD') as ends_on,
      to_char(ended_early_on, 'YYYY-MM-DD') as ended_early_on, days, created_at from freezes where membership_id = any($1) order by starts_on`, [ids])).rows;
 const chargesOf = async (db: Db, ids: string[]) => (await db.query(
-  `select id, membership_id, kind, title, to_char(due_on, 'YYYY-MM-DD') as due_on, amount_kop, status, paid_at, paid_method
-   from charges where membership_id = any($1) order by due_on, created_at`, [ids])).rows;
+  `select ch.id, ch.membership_id, ch.kind, ch.title, to_char(ch.due_on, 'YYYY-MM-DD') as due_on, ch.amount_kop, ch.status, ch.paid_at, ch.paid_method, co.name as company_name, i.number as invoice_number
+   from charges ch left join companies co on co.id = ch.company_id left join company_invoices i on i.id = ch.invoice_id where ch.membership_id = any($1) order by ch.due_on, ch.created_at`, [ids])).rows;
 
 export async function personMemberships(db: Db, personId: string) {
   const ms = (await db.query(`select m.*, to_char(m.starts_on, 'YYYY-MM-DD') as starts_on, to_char(m.ends_on, 'YYYY-MM-DD') as ends_on,
@@ -106,14 +109,14 @@ export async function personMemberships(db: Db, personId: string) {
       contract: ct.get(m.id) ?? null,
       freezes: f.map((x) => ({ id: x.id, startsOn: x.starts_on, endsOn: x.ends_on, endedEarlyOn: x.ended_early_on, days: x.days })),
       charges: c.map((x) => ({ id: x.id, kind: x.kind, title: x.title, dueOn: x.due_on, amountKop: Number(x.amount_kop), status: x.status,
-        paidAt: x.paid_at, paidMethod: x.paid_method, overdue: x.status === 'due' && x.due_on < today })),
+        paidAt: x.paid_at, paidMethod: x.paid_method, overdue: x.status === 'due' && x.due_on < today, company: x.company_name ?? null, invoice: x.invoice_number ?? null })),
     });
   }
   return out;
 }
 
 /* ---------- продажа и продление ---------- */
-export type SaleInput = { personId?: string; productId?: string; startsOn?: string; installments?: number; renewFromId?: string; confirmDuplicate?: boolean } & DiscountInput;
+export type SaleInput = { personId?: string; productId?: string; startsOn?: string; installments?: number; renewFromId?: string; confirmDuplicate?: boolean } & DiscountInput & PayerInput;
 
 async function currentPrice(db: Db, productId: string) {
   return (await db.query('select id, amount_kop from price_versions where product_id = $1 and valid_from <= now() order by valid_from desc limit 1', [productId])).rows[0];
@@ -177,6 +180,9 @@ export async function sellMembership(db: Db, ctx: Pick<Ctx, 'tenantId' | 'userId
   const disc = await resolveDiscount(db, ctx, b, { personId: b.personId!, productId: prod.id, clubId: prod.club_id, category, amountKop: listPrice, today });
   // Друг по рекомендации получает скидку на первую покупку, если другой скидки нет
   if (!disc.discountKop) { const rd = await referralDiscount(db, b.personId!, prod.club_id, category, listPrice); if (rd) Object.assign(disc, rd); }
+  // Кто платит: сам клиент, семья (плательщик семьи, скидка второму и следующим) или компания (по счёту раз в месяц)
+  const pay = await resolvePayer(db, b, { personId: b.personId!, clubId: prod.club_id, productKind: prod.kind, installments: n, today });
+  if (!disc.discountKop && pay.percent) Object.assign(disc, { discountKop: Math.round(listPrice * pay.percent / 100), label: pay.label });
   const amount = listPrice - disc.discountKop;
   let endsOn: string | null = null;
   let visits: number | null = null;
@@ -191,10 +197,10 @@ export async function sellMembership(db: Db, ctx: Pick<Ctx, 'tenantId' | 'userId
   const id = (await db.query(
     `insert into memberships(tenant_id, club_id, person_id, product_id, price_version_id, kind, product_name, amount_kop, starts_on, ends_on, visits_left,
        installments, next_charge_on, renewed_from_id, created_by, sale_category, network_access, access_from, access_to,
-       list_price_kop, discount_kop, promo_id, discount_request_id)
-       values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23) returning id`,
+       list_price_kop, discount_kop, promo_id, discount_request_id, family_group_id, payer_person_id, company_id)
+       values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26) returning id`,
     [ctx.tenantId, prod.club_id, b.personId, prod.id, price.id, prod.kind, prod.name, amount, startsOn, endsOn, visits, n, nextCharge, renewedFrom, ctx.userId, category,
-      prod.network_access ?? false, prod.access_from ?? null, prod.access_to ?? null, listPrice, disc.discountKop, disc.promoId, disc.requestId])).rows[0].id;
+      prod.network_access ?? false, prod.access_from ?? null, prod.access_to ?? null, listPrice, disc.discountKop, disc.promoId, disc.requestId, pay.familyGroupId, pay.payerPersonId, pay.companyId])).rows[0].id;
 
   // График платежей: первый платёж в день продажи, остальные помесячно
   const part = Math.floor(amount / n);
@@ -202,8 +208,8 @@ export async function sellMembership(db: Db, ctx: Pick<Ctx, 'tenantId' | 'userId
     const sum = i === n - 1 ? amount - part * (n - 1) : part;
     const kind = prod.kind === 'subscription' ? 'subscription' : n > 1 ? 'installment' : 'full';
     const title = prod.kind === 'subscription' ? `${prod.name}: первый месяц` : n > 1 ? `${prod.name}: платёж ${i + 1} из ${n}` : prod.name;
-    await db.query('insert into charges(tenant_id, club_id, membership_id, person_id, kind, title, due_on, amount_kop) values ($1,$2,$3,$4,$5,$6,$7,$8)',
-      [ctx.tenantId, prod.club_id, id, b.personId, kind, title, i === 0 ? today : addMonths(today, i), sum]);
+    await db.query('insert into charges(tenant_id, club_id, membership_id, person_id, kind, title, due_on, amount_kop, company_id) values ($1,$2,$3,$4,$5,$6,$7,$8,$9)',
+      [ctx.tenantId, prod.club_id, id, b.personId, kind, title, i === 0 ? pay.dueOn ?? today : addMonths(today, i), sum, pay.companyId]);
   }
   await db.query('insert into membership_operations(tenant_id, club_id, membership_id, kind, params, actor_id) values ($1,$2,$3,$4,$5,$6)',
     [ctx.tenantId, prod.club_id, id, renewedFrom ? 'renewal' : 'sale', JSON.stringify({ productId: prod.id, priceVersionId: price.id, amountKop: amount, listPriceKop: listPrice, discountKop: disc.discountKop, discount: disc.label, installments: n, startsOn, renewedFrom }), ctx.userId]);
@@ -274,9 +280,11 @@ export async function payCharge(db: Db, ctx: { tenantId: string; userId: string 
   const c = (await db.query('select * from charges where id = $1 for update', [chargeId])).rows[0];
   if (!c || c.status !== 'due') return null;
   await db.query(`update charges set status = 'paid', paid_at = now(), paid_method = $2, paid_by = $3, autopay_error = null where id = $1`, [chargeId, method, ctx.userId]);
-  const cat = c.membership_id ? (await db.query('select sale_category from memberships where id = $1', [c.membership_id])).rows[0]?.sale_category : c.kind === 'goods' ? 'goods' : null;
+  const mm = c.membership_id ? (await db.query('select sale_category, payer_person_id from memberships where id = $1', [c.membership_id])).rows[0] : null;
+  const cat = mm ? mm.sale_category : c.kind === 'goods' ? 'goods' : null;
   if (c.kind === 'goods') await db.query(`update goods_sales set status = 'paid', method = $2 where charge_id = $1 and status = 'on_account'`, [chargeId, method]);
-  await recordPayment(db, ctx as never, { clubId: c.club_id, direction: 'in', kind: 'charge', amountKop: Number(c.amount_kop), method, personId: c.person_id, chargeId, saleCategory: cat });
+  // Семейный абонемент: платёж записывается на плательщика семьи
+  await recordPayment(db, ctx as never, { clubId: c.club_id, direction: 'in', kind: 'charge', amountKop: Number(c.amount_kop), method, personId: mm?.payer_person_id ?? c.person_id, chargeId, saleCategory: cat });
   if (c.membership_id) {
     await db.query(`insert into membership_operations(tenant_id, club_id, membership_id, kind, params, actor_id) values ($1,$2,$3,'charge_paid',$4,$5)`,
       [ctx.tenantId, c.club_id, c.membership_id, JSON.stringify({ chargeId, method, amountKop: Number(c.amount_kop) }), ctx.userId]);
@@ -478,9 +486,10 @@ export function membershipRoutes(app: FastifyInstance, pool: pg.Pool) {
     const { method } = (req.body ?? {}) as { method?: string };
     if (!['cash', 'card_terminal', 'sbp'].includes(method ?? '')) throw badRequest('Выберите способ оплаты');
     return withCtx(pool, ctx, async (db) => {
-      const c = (await db.query('select status from charges where id = $1', [id])).rows[0];
+      const c = (await db.query('select status, company_id from charges where id = $1', [id])).rows[0];
       if (!c) throw notFound('Платёж не найден');
       if (c.status !== 'due') throw badRequest('Платёж уже оплачен или отменён');
+      if (c.company_id) throw badRequest('Этот абонемент оплачивает компания по счёту: отметьте оплату счёта в разделе «Компании»', 'company_pays');
       const receiptId = await payCharge(db, ctx, id, method!);
       return { ok: true, receiptId };
     });

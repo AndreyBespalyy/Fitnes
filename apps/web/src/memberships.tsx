@@ -1,6 +1,7 @@
 // Шаг 6. Раздел «Тарифы» (настройки клуба, тарифы и цены) и абонементы в карточке клиента.
 import { Fragment, useEffect, useState, type FormEvent } from 'react';
 import { PayLinkButton } from './payments.tsx';
+import { PayerPick, type PayerValue } from './familyCorp.tsx';
 import { api, can, type Club, type Me } from './api.ts';
 import { errText, toast } from './ui.ts';
 import { ContractLine, type ContractBrief } from './contracts.tsx';
@@ -10,12 +11,12 @@ import { PromosBlock, SaleDiscount, type SaleDiscountValue } from './promos.tsx'
 export type Settings = {
   freezeEnabled: boolean; freezeMaxDaysPerYear: number; freezeMaxTimesPerYear: number; freezeMinDays: number; freezePaid: boolean; freezePriceKop: number;
   installmentsEnabled: boolean; installmentsMaxPayments: number; overdueBlockAfterDays: number;
-  subscriptionRetryAttempts: number; subscriptionRetryIntervalDays: number; renewalReminderDays: number; contractRequiredForAccess: boolean;
+  subscriptionRetryAttempts: number; subscriptionRetryIntervalDays: number; renewalReminderDays: number; contractRequiredForAccess: boolean; familyDiscountPercent: number; familyMaxMembers: number;
 };
 export type Product = { id: string; clubId: string; kind: string; name: string; durationDays: number | null; visitsCount: number | null; validityDays: number | null;
   freezeAllowed: boolean; installmentsAllowed: boolean; isActive: boolean; priceKop: number | null;
   networkAccess: boolean; accessFrom: string | null; accessTo: string | null; prices: { amountKop: number; validFrom: string }[] };
-type Charge = { id: string; kind: string; title: string; dueOn: string; amountKop: number; status: string; paidMethod: string | null; overdue: boolean };
+type Charge = { id: string; kind: string; title: string; dueOn: string; amountKop: number; status: string; paidMethod: string | null; overdue: boolean; company?: string | null; invoice?: string | null };
 type Membership = { id: string; clubId: string; clubName: string; kind: string; productName: string; amountKop: number; startsOn: string; endsOn: string | null;
   visitsLeft: number | null; installments: number; nextChargeOn: string | null; status: string; state: string; access: boolean; reason: string; freezeAllowed: boolean;
   freezes: { id: string; startsOn: string; endsOn: string; endedEarlyOn: string | null; days: number }[]; charges: Charge[]; contract: ContractBrief | null };
@@ -92,6 +93,10 @@ function SettingsForm({ club, manage }: { club: Club; manage: boolean }) {
           <Num label="Закрыть проход при просрочке больше, дней" value={s.overdueBlockAfterDays} onChange={set('overdueBlockAfterDays')} disabled={ro} hint="0 — закрыть на следующий день после срока платежа" />
           <Num label="Напомнить о продлении за, дней" value={s.renewalReminderDays} onChange={set('renewalReminderDays')} disabled={ro} />
           <Check label="Не пускать в клуб без подписанного договора" value={s.contractRequiredForAccess} onChange={set('contractRequiredForAccess')} disabled={ro} />
+        </fieldset>
+        <fieldset className="item" style={{ display: 'grid', gap: 8 }}><b>Семейные абонементы</b>
+          <Num label="Скидка второму и следующим членам семьи, %" value={s.familyDiscountPercent} onChange={set('familyDiscountPercent')} disabled={ro} hint="От 0 до 50 %. Действует, пока у кого-то из семьи есть действующий абонемент" />
+          <Num label="Человек в семье, не больше" value={s.familyMaxMembers} onChange={set('familyMaxMembers')} disabled={ro} />
         </fieldset>
         {sub && (
           <fieldset className="item" style={{ display: 'grid', gap: 8 }}><b>Подписка</b>
@@ -188,6 +193,7 @@ export function MembershipsBlock({ me, personId, homeClubId }: { me: Me; personI
   const [inst, setInst] = useState(1);
   const [maxInst, setMaxInst] = useState(1);
   const [discount, setDiscount] = useState<SaleDiscountValue>({});
+  const [payer, setPayer] = useState<PayerValue>({});
   const [freeze, setFreeze] = useState<{ id: string; days: number; startsOn: string } | null>(null);
   const [cancel, setCancel] = useState<{ id: string; reason: string } | null>(null);
   const [refund, setRefund] = useState<string | null>(null);
@@ -224,9 +230,10 @@ export function MembershipsBlock({ me, personId, homeClubId }: { me: Me; personI
           {prod?.installmentsAllowed && maxInst > 1 && (
             <label className="f">Оплата<select value={inst} onChange={(e) => setInst(Number(e.target.value))}>
               {Array.from({ length: maxInst }, (_, i) => i + 1).map((n) => <option key={n} value={n}>{n === 1 ? 'Сразу полностью' : `Рассрочка: ${n} ${n < 5 ? 'платежа' : 'платежей'} по ${rub(Math.floor((prod.priceKop ?? 0) / n))}`}</option>)}</select></label>)}
+          <PayerPick personId={personId} clubId={prod?.clubId} kind={prod?.kind} onChange={setPayer} />
           <SaleDiscount key={productId} personId={personId} product={prod} clubId={prod?.clubId} onChange={setDiscount} />
           <div className="row">
-            <button className="btn pri sm" disabled={!productId} onClick={() => act(() => api('POST', '/api/memberships', { personId, productId, installments: inst, ...discount }), `Продано: ${prod?.name}. Платёж ждёт оплаты`)}>Оформить</button>
+            <button className="btn pri sm" disabled={!productId} onClick={() => act(() => api('POST', '/api/memberships', { personId, productId, installments: inst, ...discount, ...payer }), `Продано: ${prod?.name}. Платёж ждёт оплаты`)}>Оформить</button>
             <button className="btn sm" onClick={() => setSell(false)}>Отмена</button>
           </div>
         </div>)}
@@ -246,6 +253,7 @@ export function MembershipsBlock({ me, personId, homeClubId }: { me: Me; personI
                   <span>{d(c.dueOn)} · {c.title} · <b>{rub(c.amountKop)}</b></span>
                   {c.status === 'paid' ? <span className="chip ok">оплачен{c.paidMethod ? `, ${PAY[c.paidMethod] ?? c.paidMethod}` : ''}</span>
                     : c.status === 'cancelled' ? <span className="chip">отменён</span>
+                    : c.company ? <span className="chip acc">платит «{c.company}» по счёту{c.invoice ? ` ${c.invoice}` : ''}</span>
                     : <span className="row"><span className={`chip ${c.overdue ? 'bad' : 'warn'}`}>{c.overdue ? 'просрочен' : 'к оплате'}</span>
                       {canManage && <><button className="btn sm" onClick={() => act(() => api('POST', `/api/charges/${c.id}/mark-paid`, { method: 'card_terminal' }), 'Оплата картой отмечена')}>Картой</button>
                         <button className="btn sm" onClick={() => act(() => api('POST', `/api/charges/${c.id}/mark-paid`, { method: 'cash' }), 'Оплата наличными отмечена')}>Наличными</button></>}

@@ -54,9 +54,10 @@ async function settleCharge(db: Db, ctx: Actor, chargeId: string, method: 'depos
 
 /** Оплатить начисление с депозита клиента. */
 export async function payChargeFromDeposit(db: Db, ctx: Actor, chargeId: string) {
-  const c = (await db.query('select club_id, person_id, amount_kop, title, status from charges where id = $1', [chargeId])).rows[0];
+  const c = (await db.query('select club_id, person_id, amount_kop, title, status, company_id from charges where id = $1', [chargeId])).rows[0];
   if (!c) throw notFound();
   if (c.status !== 'due') throw badRequest('Начисление уже оплачено или отменено');
+  if (c.company_id) throw badRequest('Этот абонемент оплачивает компания по счёту', 'company_pays');
   await depositSpend(db, ctx, { clubId: c.club_id, personId: c.person_id, amountKop: Number(c.amount_kop), chargeId, comment: c.title });
   await settleCharge(db, ctx, chargeId, 'deposit');
   await audit(db, ctx, 'charge.paid_deposit', 'charge', chargeId, { status: 'due' }, { status: 'paid', method: 'deposit' });

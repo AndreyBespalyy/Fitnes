@@ -12,7 +12,7 @@ type Cert = { id: string; code: string; kind: 'amount' | 'product'; amountKop: n
   recipientName: string | null; method: string; soldAt: string; usedPersonId: string | null; usedBy: string | null; usedAt: string | null };
 const CST: Record<string, [string, string]> = { active: ['действует', 'ok'], used: ['использован', ''], cancelled: ['аннулирован', 'bad'], expired: ['истёк срок', 'warn'] };
 
-function usePersonSearch(club: string | null) {
+export function usePersonSearch(club: string | null) {
   const [q, setQ] = useState('');
   const [found, setFound] = useState<Person[]>([]);
   const [person, setPerson] = useState<Person | null>(null);

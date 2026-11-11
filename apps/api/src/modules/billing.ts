@@ -90,6 +90,7 @@ export async function payLink(db: Db, f: Fetch, actor: Actor, chargeId: string, 
   const c = (await db.query(`select ch.*, cl.name as club_name, p.autopay_enabled from charges ch join clubs cl on cl.id = ch.club_id join persons p on p.id = ch.person_id where ch.id = $1`, [chargeId])).rows[0];
   if (!c) throw notFound('Начисление не найдено');
   if (c.status !== 'due') throw badRequest('Начисление уже оплачено или отменено');
+  if (c.company_id) throw badRequest('Этот абонемент оплачивает компания по счёту');
   const live = (await db.query(`select id from online_payments where charge_id = $1 and purpose = 'link' and status in ('created', 'pending') and (expires_at is null or expires_at > now()) order by created_at desc limit 1`, [chargeId])).rows[0];
   if (live) return { id: live.id as string, url: `${baseUrl}/pay/${live.id}`, reused: true };
   const { view, acq } = await getAcq(db, c.club_id);
