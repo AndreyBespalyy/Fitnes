@@ -23,6 +23,7 @@ import { ImportPage } from './importer.tsx';
 import { AccessPage } from './access.tsx';
 import { ChatsPage, MessagingAdmin } from './chat.tsx';
 import { StaffTimePage } from './staff.tsx';
+import { LoginSecurity } from './loginSecurity.tsx';
 import { ConfigPage } from './config.tsx';
 import { ReviewsPage } from './insights.tsx';
 import { OfflineBar, ProfilePage, registerServiceWorker, StaffSessions } from './mobile.tsx';
@@ -414,6 +415,7 @@ function StaffPage({ me, clubs }: { me: Me; clubs: Club[] }) {
           </tr>))}</tbody>
       </table></div>
       <p className="small">Заблокированный сотрудник сразу выходит из системы и не может войти, его история и клиенты сохраняются.</p></div>
+      {manage && me.allClubs && <LoginSecurity selfId={me.id} />}
     </>
   );
 }
