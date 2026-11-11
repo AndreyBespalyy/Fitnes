@@ -12,6 +12,7 @@ import { TariffsPage } from './memberships.tsx';
 import { ShopPage } from './shop.tsx';
 import { CompaniesPage } from './familyCorp.tsx';
 import { TrainerPage } from './trainer.tsx';
+import { DeskPage } from './desk.tsx';
 import { ContractsAdminPage, SitePage } from './contracts.tsx';
 import { FiscalPage, LocalKktAgent } from './fiscal.tsx';
 import { FinancePage } from './finance.tsx';
@@ -88,7 +89,7 @@ function ChangePassword({ me, forced, onDone, onLogout }: { me: Me; forced?: boo
   );
 }
 
-type Tab = 'dash' | 'hot' | 'calls' | 'leads' | 'board' | 'tasks' | 'home' | 'clubs' | 'tariffs' | 'contracts' | 'site' | 'fiscal' | 'finance' | 'import' | 'chats' | 'access' | 'messaging' | 'pipelines' | 'staff' | 'stafftime' | 'config' | 'reviews' | 'onboarding' | 'help' | 'schedule' | 'retention' | 'shop' | 'corp' | 'trainer' | 'profile';
+type Tab = 'dash' | 'hot' | 'calls' | 'leads' | 'board' | 'tasks' | 'home' | 'clubs' | 'tariffs' | 'contracts' | 'site' | 'fiscal' | 'finance' | 'import' | 'chats' | 'access' | 'messaging' | 'pipelines' | 'staff' | 'stafftime' | 'config' | 'reviews' | 'onboarding' | 'help' | 'schedule' | 'retention' | 'shop' | 'corp' | 'trainer' | 'desk' | 'profile';
 
 function Shell({ me, onLogout }: { me: Me; onLogout: () => void }) {
   const firstTab: Tab = 'dash';
@@ -130,6 +131,7 @@ function Shell({ me, onLogout }: { me: Me; onLogout: () => void }) {
     ['clubs', 'Клубы', can(me, 'clubs.manage')],
     ['tariffs', 'Тарифы', can(me, 'tariffs.manage') || can(me, 'memberships.sell')],
     ['shop', 'Товары', can(me, 'tariffs.manage') || can(me, 'memberships.sell') || can(me, 'shifts.work')],
+    ['desk', 'Ресепшн', can(me, 'acs.work')],
     ['trainer', can(me, 'memberships.sell') ? 'Столы тренеров' : 'Мой день', can(me, 'schedule.book') && (!can(me, 'memberships.sell') || can(me, 'schedule.manage'))],
     ['corp', 'Компании', can(me, 'tariffs.manage') || can(me, 'finance.work') || can(me, 'crm.view_all') || can(me, 'memberships.sell')],
     ['contracts', 'Договоры', can(me, 'contracts.manage')],
@@ -150,10 +152,10 @@ function Shell({ me, onLogout }: { me: Me; onLogout: () => void }) {
   ];
   const visible = tabs.filter((t) => t[2]);
   // Нижняя панель на телефоне: главные разделы роли под большим пальцем, остальное — в «Ещё»
-  const PRIMARY: Tab[] = ['dash', 'trainer', 'hot', 'tasks', 'chats', 'home', 'schedule', 'access', 'finance'];
+  const PRIMARY: Tab[] = ['dash', 'desk', 'trainer', 'hot', 'tasks', 'chats', 'home', 'schedule', 'access', 'finance'];
   const bottom = PRIMARY.filter((k) => visible.some((v) => v[0] === k)).slice(0, 4);
-  const short: Partial<Record<Tab, string>> = { dash: 'Главная', trainer: 'Мой день', hot: 'Звонить', tasks: 'Задачи', schedule: 'Занятия', chats: 'Чаты', home: 'Клиенты', access: 'Проходы', finance: 'Финансы' };
-  const icon: Partial<Record<Tab, string>> = { dash: '◧', trainer: '◷', hot: '☎', tasks: '✓', schedule: '▦', chats: '✉', home: '☺', access: '⇥', finance: '₽' };
+  const short: Partial<Record<Tab, string>> = { dash: 'Главная', trainer: 'Мой день', desk: 'Ресепшн', hot: 'Звонить', tasks: 'Задачи', schedule: 'Занятия', chats: 'Чаты', home: 'Клиенты', access: 'Проходы', finance: 'Финансы' };
+  const icon: Partial<Record<Tab, string>> = { dash: '◧', trainer: '◷', desk: '⚑', hot: '☎', tasks: '✓', schedule: '▦', chats: '✉', home: '☺', access: '⇥', finance: '₽' };
   return (
     <>
       <header className="top">
@@ -186,6 +188,7 @@ function Shell({ me, onLogout }: { me: Me; onLogout: () => void }) {
         {tab === 'access' && <AccessPage me={me} clubs={clubs} clubId={clubId} openPerson={setPersonId} />}
         {tab === 'messaging' && <MessagingAdmin me={me} clubs={clubs} clubId={clubId} />}
         {tab === 'import' && <ImportPage clubs={clubs} clubId={clubId} />}
+        {tab === 'desk' && <DeskPage me={me} clubs={clubs} clubId={clubId} openPerson={setPersonId} />}
         {tab === 'trainer' && <TrainerPage me={me} clubs={clubs} clubId={clubId} openPerson={setPersonId} />}
         {tab === 'corp' && <CompaniesPage me={me} clubs={clubs} clubId={clubId} openPerson={setPersonId} />}
         {tab === 'site' && <SitePage me={me} clubs={clubs} clubId={clubId} openPerson={setPersonId} />}

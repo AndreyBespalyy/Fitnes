@@ -87,6 +87,19 @@ export async function decide(db: Db, clubId: string, code: string, direction: Di
     return { decision: 'deny', reasonCode: code2, reason: `${REASON_TITLES[code2]}${c.status === 'replaced' ? ': выдана новая, старую заберите' : ''}`, ...who };
   }
   if (direction === 'out') return { decision: 'allow', reasonCode: 'exit', reason: 'Выход', ...who };
+  return decideHolder(db, clubId, c, who, at);
+}
+
+/** Решение о входе для клиента без карты (ресепшн нашёл по телефону или имени). */
+export async function decidePerson(db: Db, clubId: string, personId: string, at: Date): Promise<Decision> {
+  const p = (await db.query('select full_name from persons where id = $1', [personId])).rows[0];
+  const cred = (await db.query(`select id from access_credentials where person_id = $1 and status = 'active' order by issued_at desc limit 1`, [personId])).rows[0];
+  const who = { name: p?.full_name ?? null, personId, userId: null, credentialId: cred?.id ?? null, membershipId: null };
+  return decideHolder(db, clubId, { person_id: personId, user_id: null, holder_name: p?.full_name ?? '' }, who, at);
+}
+
+async function decideHolder(db: Db, clubId: string, c: { person_id: string | null; user_id: string | null; holder_name: string; user_status?: string },
+  who: { name: string | null; personId: string | null; userId: string | null; credentialId: string | null; membershipId: string | null }, at: Date): Promise<Decision> {
   const h = await holderStatus(db, clubId, c);
   if (!h.allow) return { decision: 'deny', reasonCode: h.reasonCode, reason: h.reason, ...who, membershipId: h.membershipId };
   if (c.user_id) return { decision: 'allow', reasonCode: 'staff', reason: 'Сотрудник', ...who };
@@ -102,7 +115,7 @@ export async function decide(db: Db, clubId: string, code: string, direction: Di
 
 /* ---------- событие прохода и посещение ---------- */
 type EventIn = { clubId: string; pointId?: string | null; gatewayId?: string | null; externalId?: string | null; at: Date; direction: Direction; code?: string | null;
-  mode: 'online' | 'offline' | 'manual' | 'emulator'; manualBy?: string | null; manualReason?: string | null };
+  mode: 'online' | 'offline' | 'manual' | 'emulator' | 'desk'; manualBy?: string | null; manualReason?: string | null };
 
 /** Пересчитывает посещение по событию. Повторное прикладывание и возврат через несколько минут не создают новое посещение. */
 async function visitFor(db: Db, tenantId: string, e: EventIn, d: Decision): Promise<{ visitId: string | null; effect: string }> {
@@ -123,7 +136,7 @@ async function visitFor(db: Db, tenantId: string, e: EventIn, d: Decision): Prom
     order by exit_at desc limit 1`, [d.personId, e.clubId, at, s.repeatEntryMinutes])).rows[0];
   if (back) { await db.query('update visits set exit_at = null where id = $1', [back.id]); return { visitId: back.id, effect: 'reopen' }; }
   const v = (await db.query(`insert into visits(tenant_id, club_id, person_id, membership_id, visited_at, source, point_id) values ($1,$2,$3,$4,$5,$6,$7) returning id`,
-    [tenantId, e.clubId, d.personId, d.membershipId, at, e.mode === 'manual' ? 'manual' : 'acs', e.pointId ?? null])).rows[0].id;
+    [tenantId, e.clubId, d.personId, d.membershipId, at, e.mode === 'manual' || e.mode === 'desk' ? 'manual' : 'acs', e.pointId ?? null])).rows[0].id;
   // Пакет посещений и гостевой визит: списываем одно посещение
   if (d.membershipId) await db.query(`update memberships set visits_left = visits_left - 1, updated_at = now() where id = $1 and kind in ('visits', 'guest') and visits_left > 0`, [d.membershipId]);
   return { visitId: v, effect: 'new' };

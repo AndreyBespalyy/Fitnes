@@ -75,7 +75,7 @@ export function membershipState(m: MRow, freezes: Freeze[], charges: Charge[], s
   return { state: 'active', access: true, reason: m.ends_on ? `Действует до ${ru(m.ends_on)}` : 'Действует' };
 }
 
-async function loadMembership(db: Db, id: string) {
+export async function loadMembership(db: Db, id: string) {
   const m = (await db.query(`select *, to_char(starts_on, 'YYYY-MM-DD') as starts_on, to_char(ends_on, 'YYYY-MM-DD') as ends_on,
     to_char(next_charge_on, 'YYYY-MM-DD') as next_charge_on from memberships where id = $1`, [id])).rows[0];
   if (!m) throw notFound('Абонемент не найден');

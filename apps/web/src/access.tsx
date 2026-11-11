@@ -14,7 +14,7 @@ type Point = { id: string; name: string; direction: string; gatewayId: string | 
 type Feed = { events: Ev[]; inside: number; today: number; gateways: Gw[]; points: Point[]; alerts: string[] };
 type Verdict = { decision: string; reason: string; name: string | null; warn?: string | null; personId: string | null; visitEffect?: string };
 
-const MODE: Record<string, string> = { online: 'турникет', offline: 'без связи', manual: 'вручную', emulator: 'эмулятор' };
+const MODE: Record<string, string> = { online: 'турникет', offline: 'без связи', manual: 'вручную', emulator: 'эмулятор', desk: 'ресепшн' };
 const DIR: Record<string, string> = { in: 'вход', out: 'выход', both: 'вход и выход' };
 const KIND: Record<string, string> = { card: 'Карта', bracelet: 'Браслет', qr: 'QR-код' };
 const CRED_STATUS: Record<string, string> = { active: 'действует', replaced: 'заменена', lost: 'утеряна', blocked: 'заблокирована' };
