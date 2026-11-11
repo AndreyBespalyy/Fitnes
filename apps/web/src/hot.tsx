@@ -1,4 +1,5 @@
 // Шаг 15. ИИ-помощник продаж: план дня, горячий список с предложением, теневой режим.
+import { HintLine, UpsellList, useUpsell, type Hint } from './upsell.tsx';
 import { DialButton } from './mobile.tsx';
 import { useEffect, useState } from 'react';
 import { api, can, type Club, type Me, navParams } from './api.ts';
@@ -15,7 +16,7 @@ const SEG: Record<string, [string, string]> = { hot: ['звонить первы
 const KINDS: [string, string][] = [['', 'Все задачи'], ['purchase', 'Покупка'], ['renewal', 'Продление'], ['return', 'Возврат'], ['churn', 'Удержание']];
 
 export function HotPage({ me, clubs, clubId, openPerson }: { me: Me; clubs: Club[]; clubId: string; openPerson: (id: string) => void }) {
-  const tabs: [string, string, boolean][] = [['day', 'План дня', true], ['list', 'Горячий список', true], ['shadow', 'Теневой режим', can(me, 'ai.review')]];
+  const tabs: [string, string, boolean][] = [['day', 'План дня', true], ['list', 'Горячий список', true], ['upsell', 'Допродажи', clubId !== 'all' || clubs.length > 0], ['shadow', 'Теневой режим', can(me, 'ai.review')]];
   const [tab, setTab] = useState(() => (tabs.some((t) => t[0] === navParams('hot').tab && t[2]) ? navParams('hot').tab : 'day'));
   const club = clubId !== 'all' ? clubId : clubs[0]?.id ?? '';
   return (
@@ -25,6 +26,7 @@ export function HotPage({ me, clubs, clubId, openPerson }: { me: Me; clubs: Club
       {tab === 'day' && club && <DayPlan clubId={club} openPerson={openPerson} />}
       {tab === 'list' && <HotList me={me} clubId={clubId} openPerson={openPerson} />}
       {tab === 'shadow' && <Shadow clubId={clubId} />}
+      {tab === 'upsell' && club && <UpsellList clubId={club} openPerson={openPerson} />}
     </>
   );
 }
@@ -41,7 +43,7 @@ function Take({ row, onDone }: { row: HotRow; onDone: () => void }) {
   return <button className="btn sm pri" onClick={take}>Взять в работу</button>;
 }
 
-function HotItem({ r, openPerson, reload, showOwner }: { r: HotRow; openPerson: (id: string) => void; reload: () => void; showOwner?: boolean }) {
+function HotItem({ r, openPerson, reload, showOwner, hints }: { r: HotRow; openPerson: (id: string) => void; reload: () => void; showOwner?: boolean; hints?: Hint[] }) {
   return (
     <div className="item" style={{ display: 'grid', gap: 4 }}>
       <div className="row between">
@@ -51,6 +53,7 @@ function HotItem({ r, openPerson, reload, showOwner }: { r: HotRow; openPerson: 
       <div className="hot-meter"><i style={{ width: `${r.priority}%` }} /></div>
       {r.reasons.length > 0 && <Reasons r={r.reasons} />}
       {r.offer?.text && <div className="small"><b>Предложение:</b> {r.offer.text}</div>}
+      {hints && <HintLine hints={hints} />}
       <div className="small muted">{r.phone ?? 'телефона нет'}{r.lastContactAt ? ` · последний контакт ${dt(r.lastContactAt)}` : ' · ещё не общались'}{r.nextTaskAt ? ` · задача на ${dt(r.nextTaskAt)}` : ''}{showOwner ? ` · ${r.ownerName ?? 'общий список клуба'}` : ''}</div>
       <div className="row">{r.segment !== 'excluded' && <Take row={r} onDone={reload} />}{r.phone && r.segment !== 'excluded' && <DialButton personId={r.personId} />}<button className="btn sm" onClick={() => openPerson(r.personId)}>Карточка</button></div>
     </div>
@@ -66,6 +69,7 @@ type Day = {
 function DayPlan({ clubId, openPerson }: { clubId: string; openPerson: (id: string) => void }) {
   const [d, setD] = useState<Day | null>(null);
   const [err, setErr] = useState('');
+  const hintsOf = useUpsell(d?.callFirst);
   const load = () => api<Day>('GET', `/api/ai/day-plan?clubId=${clubId}`).then(setD).catch((x) => setErr(errText(x)));
   useEffect(() => { load(); }, [clubId]);
   if (!d) return err ? <p className="err">{err}</p> : <p className="muted">Загрузка…</p>;
@@ -84,7 +88,7 @@ function DayPlan({ clubId, openPerson }: { clubId: string; openPerson: (id: stri
       </div>
       <div className="card" style={{ display: 'grid', gap: 8 }}><h2>Звонить первым</h2>
         {d.callFirst.length === 0 ? <p className="muted" style={{ margin: 0 }}>Горячих клиентов сейчас нет: посмотрите тёплых в горячем списке.</p>
-          : <div className="list">{d.callFirst.map((r) => <HotItem key={r.kind + r.personId} r={r} openPerson={openPerson} reload={load} />)}</div>}
+          : <div className="list">{d.callFirst.map((r) => <HotItem key={r.kind + r.personId} r={r} openPerson={openPerson} reload={load} hints={hintsOf(r.clubId, r.personId)} />)}</div>}
       </div>
       <p className="small muted" style={{ margin: 0 }}>Основание: {d.basis.join('; ')}. Уверенность: {d.confidence}.</p>
     </>
@@ -107,6 +111,7 @@ function HotList({ me, clubId, openPerson }: { me: Me; clubId: string; openPerso
     try { await api('POST', '/api/ai/scores/recompute', { clubId }); toast('Оценки пересчитаны'); load(); } catch (x) { toast(errText(x)); }
   };
   const model = d?.models.find((m) => m.clubId === clubId) ?? d?.models[0];
+  const hintsOf = useUpsell(d?.rows);
   return (
     <>
       <div className="row" style={{ flexWrap: 'wrap', gap: 8 }}>
@@ -119,7 +124,7 @@ function HotList({ me, clubId, openPerson }: { me: Me; clubId: string; openPerso
       {!d ? <p className="muted">Загрузка…</p> : (<>
         <p className="small muted" style={{ margin: 0 }}>Список собран за {d.ms} мс, оценки обновлены {d.computedAt ? dt(d.computedAt) : '—'} (пересчёт каждые 15 минут). Модель: {model ? `${model.version}${model.metrics.aucModel ? `, качество на проверке AUC ${model.metrics.aucModel}` : ''}` : 'правила'}{model?.metrics.note ? `. ${model.metrics.note}` : ''}. {mine ? 'Ваши клиенты и общий список клуба.' : ''}</p>
         {d.rows.length === 0 ? <div className="card"><p className="muted" style={{ margin: 0 }}>Клиентов в этом списке нет.</p></div>
-          : <div className="list">{d.rows.map((r) => <HotItem key={r.kind + r.personId} r={r} openPerson={openPerson} reload={load} showOwner={!mine} />)}</div>}
+          : <div className="list">{d.rows.map((r) => <HotItem key={r.kind + r.personId} r={r} openPerson={openPerson} reload={load} showOwner={!mine} hints={hintsOf(r.clubId, r.personId)} />)}</div>}
       </>)}
     </>
   );

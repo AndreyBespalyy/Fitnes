@@ -4,6 +4,7 @@ import { api, can, type Club, type Me, navParams } from './api.ts';
 import { dt, errText, fromLocal, localInput, toast } from './ui.ts';
 import { MembershipsBlock } from './memberships.tsx';
 import { ReferralBlock } from './referrals.tsx';
+import { UpsellBlock } from './upsell.tsx';
 import { PersonChats } from './chat.tsx';
 import { PersonPasses } from './access.tsx';
 import { PersonCards } from './payments.tsx';
@@ -260,6 +261,7 @@ export function PersonCard({ me, id, onClose }: { me: Me; id: string; onClose: (
           {can(me, 'memberships.view') && <PersonCards me={me} personId={card.person.id} autopayEnabled={card.person.autopayEnabled} />}
           {can(me, 'messages.work') && <PersonChats me={me} personId={card.person.id} homeClubId={card.person.homeClubId}
             marketingConsent={card.person.marketingConsent} optOut={card.person.messagingOptOut} reload={reload} />}
+          {can(me, 'persons.view') && <UpsellBlock personId={card.person.id} clubId={card.person.homeClubId} />}
           <MembershipsBlock me={me} personId={card.person.id} homeClubId={card.person.homeClubId} />
           {can(me, 'persons.view') && <ReferralBlock me={me} personId={card.person.id} clubId={card.person.homeClubId} />}
           {(can(me, 'acs.work') || can(me, 'acs.manage')) && <PersonPasses me={me} personId={card.person.id} clubId={card.person.homeClubId ?? ''} />}
