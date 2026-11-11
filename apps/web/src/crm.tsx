@@ -247,7 +247,10 @@ export function PersonCard({ me, id, onClose }: { me: Me; id: string; onClose: (
   return (
     <div className="overlay" onClick={(e) => e.target === e.currentTarget && onClose()}>
       <aside className="drawer" role="dialog" aria-label="Карточка клиента">
-        <div className="row between"><span className="lbl">Карточка клиента</span><button className="btn sm" onClick={onClose}>Закрыть</button></div>
+        <div className="row between"><span className="lbl">Карточка клиента</span>
+          <span className="row" style={{ gap: 6 }}>
+            {location.search.includes('person=') && <button className="btn sm" title="Ссылка на карточку для коллеги" onClick={() => navigator.clipboard?.writeText(location.href).then(() => toast('Ссылка на карточку скопирована')).catch(() => null)}>Ссылка</button>}
+            <button className="btn sm" onClick={onClose}>Закрыть</button></span></div>
         {err && <div className="err">{err}</div>}
         {!card ? <p className="muted">Загрузка…</p> : (<>
           <div><h1>{card.person.fullName}</h1>

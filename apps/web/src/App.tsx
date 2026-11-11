@@ -1,35 +1,60 @@
-import { RetentionPage } from './retention.tsx';
-import { SchedulePage } from './schedule.tsx';
-import { HelpPage, OnboardingPage } from './onboarding.tsx';
-import { CallsPage } from './calls.tsx';
-import { HotPage } from './hot.tsx';
-import { DashPage } from './dash.tsx';
-import { useEffect, useState, type FormEvent } from 'react';
+import { lazy, Suspense, useEffect, useState, type ComponentType, type FormEvent } from 'react';
 import { api, ApiError, can, clearDeviceData, setNavIntent, type Go, MODEL, MODEL_SHORT, type Club, type Me, type Person, type RoleDef, type Staff } from './api.ts';
 import { errText, toast as alertOk } from './ui.ts';
-import { BoardPage, LeadsPage, PersonCard, PipelinesAdmin, TasksPage } from './crm.tsx';
-import { TariffsPage } from './memberships.tsx';
-import { ShopPage } from './shop.tsx';
-import { CompaniesPage } from './familyCorp.tsx';
-import { TrainerPage } from './trainer.tsx';
-import { DeskPage } from './desk.tsx';
-import { LoadPage } from './load.tsx';
-import { CohortsPage } from './cohorts.tsx';
-import { PnlPage } from './pnl.tsx';
-import { ContractsAdminPage, SitePage } from './contracts.tsx';
-import { FiscalPage, LocalKktAgent } from './fiscal.tsx';
-import { FinancePage } from './finance.tsx';
-import { ImportPage } from './importer.tsx';
-import { AccessPage } from './access.tsx';
-import { ChatsPage, MessagingAdmin } from './chat.tsx';
-import { StaffTimePage } from './staff.tsx';
-import { LoginSecurity } from './loginSecurity.tsx';
 import { ReportProblem } from './report.tsx';
-import { UsagePage } from './usage.tsx';
-import { IntakePage } from './intake.tsx';
-import { ConfigPage } from './config.tsx';
-import { ReviewsPage } from './insights.tsx';
 import { OfflineBar, ProfilePage, registerServiceWorker, StaffSessions } from './mobile.tsx';
+
+// Разделы грузятся по мере открытия: первый вход быстрее, особенно на планшете ресепшна
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const page = <M extends Record<K, ComponentType<any>>, K extends keyof M>(load: () => Promise<M>, name: K) => lazy(async () => {
+  try {
+    const m = await load();
+    try { sessionStorage.removeItem('chunk-reload'); } catch { /* нет хранилища */ }
+    return { default: m[name] };
+  } catch {
+    // После обновления сайта старых файлов разделов уже нет — один раз перезагружаем страницу
+    let tried = true;
+    try { tried = !!sessionStorage.getItem('chunk-reload'); if (!tried) sessionStorage.setItem('chunk-reload', '1'); } catch { /* нет хранилища */ }
+    if (navigator.onLine && !tried) location.reload();
+    return { default: (() => <div className="err">Раздел не загрузился. {navigator.onLine ? 'Обновите страницу.' : 'Нет связи: этот раздел ещё не открывался на устройстве и недоступен без интернета.'}</div>) as unknown as M[K] };
+  }
+});
+const RetentionPage = page(() => import('./retention.tsx'), 'RetentionPage');
+const SchedulePage = page(() => import('./schedule.tsx'), 'SchedulePage');
+const HelpPage = page(() => import('./onboarding.tsx'), 'HelpPage');
+const OnboardingPage = page(() => import('./onboarding.tsx'), 'OnboardingPage');
+const CallsPage = page(() => import('./calls.tsx'), 'CallsPage');
+const HotPage = page(() => import('./hot.tsx'), 'HotPage');
+const DashPage = page(() => import('./dash.tsx'), 'DashPage');
+const BoardPage = page(() => import('./crm.tsx'), 'BoardPage');
+const LeadsPage = page(() => import('./crm.tsx'), 'LeadsPage');
+const PersonCard = page(() => import('./crm.tsx'), 'PersonCard');
+const PipelinesAdmin = page(() => import('./crm.tsx'), 'PipelinesAdmin');
+const TasksPage = page(() => import('./crm.tsx'), 'TasksPage');
+const TariffsPage = page(() => import('./memberships.tsx'), 'TariffsPage');
+const ShopPage = page(() => import('./shop.tsx'), 'ShopPage');
+const CompaniesPage = page(() => import('./familyCorp.tsx'), 'CompaniesPage');
+const TrainerPage = page(() => import('./trainer.tsx'), 'TrainerPage');
+const DeskPage = page(() => import('./desk.tsx'), 'DeskPage');
+const LoadPage = page(() => import('./load.tsx'), 'LoadPage');
+const CohortsPage = page(() => import('./cohorts.tsx'), 'CohortsPage');
+const PnlPage = page(() => import('./pnl.tsx'), 'PnlPage');
+const ContractsAdminPage = page(() => import('./contracts.tsx'), 'ContractsAdminPage');
+const SitePage = page(() => import('./contracts.tsx'), 'SitePage');
+const FiscalPage = page(() => import('./fiscal.tsx'), 'FiscalPage');
+const LocalKktAgent = page(() => import('./fiscal.tsx'), 'LocalKktAgent');
+const FinancePage = page(() => import('./finance.tsx'), 'FinancePage');
+const ImportPage = page(() => import('./importer.tsx'), 'ImportPage');
+const AccessPage = page(() => import('./access.tsx'), 'AccessPage');
+const ChatsPage = page(() => import('./chat.tsx'), 'ChatsPage');
+const MessagingAdmin = page(() => import('./chat.tsx'), 'MessagingAdmin');
+const StaffTimePage = page(() => import('./staff.tsx'), 'StaffTimePage');
+const LoginSecurity = page(() => import('./loginSecurity.tsx'), 'LoginSecurity');
+const UsagePage = page(() => import('./usage.tsx'), 'UsagePage');
+const IntakePage = page(() => import('./intake.tsx'), 'IntakePage');
+const ConfigPage = page(() => import('./config.tsx'), 'ConfigPage');
+const ReviewsPage = page(() => import('./insights.tsx'), 'ReviewsPage');
+
 
 export function App() {
   const [me, setMe] = useState<Me | null | undefined>(undefined);
@@ -100,22 +125,49 @@ type Tab = 'dash' | 'hot' | 'calls' | 'leads' | 'board' | 'tasks' | 'home' | 'cl
 
 function Shell({ me, onLogout }: { me: Me; onLogout: () => void }) {
   const firstTab: Tab = 'dash';
-  const urlQs = new URLSearchParams(location.search);
-  const urlTab = urlQs.get('tab') as Tab | null;
-  // Ссылка из сводки или уведомления: ?tab=finance&view=debts — раздел откроется сразу с нужным фильтром
-  if (urlTab && [...urlQs.keys()].length > 1) setNavIntent({ tab: urlTab, p: Object.fromEntries([...urlQs.entries()].filter(([k]) => k !== 'tab')) });
-  const [tab, setTabState] = useState<Tab>(urlTab ?? firstTab);
+  // Адрес раздела: ?tab=finance&view=debts&person=<id> — ссылки, закладки и кнопка «Назад» в браузере
+  const readUrl = () => {
+    const q = new URLSearchParams(location.search);
+    const t = q.get('tab') as Tab | null;
+    const p = Object.fromEntries([...q.entries()].filter(([k]) => k !== 'tab' && k !== 'person'));
+    return { tab: t, p, person: q.get('person') };
+  };
+  const [init] = useState(() => { const u = readUrl(); if (u.tab && Object.keys(u.p).length) setNavIntent({ tab: u.tab, p: u.p }); return u; });
+  const [tab, setTabState] = useState<Tab>(init.tab ?? firstTab);
   const [more, setMore] = useState(false);
-  const setTab = (t: Tab) => { setNavIntent(null); setTabState(t); setMore(false); window.scrollTo(0, 0); };
+  const [personId, setPersonId] = useState<string | null>(init.person);
+  const href = (t: string, p: Record<string, string> = {}, person?: string | null) => {
+    const q = new URLSearchParams({ tab: t, ...p }); if (person) q.set('person', person); return `/?${q}`;
+  };
+  const push = (url: string, state: unknown = null) => { if (url !== location.pathname + location.search) history.pushState(state, '', url); };
+  const setTab = (t: Tab) => { setNavIntent(null); setTabState(t); setMore(false); setPersonId(null); window.scrollTo(0, 0); push(href(t)); };
   /** Переход с рабочего стола: раздел с фильтром */
   const go = (g: Go) => {
-    setNavIntent(g); setTabState(g.tab as Tab); setMore(false); window.scrollTo(0, 0); };
-  // Нажали на уведомление — открываем нужный раздел
+    setNavIntent(g); setTabState(g.tab as Tab); setMore(false); setPersonId(null); window.scrollTo(0, 0); push(href(g.tab, g.p)); };
+  const openPerson = (id: string) => { setPersonId(id); const u = readUrl(); push(href(u.tab ?? tab, u.p, id), { card: true }); };
+  const closePerson = () => {
+    setPersonId(null); setVer((v) => v + 1);
+    const u = readUrl();
+    // Карточку открыли в этом окне — «Закрыть» работает как «Назад»; пришли по ссылке — просто убираем карточку из адреса
+    if (u.person && (history.state as { card?: boolean } | null)?.card) history.back();
+    else if (u.person) history.replaceState(null, '', href(u.tab ?? tab, u.p));
+  };
   useEffect(() => {
-    registerServiceWorker((url) => { const t = new URL(url, location.origin).searchParams.get('tab') as Tab | null; if (t) setTab(t); });
-    if (urlTab) history.replaceState(null, '', '/');
+    if (!init.tab) history.replaceState(null, '', href(firstTab));
+    const onPop = () => {
+      const u = readUrl();
+      setNavIntent(u.tab && Object.keys(u.p).length ? { tab: u.tab, p: u.p } : null);
+      setTabState(u.tab ?? firstTab); setPersonId(u.person); setMore(false);
+    };
+    window.addEventListener('popstate', onPop);
+    // Нажали на уведомление — открываем нужный раздел (и карточку клиента, если она в ссылке)
+    registerServiceWorker((url) => {
+      const q = new URL(url, location.origin).searchParams; const t = q.get('tab') as Tab | null; if (!t) return;
+      const p = Object.fromEntries([...q.entries()].filter(([k]) => k !== 'tab' && k !== 'person'));
+      go({ tab: t, p }); const person = q.get('person'); if (person) openPerson(person);
+    });
+    return () => window.removeEventListener('popstate', onPop);
   }, []);
-  const [personId, setPersonId] = useState<string | null>(null);
   const [ver, setVer] = useState(0);
   const [clubs, setClubs] = useState<Club[]>([]);
   const [clubId, setClubId] = useState<string>('all');
@@ -169,6 +221,16 @@ function Shell({ me, onLogout }: { me: Me; onLogout: () => void }) {
   // Нижняя панель на телефоне: главные разделы роли под большим пальцем, остальное — в «Ещё»
   const PRIMARY: Tab[] = ['dash', 'desk', 'trainer', 'hot', 'tasks', 'chats', 'home', 'schedule', 'access', 'finance'];
   const bottom = PRIMARY.filter((k) => visible.some((v) => v[0] === k)).slice(0, 4);
+  // Главные разделы роли подгружаем заранее, в свободную минуту: они откроются мгновенно и будут работать без связи
+  useEffect(() => {
+    const PRELOAD: Partial<Record<Tab, () => Promise<unknown>>> = { dash: () => import('./dash.tsx'), desk: () => import('./desk.tsx'), trainer: () => import('./trainer.tsx'),
+      hot: () => import('./hot.tsx'), tasks: () => import('./crm.tsx'), chats: () => import('./chat.tsx'), home: () => import('./crm.tsx'), schedule: () => import('./schedule.tsx'),
+      access: () => import('./access.tsx'), finance: () => import('./finance.tsx') };
+    const run = () => { for (const k of bottom) PRELOAD[k]?.().catch(() => null); import('./crm.tsx').catch(() => null); };
+    const w = window as Window & { requestIdleCallback?: (f: () => void) => number };
+    const id = w.requestIdleCallback ? w.requestIdleCallback(run) : window.setTimeout(run, 1500);
+    return () => { if (!w.requestIdleCallback) clearTimeout(id); };
+  }, [bottom.join()]);
   const short: Partial<Record<Tab, string>> = { dash: 'Главная', trainer: 'Мой день', desk: 'Ресепшн', hot: 'Звонить', tasks: 'Задачи', schedule: 'Занятия', chats: 'Чаты', home: 'Клиенты', access: 'Проходы', finance: 'Финансы' };
   const icon: Partial<Record<Tab, string>> = { dash: '◧', trainer: '◷', desk: '⚑', hot: '☎', tasks: '✓', schedule: '▦', chats: '✉', home: '☺', access: '⇥', finance: '₽' };
   return (
@@ -181,56 +243,58 @@ function Shell({ me, onLogout }: { me: Me; onLogout: () => void }) {
             {clubs.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
           </select>
         )}
-        <div className="sp"><LocalKktAgent me={me} clubId={clubId} /><span>{me.full_name} · {roleNames}</span><button onClick={logout}>Выйти</button></div>
+        <div className="sp"><Suspense fallback={null}><LocalKktAgent me={me} clubId={clubId} /></Suspense><span>{me.full_name} · {roleNames}</span><button onClick={logout}>Выйти</button></div>
       </header>
       <main className="wrap">
         <OfflineBar />
         <div className={`tabs main-tabs ${more ? 'open' : ''}`} role="group" aria-label="Разделы">
           {visible.map(([k, t]) => <button key={k} aria-pressed={tab === k} onClick={() => setTab(k)}>{t}</button>)}
         </div>
-        {tab === 'dash' && <DashPage me={me} clubs={clubs} clubId={clubId} openPerson={setPersonId} go={go} canGo={(t) => visible.some((v) => v[0] === t)} pickClub={setClubId} />}
-        {tab === 'hot' && <HotPage me={me} clubs={clubs} clubId={clubId} openPerson={setPersonId} />}
-        {tab === 'calls' && <CallsPage me={me} clubs={clubs} clubId={clubId} openPerson={setPersonId} />}
-        {tab === 'tasks' && <TasksPage key={ver} me={me} clubId={clubId} openPerson={setPersonId} />}
-        {tab === 'leads' && <LeadsPage key={ver} me={me} clubs={clubs} clubId={clubId} openPerson={setPersonId} />}
-        {tab === 'board' && <BoardPage key={ver} clubs={clubs} clubId={clubId} openPerson={setPersonId} />}
+        <Suspense fallback={<p className="muted">Загрузка…</p>}>
+        {tab === 'dash' && <DashPage me={me} clubs={clubs} clubId={clubId} openPerson={openPerson} go={go} canGo={(t) => visible.some((v) => v[0] === t)} pickClub={setClubId} />}
+        {tab === 'hot' && <HotPage me={me} clubs={clubs} clubId={clubId} openPerson={openPerson} />}
+        {tab === 'calls' && <CallsPage me={me} clubs={clubs} clubId={clubId} openPerson={openPerson} />}
+        {tab === 'tasks' && <TasksPage key={ver} me={me} clubId={clubId} openPerson={openPerson} />}
+        {tab === 'leads' && <LeadsPage key={ver} me={me} clubs={clubs} clubId={clubId} openPerson={openPerson} />}
+        {tab === 'board' && <BoardPage key={ver} clubs={clubs} clubId={clubId} openPerson={openPerson} />}
         {tab === 'tariffs' && <TariffsPage me={me} clubs={clubs} clubId={clubId} />}
-        {tab === 'shop' && <ShopPage me={me} clubs={clubs} clubId={clubId} openPerson={setPersonId} />}
+        {tab === 'shop' && <ShopPage me={me} clubs={clubs} clubId={clubId} openPerson={openPerson} />}
         {tab === 'contracts' && <ContractsAdminPage me={me} clubs={clubs} clubId={clubId} />}
-        {tab === 'finance' && <FinancePage me={me} clubs={clubs} clubId={clubId} openPerson={setPersonId} />}
+        {tab === 'finance' && <FinancePage me={me} clubs={clubs} clubId={clubId} openPerson={openPerson} />}
         {tab === 'fiscal' && <FiscalPage me={me} clubs={clubs} clubId={clubId} />}
-        {tab === 'chats' && <ChatsPage me={me} clubs={clubs} clubId={clubId} openPerson={setPersonId} />}
-        {tab === 'access' && <AccessPage me={me} clubs={clubs} clubId={clubId} openPerson={setPersonId} />}
+        {tab === 'chats' && <ChatsPage me={me} clubs={clubs} clubId={clubId} openPerson={openPerson} />}
+        {tab === 'access' && <AccessPage me={me} clubs={clubs} clubId={clubId} openPerson={openPerson} />}
         {tab === 'messaging' && <MessagingAdmin me={me} clubs={clubs} clubId={clubId} />}
         {tab === 'import' && <ImportPage clubs={clubs} clubId={clubId} />}
         {tab === 'pnl' && <PnlPage me={me} clubs={clubs} clubId={clubId} />}
-        {tab === 'intake' && <IntakePage me={me} clubs={clubs} clubId={clubId} openPerson={setPersonId} />}
+        {tab === 'intake' && <IntakePage me={me} clubs={clubs} clubId={clubId} openPerson={openPerson} />}
         {tab === 'usage' && <UsagePage tabs={tabs.map(([k, l]) => [k, l])} />}
         {tab === 'cohorts' && <CohortsPage me={me} clubs={clubs} clubId={clubId} />}
         {tab === 'load' && <LoadPage me={me} clubs={clubs} clubId={clubId} />}
-        {tab === 'desk' && <DeskPage me={me} clubs={clubs} clubId={clubId} openPerson={setPersonId} />}
-        {tab === 'trainer' && <TrainerPage me={me} clubs={clubs} clubId={clubId} openPerson={setPersonId} />}
-        {tab === 'corp' && <CompaniesPage me={me} clubs={clubs} clubId={clubId} openPerson={setPersonId} />}
-        {tab === 'site' && <SitePage me={me} clubs={clubs} clubId={clubId} openPerson={setPersonId} />}
+        {tab === 'desk' && <DeskPage me={me} clubs={clubs} clubId={clubId} openPerson={openPerson} />}
+        {tab === 'trainer' && <TrainerPage me={me} clubs={clubs} clubId={clubId} openPerson={openPerson} />}
+        {tab === 'corp' && <CompaniesPage me={me} clubs={clubs} clubId={clubId} openPerson={openPerson} />}
+        {tab === 'site' && <SitePage me={me} clubs={clubs} clubId={clubId} openPerson={openPerson} />}
         {tab === 'pipelines' && <PipelinesAdmin clubs={clubs} clubId={clubId} />}
-        {tab === 'home' && <Home key={ver} me={me} clubs={clubs} clubId={clubId} openPerson={setPersonId} />}
+        {tab === 'home' && <Home key={ver} me={me} clubs={clubs} clubId={clubId} openPerson={openPerson} />}
         {tab === 'clubs' && <Clubs me={me} clubs={clubs} reload={reloadClubs} />}
         {tab === 'staff' && <StaffPage me={me} clubs={clubs} />}
         {tab === 'stafftime' && <StaffTimePage me={me} clubs={clubs} clubId={clubId} />}
         {tab === 'config' && <ConfigPage me={me} clubs={clubs} clubId={clubId} />}
-        {tab === 'schedule' && <SchedulePage me={me} clubs={clubs} clubId={clubId} openPerson={setPersonId} />}
-        {tab === 'retention' && <RetentionPage me={me} clubs={clubs} clubId={clubId} openPerson={setPersonId} />}
+        {tab === 'schedule' && <SchedulePage me={me} clubs={clubs} clubId={clubId} openPerson={openPerson} />}
+        {tab === 'retention' && <RetentionPage me={me} clubs={clubs} clubId={clubId} openPerson={openPerson} />}
         {tab === 'onboarding' && <OnboardingPage me={me} clubId={clubId} go={(t) => setTab(t as Tab)} reloadClubs={reloadClubs} />}
         {tab === 'help' && <HelpPage me={me} clubs={clubs} clubId={clubId} page={tab} />}
-        {tab === 'reviews' && <ReviewsPage me={me} clubs={clubs} clubId={clubId} openPerson={setPersonId} />}
+        {tab === 'reviews' && <ReviewsPage me={me} clubs={clubs} clubId={clubId} openPerson={openPerson} />}
         {tab === 'profile' && <ProfilePage me={me} passwordForm={<ChangePassword me={me} onDone={() => { alertOk('Пароль изменён'); setTab(firstTab); }} />} />}
+        </Suspense>
         <ReportProblem tab={tab} tabLabel={tabLabel} clubId={clubId} openHelp={() => go({ tab: 'help', p: { view: 'support' } })} />
       </main>
       <nav className="bottom-nav" aria-label="Главные разделы">
         {bottom.map((k) => <button key={k} aria-pressed={tab === k && !more} onClick={() => setTab(k)}><span aria-hidden="true">{icon[k]}</span>{short[k]}</button>)}
         <button aria-pressed={more || !bottom.includes(tab)} onClick={() => { setMore(!more); window.scrollTo(0, 0); }}><span aria-hidden="true">☰</span>Ещё</button>
       </nav>
-      {personId && <PersonCard me={me} id={personId} onClose={() => { setPersonId(null); setVer((v) => v + 1); }} />}
+      {personId && <Suspense fallback={null}><PersonCard me={me} id={personId} onClose={closePerson} /></Suspense>}
     </>
   );
 }
