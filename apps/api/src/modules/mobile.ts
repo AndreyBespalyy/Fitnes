@@ -23,7 +23,7 @@ const shortName = (full: string | null) => {
 };
 const hhmm = (d: Date | string, tz: string) => new Date(d).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit', timeZone: tz });
 
-type Note = { userId: string; ref: string; kind: 'lead' | 'task' | 'message'; payload: PushPayload };
+type Note = { userId: string; ref: string; kind: 'lead' | 'task' | 'message' | 'note'; pref?: 'tasks' | 'leads' | 'messages'; payload: PushPayload };
 
 /** Что пора прислать: новые лиды, задачи через 10 минут, входящие сообщения. */
 async function collect(db: Db): Promise<Note[]> {
@@ -56,6 +56,15 @@ async function collect(db: Db): Promise<Note[]> {
     notes.push({ userId: m.to_user, ref: `msg:${m.id}:${bucket}`, kind: 'message',
       payload: { title: 'Новое сообщение', body: m.full_name ? shortName(m.full_name) : 'Клиент написал в чат', url: '/?tab=chats', tag: `msg-${m.id}` } });
   }
+  // Уведомления CRM (колокольчик): сигналы и сводки отдела продаж
+  const crm = (await db.query(`select id, user_id, kind, title, body, link from staff_notifications
+    where read_at is null and created_at > now() - interval '15 minutes'`)).rows;
+  for (const n of crm) {
+    const link = n.link as { tab?: string; p?: Record<string, string> } | null;
+    const url = link?.tab ? `/?${new URLSearchParams({ tab: link.tab, ...(link.p ?? {}) }).toString()}` : '/';
+    notes.push({ userId: n.user_id, ref: `note:${n.id}`, kind: 'note', pref: String(n.kind).startsWith('lead') ? 'leads' : undefined,
+      payload: { title: n.title, body: (n.body ?? '').split('\n')[0].slice(0, 160), url, tag: `note-${n.id}` } });
+  }
   return notes;
 }
 
@@ -68,7 +77,8 @@ export async function processPush(pool: pg.Pool, vapid: Vapid, fetchFn: typeof f
       const notes = await collect(db);
       for (const n of notes) {
         const pref = (await db.query('select push_tasks, push_leads, push_messages from user_prefs where user_id = $1', [n.userId])).rows[0];
-        if (pref && !pref[`push_${n.kind === 'task' ? 'tasks' : n.kind === 'lead' ? 'leads' : 'messages'}`]) continue;
+        const key = n.kind === 'note' ? n.pref : n.kind === 'task' ? 'tasks' : n.kind === 'lead' ? 'leads' : 'messages';
+        if (pref && key && !pref[`push_${key}`]) continue;
         const subs = (await db.query(
           `select p.id, p.endpoint, p.p256dh, p.auth from push_subscriptions p join sessions s on s.id = p.session_id join users u on u.id = p.user_id
            where p.user_id = $1 and s.revoked_at is null and s.expires_at > now() and u.status = 'active'`, [n.userId])).rows;

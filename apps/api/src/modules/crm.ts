@@ -195,7 +195,7 @@ export function crmRoutes(app: FastifyInstance, pool: pg.Pool) {
     return withCtx(pool, ctx, async (db) => (await db.query(
       `select l.id, l.created_at as "createdAt", l.club_id as "clubId", c.name as "clubName", p.id as "personId", p.full_name as "personName",
          s.name as "sourceName", l.comment, l.is_repeat as "isRepeat", u.full_name as "assigneeName",
-         l.first_response_due_at as "dueAt", l.first_response_at as "respondedAt",
+         l.first_response_due_at as "dueAt", l.first_response_at as "respondedAt", l.taken_at as "takenAt",
          case when l.first_response_at is not null then (case when l.first_response_at <= l.first_response_due_at then 'in_time' else 'late' end)
               when now() > l.first_response_due_at then 'overdue' else 'waiting' end as "responseState"
        from leads l join persons p on p.id = l.person_id join clubs c on c.id = l.club_id

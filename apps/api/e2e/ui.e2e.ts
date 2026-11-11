@@ -92,6 +92,9 @@ test('3. продажа абонемента в карточке и оплата
 });
 
 test('4. ресепшн: поиск по телефону и проход', async () => {
+  // Тест не должен зависеть от времени запуска: в CI ночью по Москве клуб «закрыт». Одинаковые часы — круглосуточно
+  await sql(`insert into club_access_settings(club_id, tenant_id, open_from, open_to) select id, tenant_id, '00:00', '00:00' from clubs
+    on conflict (club_id) do update set open_from = '00:00', open_to = '00:00'`);
   const { ctx, p } = await open('d.lis');
   await tab(p, 'Ресепшн');
   await p.getByLabel('Поиск клиента').fill('7770001');

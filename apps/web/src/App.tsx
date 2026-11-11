@@ -3,6 +3,7 @@ import { api, ApiError, can, clearDeviceData, setNavIntent, type Go, MODEL, MODE
 import { errText, toast as alertOk } from './ui.ts';
 import { ReportProblem } from './report.tsx';
 import { OfflineBar, ProfilePage, registerServiceWorker, StaffSessions } from './mobile.tsx';
+import { NotificationsBell } from './notifications.tsx';
 
 // Разделы грузятся по мере открытия: первый вход быстрее, особенно на планшете ресепшна
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -54,6 +55,7 @@ const UsagePage = page(() => import('./usage.tsx'), 'UsagePage');
 const IntakePage = page(() => import('./intake.tsx'), 'IntakePage');
 const ConfigPage = page(() => import('./config.tsx'), 'ConfigPage');
 const ReviewsPage = page(() => import('./insights.tsx'), 'ReviewsPage');
+const SalesOpsPage = page(() => import('./salesOps.tsx'), 'SalesOpsPage');
 
 
 export function App() {
@@ -121,7 +123,7 @@ function ChangePassword({ me, forced, onDone, onLogout }: { me: Me; forced?: boo
   );
 }
 
-type Tab = 'dash' | 'hot' | 'calls' | 'leads' | 'board' | 'tasks' | 'home' | 'clubs' | 'tariffs' | 'contracts' | 'site' | 'fiscal' | 'finance' | 'import' | 'chats' | 'access' | 'messaging' | 'pipelines' | 'staff' | 'stafftime' | 'config' | 'reviews' | 'onboarding' | 'help' | 'schedule' | 'retention' | 'shop' | 'corp' | 'trainer' | 'desk' | 'load' | 'cohorts' | 'pnl' | 'usage' | 'intake' | 'profile';
+type Tab = 'dash' | 'hot' | 'calls' | 'leads' | 'board' | 'tasks' | 'home' | 'clubs' | 'tariffs' | 'contracts' | 'site' | 'fiscal' | 'finance' | 'import' | 'chats' | 'access' | 'messaging' | 'pipelines' | 'staff' | 'stafftime' | 'config' | 'reviews' | 'onboarding' | 'help' | 'schedule' | 'retention' | 'shop' | 'corp' | 'trainer' | 'desk' | 'load' | 'cohorts' | 'pnl' | 'usage' | 'intake' | 'sales' | 'profile';
 
 function Shell({ me, onLogout }: { me: Me; onLogout: () => void }) {
   const firstTab: Tab = 'dash';
@@ -181,6 +183,7 @@ function Shell({ me, onLogout }: { me: Me; onLogout: () => void }) {
     ['tasks', 'Задачи', can(me, 'crm.work')],
     ['hot', 'Кому звонить', can(me, 'crm.work')],
     ['calls', 'Звонки', can(me, 'crm.work')],
+    ['sales', 'Отдел продаж', can(me, 'crm.work')],
     ['schedule', 'Расписание', can(me, 'schedule.book')],
     ['leads', 'Лиды', can(me, 'leads.create')],
     ['board', 'Сделки', can(me, 'crm.work')],
@@ -243,7 +246,7 @@ function Shell({ me, onLogout }: { me: Me; onLogout: () => void }) {
             {clubs.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
           </select>
         )}
-        <div className="sp"><Suspense fallback={null}><LocalKktAgent me={me} clubId={clubId} /></Suspense><span>{me.full_name} · {roleNames}</span><button onClick={logout}>Выйти</button></div>
+        <div className="sp"><Suspense fallback={null}><LocalKktAgent me={me} clubId={clubId} /></Suspense><NotificationsBell go={go} /><span>{me.full_name} · {roleNames}</span><button onClick={logout}>Выйти</button></div>
       </header>
       <main className="wrap">
         <OfflineBar />
@@ -253,6 +256,7 @@ function Shell({ me, onLogout }: { me: Me; onLogout: () => void }) {
         <Suspense fallback={<p className="muted">Загрузка…</p>}>
         {tab === 'dash' && <DashPage me={me} clubs={clubs} clubId={clubId} openPerson={openPerson} go={go} canGo={(t) => visible.some((v) => v[0] === t)} pickClub={setClubId} />}
         {tab === 'hot' && <HotPage me={me} clubs={clubs} clubId={clubId} openPerson={openPerson} />}
+        {tab === 'sales' && <SalesOpsPage me={me} clubs={clubs} clubId={clubId} openPerson={openPerson} />}
         {tab === 'calls' && <CallsPage me={me} clubs={clubs} clubId={clubId} openPerson={openPerson} />}
         {tab === 'tasks' && <TasksPage key={ver} me={me} clubId={clubId} openPerson={openPerson} />}
         {tab === 'leads' && <LeadsPage key={ver} me={me} clubs={clubs} clubId={clubId} openPerson={openPerson} />}
