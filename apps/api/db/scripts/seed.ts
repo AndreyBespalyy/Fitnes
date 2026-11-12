@@ -151,7 +151,8 @@ export async function seed(url = need('OWNER_DATABASE_URL'), quiet = false, demo
   const pwHash = await hash(password);
   for (const [login, name, role, club] of STAFF) {
     const u = (await c.query(
-      'insert into users(tenant_id, login, password_hash, full_name, must_change_password) values ($1,$2,$3,$4,false) returning id',
+      // Тестовые сотрудники видят окно «Журнал замечаний» на каждой странице
+      'insert into users(tenant_id, login, password_hash, full_name, must_change_password, is_tester) values ($1,$2,$3,$4,false,true) returning id',
       [t, login, pwHash, name],
     )).rows[0].id;
     await c.query('insert into user_assignments(tenant_id, user_id, role_code, club_id) values ($1,$2,$3,$4)', [t, u, role, club === '*' ? null : clubs[club]]);

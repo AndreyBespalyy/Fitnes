@@ -1,5 +1,5 @@
 export type Role = { code: string; name: string; club_id: string | null };
-export type Me = { id: string; login: string; full_name: string; roles: Role[]; allClubs: boolean; permissions: string[]; mustChangePassword: boolean };
+export type Me = { id: string; login: string; full_name: string; roles: Role[]; allClubs: boolean; permissions: string[]; mustChangePassword: boolean; isTester?: boolean };
 export type Club = { id: string; name: string; address: string | null; timezone: string; salesModel: 'term' | 'subscription'; status: string; firstResponseMinutes: number; staffCount: number; personsCount: number; isDemo?: boolean };
 export type Staff = { id: string; login: string; fullName: string; phone: string | null; status: 'active' | 'blocked'; mustChangePassword: boolean;
   assignments: { role: string; roleName: string; clubId: string | null; clubName: string | null }[] };

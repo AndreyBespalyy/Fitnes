@@ -73,7 +73,7 @@ export function requirePerm(req: FastifyRequest, perm: string): Ctx {
 
 export async function me(pool: pg.Pool, ctx: Ctx, mustChange: boolean) {
   return withCtx(pool, ctx, async (db) => {
-    const u = (await db.query('select id, login, full_name from users where id = $1', [ctx.userId])).rows[0];
+    const u = (await db.query('select id, login, full_name, is_tester as "isTester" from users where id = $1', [ctx.userId])).rows[0];
     const roles = (await db.query(
       `select a.role_code as code, r.name, a.club_id from user_assignments a join roles r on r.code = a.role_code
        where a.user_id = $1 order by r.sort`, [ctx.userId])).rows;

@@ -6,6 +6,7 @@ import { CommandPalette, SideNav } from './nav.tsx';
 import { OfflineBar, ProfilePage, registerServiceWorker, StaffSessions } from './mobile.tsx';
 import { NotificationsBell } from './notifications.tsx';
 import { TeamButton } from './team/button.tsx';
+import { TestNotesWidget } from './testNotes.tsx';
 
 // Разделы грузятся по мере открытия: первый вход быстрее, особенно на планшете ресепшна
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -59,6 +60,7 @@ const ConfigPage = page(() => import('./config.tsx'), 'ConfigPage');
 const ReviewsPage = page(() => import('./insights.tsx'), 'ReviewsPage');
 const SalesOpsPage = page(() => import('./salesOps.tsx'), 'SalesOpsPage');
 const TeamPage = page(() => import('./team.tsx'), 'TeamPage');
+const TestNotesPage = page(() => import('./testNotes.tsx'), 'TestNotesPage');
 
 
 export function App() {
@@ -126,7 +128,7 @@ function ChangePassword({ me, forced, onDone, onLogout }: { me: Me; forced?: boo
   );
 }
 
-type Tab = 'dash' | 'hot' | 'calls' | 'leads' | 'board' | 'tasks' | 'home' | 'clubs' | 'tariffs' | 'contracts' | 'site' | 'fiscal' | 'finance' | 'import' | 'chats' | 'access' | 'messaging' | 'pipelines' | 'staff' | 'stafftime' | 'config' | 'reviews' | 'onboarding' | 'help' | 'schedule' | 'retention' | 'shop' | 'corp' | 'trainer' | 'desk' | 'load' | 'cohorts' | 'pnl' | 'usage' | 'intake' | 'sales' | 'team' | 'profile';
+type Tab = 'dash' | 'hot' | 'calls' | 'leads' | 'board' | 'tasks' | 'home' | 'clubs' | 'tariffs' | 'contracts' | 'site' | 'fiscal' | 'finance' | 'import' | 'chats' | 'access' | 'messaging' | 'pipelines' | 'staff' | 'stafftime' | 'config' | 'reviews' | 'onboarding' | 'help' | 'schedule' | 'retention' | 'shop' | 'corp' | 'trainer' | 'desk' | 'load' | 'cohorts' | 'pnl' | 'usage' | 'intake' | 'sales' | 'team' | 'notes' | 'profile';
 
 function Shell({ me, onLogout }: { me: Me; onLogout: () => void }) {
   const firstTab: Tab = 'dash';
@@ -218,6 +220,7 @@ function Shell({ me, onLogout }: { me: Me; onLogout: () => void }) {
     ['stafftime', 'График и зарплата', true],
     ['config', 'Настройки клуба', can(me, 'config.manage')],
     ['onboarding', 'Подключение клубов', can(me, 'clubs.manage')],
+    ['notes', 'Журнал замечаний', can(me, '*')],
     ['usage', 'Использование', me.allClubs && (can(me, '*') || me.roles.some((r) => r.code === 'admin'))],
     ['help', 'Помощь', true],
     ['profile', 'Профиль', true],
@@ -299,8 +302,10 @@ function Shell({ me, onLogout }: { me: Me; onLogout: () => void }) {
         {tab === 'onboarding' && <OnboardingPage me={me} clubId={clubId} go={(t) => setTab(t as Tab)} reloadClubs={reloadClubs} />}
         {tab === 'help' && <HelpPage me={me} clubs={clubs} clubId={clubId} page={tab} />}
         {tab === 'reviews' && <ReviewsPage me={me} clubs={clubs} clubId={clubId} openPerson={openPerson} />}
+        {tab === 'notes' && <TestNotesPage me={me} />}
         {tab === 'profile' && <ProfilePage me={me} passwordForm={<ChangePassword me={me} onDone={() => { alertOk('Пароль изменён'); setTab(firstTab); }} />} />}
         </Suspense>
+        {me.isTester && <TestNotesWidget me={me} tab={tab} tabLabel={tabLabel} personOpen={!!personId} clubId={clubId} />}
         <ReportProblem tab={tab} tabLabel={tabLabel} clubId={clubId} openHelp={() => go({ tab: 'help', p: { view: 'support' } })} />
       </main>
       </div>
