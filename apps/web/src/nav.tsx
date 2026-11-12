@@ -13,7 +13,7 @@ const GROUP: Record<string, string> = {
   leads: 'sales', board: 'sales', home: 'sales', chats: 'sales', retention: 'sales', reviews: 'sales', corp: 'sales',
   schedule: 'club', access: 'club', load: 'club', shop: 'club', tariffs: 'club', contracts: 'club',
   finance: 'money', fiscal: 'money', pnl: 'money', cohorts: 'money',
-  staff: 'team', stafftime: 'team',
+  team: 'today', staff: 'team', stafftime: 'team',
   clubs: 'setup', config: 'setup', pipelines: 'setup', intake: 'setup', messaging: 'setup', site: 'setup', import: 'setup', onboarding: 'setup', usage: 'setup',
   help: 'foot', profile: 'foot',
 };
@@ -29,6 +29,7 @@ const P: Record<string, string> = {
   board: 'M3 4h18l-7 9v6l-4 2v-8z',
   home: 'M12 4a4 4 0 1 1 0 8 4 4 0 0 1 0-8M4 21a8 8 0 0 1 16 0',
   chats: 'M4 5h16v11H8l-4 4z',
+  team: 'M3 6h13v9H7l-4 3zM8 18h9l4 3V9h-2',
   retention: 'M3 12a9 9 0 1 0 3-6.7M3 4v5h5',
   reviews: 'M12 3l2.7 5.6 6.3.9-4.5 4.4 1 6.1L12 17l-5.5 3 1-6.1L3 9.5l6.3-.9z',
   corp: 'M4 21V5a1 1 0 0 1 1-1h8a1 1 0 0 1 1 1v16M14 9h5a1 1 0 0 1 1 1v11M3 21h18M8 8h2M8 12h2M8 16h2',

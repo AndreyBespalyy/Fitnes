@@ -59,8 +59,9 @@ import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { platformRoutes } from './modules/platform.ts';
 import { salesOpsRoutes, startSalesOpsWorker } from './modules/salesOps.ts';
+import { teamRoutes, startTeamPushWorker } from './modules/team.ts';
 
-export async function buildApp(pool: pg.Pool, opts: { webDist?: string; secureCookie?: boolean; logger?: boolean; storageDir?: string; fiscalWorker?: boolean; messagingWorker?: boolean; billingWorker?: boolean; aiWorker?: boolean; scoringWorker?: boolean; pushWorker?: boolean; insightsWorker?: boolean; scheduleWorker?: boolean; retentionWorker?: boolean; surveyWorker?: boolean; staffBotWorker?: boolean; salesOpsWorker?: boolean; ai?: AiConfig | null; fetch?: typeof fetch } = {}) {
+export async function buildApp(pool: pg.Pool, opts: { webDist?: string; secureCookie?: boolean; logger?: boolean; storageDir?: string; fiscalWorker?: boolean; messagingWorker?: boolean; billingWorker?: boolean; aiWorker?: boolean; scoringWorker?: boolean; pushWorker?: boolean; insightsWorker?: boolean; scheduleWorker?: boolean; retentionWorker?: boolean; surveyWorker?: boolean; staffBotWorker?: boolean; salesOpsWorker?: boolean; teamPushWorker?: boolean; ai?: AiConfig | null; fetch?: typeof fetch } = {}) {
   const app = Fastify({ logger: opts.logger ?? false, trustProxy: true });
   await app.register(cookie);
 
@@ -160,6 +161,7 @@ export async function buildApp(pool: pg.Pool, opts: { webDist?: string; secureCo
   staffBotRoutes(app, pool, { fetch: opts.fetch });
   morningRoutes(app, pool, { fetch: opts.fetch });
   salesOpsRoutes(app, pool);
+  teamRoutes(app, pool, storage);
   platformRoutes(app, pool, { ownerUrl: process.env.PLATFORM_DATABASE_URL || process.env.OWNER_DATABASE_URL, secureCookie: !!opts.secureCookie });
   // Фоновая отправка чеков в облачную кассу (в тестах выключена, там вызывается напрямую)
   if (opts.messagingWorker) { const stop = startMessagingWorker(pool, opts.fetch); app.addHook('onClose', async () => stop()); }
@@ -169,6 +171,7 @@ export async function buildApp(pool: pg.Pool, opts: { webDist?: string; secureCo
   if (opts.salesOpsWorker) { const stop = startSalesOpsWorker(pool); app.addHook('onClose', async () => stop()); }
   if (opts.surveyWorker) { const stop = startSurveyWorker(pool, opts.fetch ?? fetch); app.addHook('onClose', async () => stop()); }
   if (opts.retentionWorker) { const stop = startRetentionWorker(pool, opts.fetch ?? fetch); app.addHook('onClose', async () => stop()); }
+  if (opts.teamPushWorker) { const stop = startTeamPushWorker(pool, opts.fetch ?? fetch); app.addHook('onClose', async () => stop()); }
   if (opts.pushWorker) { const stop = startPushWorker(pool, opts.fetch ?? fetch); app.addHook('onClose', async () => stop()); }
   if (opts.scoringWorker) { const stop = startScoringWorker(pool); app.addHook('onClose', async () => stop()); }
   if (opts.aiWorker) { const stop = startAiWorker(pool, ai, storage); app.addHook('onClose', async () => stop()); }

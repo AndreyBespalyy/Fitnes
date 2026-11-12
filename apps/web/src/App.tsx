@@ -5,6 +5,7 @@ import { ReportProblem } from './report.tsx';
 import { CommandPalette, SideNav } from './nav.tsx';
 import { OfflineBar, ProfilePage, registerServiceWorker, StaffSessions } from './mobile.tsx';
 import { NotificationsBell } from './notifications.tsx';
+import { TeamButton } from './team/button.tsx';
 
 // Разделы грузятся по мере открытия: первый вход быстрее, особенно на планшете ресепшна
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -57,6 +58,7 @@ const IntakePage = page(() => import('./intake.tsx'), 'IntakePage');
 const ConfigPage = page(() => import('./config.tsx'), 'ConfigPage');
 const ReviewsPage = page(() => import('./insights.tsx'), 'ReviewsPage');
 const SalesOpsPage = page(() => import('./salesOps.tsx'), 'SalesOpsPage');
+const TeamPage = page(() => import('./team.tsx'), 'TeamPage');
 
 
 export function App() {
@@ -124,7 +126,7 @@ function ChangePassword({ me, forced, onDone, onLogout }: { me: Me; forced?: boo
   );
 }
 
-type Tab = 'dash' | 'hot' | 'calls' | 'leads' | 'board' | 'tasks' | 'home' | 'clubs' | 'tariffs' | 'contracts' | 'site' | 'fiscal' | 'finance' | 'import' | 'chats' | 'access' | 'messaging' | 'pipelines' | 'staff' | 'stafftime' | 'config' | 'reviews' | 'onboarding' | 'help' | 'schedule' | 'retention' | 'shop' | 'corp' | 'trainer' | 'desk' | 'load' | 'cohorts' | 'pnl' | 'usage' | 'intake' | 'sales' | 'profile';
+type Tab = 'dash' | 'hot' | 'calls' | 'leads' | 'board' | 'tasks' | 'home' | 'clubs' | 'tariffs' | 'contracts' | 'site' | 'fiscal' | 'finance' | 'import' | 'chats' | 'access' | 'messaging' | 'pipelines' | 'staff' | 'stafftime' | 'config' | 'reviews' | 'onboarding' | 'help' | 'schedule' | 'retention' | 'shop' | 'corp' | 'trainer' | 'desk' | 'load' | 'cohorts' | 'pnl' | 'usage' | 'intake' | 'sales' | 'team' | 'profile';
 
 function Shell({ me, onLogout }: { me: Me; onLogout: () => void }) {
   const firstTab: Tab = 'dash';
@@ -182,6 +184,7 @@ function Shell({ me, onLogout }: { me: Me; onLogout: () => void }) {
   const roleNames = me.roles.map((r) => r.name).join(', ');
   const tabs: [Tab, string, boolean][] = [
     ['dash', 'Рабочий стол', true],
+    ['team', 'Мессенджер', true],
     ['tasks', 'Задачи', can(me, 'crm.work')],
     ['hot', 'Кому звонить', can(me, 'crm.work')],
     ['calls', 'Звонки', can(me, 'crm.work')],
@@ -252,7 +255,7 @@ function Shell({ me, onLogout }: { me: Me; onLogout: () => void }) {
       <div className="main-col">
       <header className="top">
         <button className="search-btn" onClick={() => setCmdk(true)}><span aria-hidden="true">⌕</span><span className="search-ph">Клиент, телефон или раздел</span><kbd>{/Mac|iPhone|iPad/.test(navigator.platform) ? '⌘K' : 'Ctrl K'}</kbd></button>
-        <div className="sp"><Suspense fallback={null}><LocalKktAgent me={me} clubId={clubId} /></Suspense><NotificationsBell go={go} />
+        <div className="sp"><Suspense fallback={null}><LocalKktAgent me={me} clubId={clubId} /></Suspense><TeamButton onOpen={() => setTab('team')} /><NotificationsBell go={go} />
           <span className="who-me"><span className="ava" aria-hidden="true">{me.full_name.split(' ').map((w) => w[0]).slice(0, 2).join('')}</span><span className="who-txt"><b>{me.full_name}</b><small>{roleNames}</small></span></span>
           <button className="btn sm" onClick={logout}>Выйти</button></div>
       </header>
@@ -261,6 +264,7 @@ function Shell({ me, onLogout }: { me: Me; onLogout: () => void }) {
         <Suspense fallback={<p className="muted">Загрузка…</p>}>
         {tab === 'dash' && <DashPage me={me} clubs={clubs} clubId={clubId} openPerson={openPerson} go={go} canGo={(t) => visible.some((v) => v[0] === t)} pickClub={setClubId} />}
         {tab === 'hot' && <HotPage me={me} clubs={clubs} clubId={clubId} openPerson={openPerson} />}
+        {tab === 'team' && <TeamPage me={me} clubs={clubs} clubId={clubId} />}
         {tab === 'sales' && <SalesOpsPage me={me} clubs={clubs} clubId={clubId} openPerson={openPerson} />}
         {tab === 'calls' && <CallsPage me={me} clubs={clubs} clubId={clubId} openPerson={openPerson} />}
         {tab === 'tasks' && <TasksPage key={ver} me={me} clubId={clubId} openPerson={openPerson} />}
