@@ -9,8 +9,8 @@ const GROUPS: [string, string][] = [
   ['today', 'Сегодня'], ['sales', 'Клиенты и продажи'], ['club', 'Клуб'], ['money', 'Деньги и аналитика'], ['team', 'Команда'], ['setup', 'Настройки'], ['other', 'Прочее'],
 ];
 const GROUP: Record<string, string> = {
-  dash: 'today', tasks: 'today', hot: 'today', calls: 'today', desk: 'today', trainer: 'today',
-  leads: 'sales', board: 'sales', home: 'sales', chats: 'sales', retention: 'sales', reviews: 'sales', corp: 'sales',
+  dash: 'today', team: 'today', tasks: 'today', hot: 'today', calls: 'today', desk: 'today', trainer: 'today',
+  sales: 'sales', leads: 'sales', board: 'sales', home: 'sales', chats: 'sales', retention: 'sales', reviews: 'sales', corp: 'sales',
   schedule: 'club', access: 'club', load: 'club', shop: 'club', tariffs: 'club', contracts: 'club',
   finance: 'money', fiscal: 'money', pnl: 'money', cohorts: 'money',
   staff: 'team', stafftime: 'team',
@@ -26,6 +26,8 @@ const P: Record<string, string> = {
   desk: 'M14 12v.01M5 21h14M6 21V4a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v17',
   trainer: 'M6 9v6M18 9v6M3 11v2M21 11v2M6 12h12',
   leads: 'M12 5v14M5 12h14',
+  sales: 'M3 3v18h18M7 14l4-4 3 3 5-6',
+  team: 'M21 12a8 8 0 0 1-11.6 7.1L4 20l1-4.4A8 8 0 1 1 21 12zM8 11h8M8 14h5',
   board: 'M3 4h18l-7 9v6l-4 2v-8z',
   home: 'M12 4a4 4 0 1 1 0 8 4 4 0 0 1 0-8M4 21a8 8 0 0 1 16 0',
   chats: 'M4 5h16v11H8l-4 4z',
