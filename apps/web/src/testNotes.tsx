@@ -6,6 +6,7 @@
 import { Fragment, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { api, type Me } from './api.ts';
 import { dt, errText, toast } from './ui.ts';
+import { ShotEditor } from './shotEditor.tsx';
 
 type Kind = 'bug' | 'ux' | 'idea';
 type Status = 'new' | 'in_work' | 'done' | 'rejected';
@@ -148,9 +149,15 @@ export function TestNotesWidget({ me, tab, tabLabel, personOpen, clubId }: { me:
     setAsk(null);
   };
 
-  const addShot = async (b: Blob) => { try { setDraft({ ...draft, shot: await shrink(b) }); } catch { setErr('Не получилось прочитать картинку'); } };
+  // Новый скриншот сразу открывается в редакторе поверх страницы: обвести, подписать, сохранить
+  const [editing, setEditing] = useState<string | null>(null);
+  const [capturing, setCapturing] = useState(false);
+  const addShot = async (b: Blob) => { try { setEditing(await shrink(b)); } catch { setErr('Не получилось прочитать картинку'); } };
   const snap = async () => {
-    try { const s = await captureScreen(); if (s) setDraft({ ...draft, shot: s }); } catch { /* отказались выбирать экран */ }
+    // Окно журнала на время снимка прячем, чтобы оно не закрывало страницу
+    setCapturing(true);
+    await new Promise((r) => setTimeout(r, 120));
+    try { const s = await captureScreen(); if (s) setEditing(s); } catch { /* отказались выбирать экран */ } finally { setCapturing(false); }
   };
   const canSnap = typeof navigator.mediaDevices?.getDisplayMedia === 'function' && window.innerWidth > 640;
   const fileRef = useRef<HTMLInputElement>(null);
@@ -161,10 +168,11 @@ export function TestNotesWidget({ me, tab, tabLabel, personOpen, clubId }: { me:
 
   return (
     <>
-      {!open && <button className="tn-btn" onClick={() => setOpen(true)} title="Журнал замечаний к этой странице">
+      {!open && !capturing && <button className="tn-btn" onClick={() => setOpen(true)} title="Журнал замечаний к этой странице">
         <span aria-hidden="true">✎</span><span className="tn-btn-t">Замечания</span>{!isEmpty(draft) && <i className="tn-dot" aria-label="есть черновик" />}</button>}
+      {editing && <ShotEditor src={editing} onCancel={() => setEditing(null)} onSave={(img) => { setDraft({ ...draft, shot: img }); setEditing(null); }} />}
       {open && (
-        <section className="tn-panel card" aria-label="Журнал замечаний">
+        <section className="tn-panel card" aria-label="Журнал замечаний" style={capturing ? { visibility: 'hidden' } : undefined}>
           <div className="row between" style={{ alignItems: 'flex-start', gap: 8 }}>
             <div style={{ minWidth: 0 }}>
               <div className="lbl">Журнал замечаний</div>
@@ -176,11 +184,12 @@ export function TestNotesWidget({ me, tab, tabLabel, personOpen, clubId }: { me:
           <div className="tabs" role="group" aria-label="Тип записи">
             {KIND.map(([k, l]) => <button key={k} aria-pressed={draft.kind === k} onClick={() => setDraft({ ...draft, kind: draft.kind === k ? null : k })}>{l}</button>)}
           </div>
-          <textarea rows={5} value={draft.text} placeholder="Что не так на этой странице или что хотелось бы. Скриншот можно вставить сюда: ⌘V"
+          <textarea rows={5} value={draft.text} placeholder="Что не так на этой странице или что хотелось бы. Скриншот можно вставить сюда: ⌘V — он откроется, чтобы обвести и подписать"
             onChange={(e) => setDraft({ ...draft, text: e.target.value })}
             onKeyDown={(e) => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); saveHere(); } }}
             onPaste={(e) => { const f = [...e.clipboardData.items].find((i) => i.type.startsWith('image/'))?.getAsFile(); if (f) { e.preventDefault(); addShot(f); } }} />
-          {draft.shot && <div className="tn-shot"><img src={draft.shot} alt="Скриншот к записи" /><button className="btn sm" onClick={() => setDraft({ ...draft, shot: null })}>Убрать скриншот</button></div>}
+          {draft.shot && <div className="tn-shot"><img src={draft.shot} alt="Скриншот к записи" onClick={() => setEditing(draft.shot)} title="Открыть и дорисовать" style={{ cursor: 'zoom-in' }} />
+            <div className="row" style={{ gap: 6 }}><button className="btn sm" onClick={() => setEditing(draft.shot)}>Дорисовать</button><button className="btn sm" onClick={() => setDraft({ ...draft, shot: null })}>Убрать скриншот</button></div></div>}
           {err && <div className="err">{err}</div>}
           <div className="row" style={{ gap: 6, flexWrap: 'wrap' }}>
             <button className="btn pri sm" disabled={busy || !draft.text.trim()} onClick={saveHere}>{busy ? 'Сохраняю…' : 'Сохранить'}</button>
