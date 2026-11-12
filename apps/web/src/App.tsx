@@ -2,6 +2,7 @@ import { lazy, Suspense, useEffect, useState, type ComponentType, type FormEvent
 import { api, ApiError, can, clearDeviceData, setNavIntent, type Go, MODEL, MODEL_SHORT, type Club, type Me, type Person, type RoleDef, type Staff } from './api.ts';
 import { errText, toast as alertOk } from './ui.ts';
 import { ReportProblem } from './report.tsx';
+import { CommandPalette, SideNav } from './nav.tsx';
 import { OfflineBar, ProfilePage, registerServiceWorker, StaffSessions } from './mobile.tsx';
 import { NotificationsBell } from './notifications.tsx';
 import { TeamButton } from './team/button.tsx';
@@ -139,6 +140,7 @@ function Shell({ me, onLogout }: { me: Me; onLogout: () => void }) {
   const [init] = useState(() => { const u = readUrl(); if (u.tab && Object.keys(u.p).length) setNavIntent({ tab: u.tab, p: u.p }); return u; });
   const [tab, setTabState] = useState<Tab>(init.tab ?? firstTab);
   const [more, setMore] = useState(false);
+  const [cmdk, setCmdk] = useState(false);
   const [personId, setPersonId] = useState<string | null>(init.person);
   const href = (t: string, p: Record<string, string> = {}, person?: string | null) => {
     const q = new URLSearchParams({ tab: t, ...p }); if (person) q.set('person', person); return `/?${q}`;
@@ -241,21 +243,24 @@ function Shell({ me, onLogout }: { me: Me; onLogout: () => void }) {
   const icon: Partial<Record<Tab, string>> = { dash: '◧', trainer: '◷', desk: '⚑', hot: '☎', tasks: '✓', schedule: '▦', chats: '✉', home: '☺', access: '⇥', finance: '₽' };
   return (
     <>
-      <header className="top">
-        <div className="brand"><i />Клубная ОС</div>
-        {clubs.length > 0 && (
-          <select aria-label="Клуб" value={clubId} onChange={(e) => setClubId(e.target.value)}>
+      <div className="shell">
+      <SideNav items={visible.map(([k, t]) => [k, t])} tab={tab} setTab={(t) => setTab(t as Tab)} open={more}
+        brand={<div className="brand"><i />Клубная ОС</div>}
+        club={clubs.length > 0 ? (
+          <select className="club-pick" aria-label="Клуб" value={clubId} onChange={(e) => setClubId(e.target.value)}>
             {me.allClubs && <option value="all">Вся сеть</option>}
             {clubs.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
           </select>
-        )}
-        <div className="sp"><Suspense fallback={null}><LocalKktAgent me={me} clubId={clubId} /></Suspense><TeamButton onOpen={() => setTab('team')} /><NotificationsBell go={go} /><span>{me.full_name} · {roleNames}</span><button onClick={logout}>Выйти</button></div>
+        ) : null} />
+      <div className="main-col">
+      <header className="top">
+        <button className="search-btn" onClick={() => setCmdk(true)}><span aria-hidden="true">⌕</span><span className="search-ph">Клиент, телефон или раздел</span><kbd>{/Mac|iPhone|iPad/.test(navigator.platform) ? '⌘K' : 'Ctrl K'}</kbd></button>
+        <div className="sp"><Suspense fallback={null}><LocalKktAgent me={me} clubId={clubId} /></Suspense><TeamButton onOpen={() => setTab('team')} /><NotificationsBell go={go} />
+          <span className="who-me"><span className="ava" aria-hidden="true">{me.full_name.split(' ').map((w) => w[0]).slice(0, 2).join('')}</span><span className="who-txt"><b>{me.full_name}</b><small>{roleNames}</small></span></span>
+          <button className="btn sm" onClick={logout}>Выйти</button></div>
       </header>
       <main className="wrap">
         <OfflineBar />
-        <div className={`tabs main-tabs ${more ? 'open' : ''}`} role="group" aria-label="Разделы">
-          {visible.map(([k, t]) => <button key={k} aria-pressed={tab === k} onClick={() => setTab(k)}>{t}</button>)}
-        </div>
         <Suspense fallback={<p className="muted">Загрузка…</p>}>
         {tab === 'dash' && <DashPage me={me} clubs={clubs} clubId={clubId} openPerson={openPerson} go={go} canGo={(t) => visible.some((v) => v[0] === t)} pickClub={setClubId} />}
         {tab === 'hot' && <HotPage me={me} clubs={clubs} clubId={clubId} openPerson={openPerson} />}
@@ -298,6 +303,9 @@ function Shell({ me, onLogout }: { me: Me; onLogout: () => void }) {
         </Suspense>
         <ReportProblem tab={tab} tabLabel={tabLabel} clubId={clubId} openHelp={() => go({ tab: 'help', p: { view: 'support' } })} />
       </main>
+      </div>
+      </div>
+      <CommandPalette items={visible.map(([k, t]) => [k, t])} open={cmdk} setOpen={setCmdk} setTab={(t) => setTab(t as Tab)} openPerson={openPerson} canPersons={can(me, 'persons.view')} />
       <nav className="bottom-nav" aria-label="Главные разделы">
         {bottom.map((k) => <button key={k} aria-pressed={tab === k && !more} onClick={() => setTab(k)}><span aria-hidden="true">{icon[k]}</span>{short[k]}</button>)}
         <button aria-pressed={more || !bottom.includes(tab)} onClick={() => { setMore(!more); window.scrollTo(0, 0); }}><span aria-hidden="true">☰</span>Ещё</button>

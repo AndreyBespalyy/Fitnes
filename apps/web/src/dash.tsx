@@ -47,6 +47,7 @@ export function DashPage({ me, clubs, clubId, openPerson, go: goTo, canGo, pickC
   const q = `clubId=${clubId}&month=${month}&from=${range.from}&to=${range.to}`;
   return (
     <>
+      <Hello me={me} club={club} />
       <div className="row between" style={{ flexWrap: 'wrap', gap: 8 }}>
         <div className="tabs" role="group" aria-label="Рабочий стол">
           {tabs.filter((t) => t[2]).map(([k, t]) => <button key={k} aria-pressed={view === k} onClick={() => setView(k)}>{t}</button>)}
@@ -73,6 +74,19 @@ export function DashPage({ me, clubs, clubId, openPerson, go: goTo, canGo, pickC
       {view === 'sales' && <SalesReport clubId={clubId} />}
       {view === 'metrics' && <MetricsDictionary metrics={metrics} />}
     </>
+  );
+}
+/** Приветствие над рабочим столом: кто, где и какой сегодня день */
+function Hello({ me, club }: { me: Me; club: Club | null }) {
+  const h = new Date().getHours();
+  const hi = h < 5 ? 'Доброй ночи' : h < 12 ? 'Доброе утро' : h < 18 ? 'Добрый день' : 'Добрый вечер';
+  const name = me.full_name.split(' ')[0];
+  const day = new Date().toLocaleDateString('ru-RU', { weekday: 'long', day: 'numeric', month: 'long' });
+  return (
+    <div className="hello">
+      <h1>{hi}, {name}</h1>
+      <span className="muted">{day} · {me.roles.map((r) => r.name).join(', ')} · {club ? club.name : 'вся сеть'}</span>
+    </div>
   );
 }
 const SelectClub = () => <div className="card"><p>Выберите клуб в списке вверху страницы.</p></div>;

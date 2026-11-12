@@ -146,3 +146,5 @@
 .tm-inv-text{white-space:pre-wrap;background:var(--surface-2);border-radius:10px;padding:10px 12px;font-size:13px;margin:0}
 @media (max-width:640px){.tm-inv-hero{grid-template-columns:1fr}.tm-qr{display:none}}
 .tm-unread-dot{display:inline-grid;place-items:center;min-width:18px;height:18px;padding:0 5px;border-radius:9px;background:var(--accent);color:var(--accent-ink);font-size:11px;font-weight:800;margin-left:6px}
+/* В CRM справа внизу висит кнопка «Сообщить о проблеме» — не перекрываем ею «Отправить» */
+.wrap .tm-compose{padding-right:64px}
