@@ -5,7 +5,7 @@ import { errText, toast } from './ui.ts';
 
 export function ReportProblem({ tab, tabLabel, clubId, openHelp }: { tab: string; tabLabel: string; clubId: string; openHelp: () => void }) {
   const [open, setOpen] = useState(false);
-  const [kind, setKind] = useState<'bug' | 'question' | 'idea'>('bug');
+  const [kind, setKind] = useState<'bug' | 'question' | 'idea'>('idea');
   const [text, setText] = useState('');
   const [attach, setAttach] = useState(true);
   const [busy, setBusy] = useState(false);
@@ -27,13 +27,14 @@ export function ReportProblem({ tab, tabLabel, clubId, openHelp }: { tab: string
   };
   return (
     <>
-      <button className="report-btn" onClick={() => setOpen(true)} aria-label="Сообщить о проблеме" title="Сообщить о проблеме">?</button>
+      <button className="report-btn" onClick={() => setOpen(true)} aria-label="Предложения" title="Предложение, вопрос или проблема — в поддержку">
+        <span aria-hidden="true">💡</span><span className="report-btn-t">Предложения</span></button>
       {open && (
         <div className="modal-bg" role="dialog" aria-modal="true" aria-label="Сообщить о проблеме" onClick={(e) => { if (e.target === e.currentTarget) setOpen(false); }}>
           <div className="card modal" style={{ display: 'grid', gap: 10, maxWidth: 520 }}>
-            <div className="row between"><h2 style={{ margin: 0 }}>Сообщить о проблеме</h2><button className="btn sm" onClick={() => setOpen(false)} aria-label="Закрыть">×</button></div>
+            <div className="row between"><h2 style={{ margin: 0 }}>Предложения</h2><button className="btn sm" onClick={() => setOpen(false)} aria-label="Закрыть">×</button></div>
             <div className="tabs" role="group" aria-label="Что случилось">
-              {([['bug', 'Что-то не работает'], ['question', 'Вопрос'], ['idea', 'Идея']] as const).map(([k, l]) => <button key={k} aria-pressed={kind === k} onClick={() => setKind(k)}>{l}</button>)}
+              {([['idea', 'Предложение'], ['bug', 'Что-то не работает'], ['question', 'Вопрос']] as const).map(([k, l]) => <button key={k} aria-pressed={kind === k} onClick={() => setKind(k)}>{l}</button>)}
             </div>
             <label className="f">Раздел «{tabLabel}». Что произошло?
               <textarea rows={4} autoFocus value={text} onChange={(e) => setText(e.target.value)} placeholder={kind === 'bug' ? 'Что делали, что ожидали и что получилось. Например: нажала «Оплатить», выдало ошибку' : kind === 'idea' ? 'Что было бы удобно' : 'Ваш вопрос'} /></label>

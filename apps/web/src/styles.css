@@ -265,11 +265,11 @@ a.btn{text-decoration:none;color:inherit}
 .pnl-bar.rev,.pnl-key.rev{background:var(--accent)} .pnl-bar.exp,.pnl-key.exp{background:var(--warm,#E3A64E)}
 .pnl-key{display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:4px;vertical-align:middle}
 /* Сообщить о проблеме */
-.report-btn{position:fixed;right:16px;bottom:16px;z-index:25;width:40px;height:40px;border-radius:50%;border:1px solid var(--line);background:var(--surface);color:var(--muted);font:700 18px var(--f);cursor:pointer;box-shadow:0 2px 8px color-mix(in srgb,var(--ink) 12%,transparent)}
-.report-btn:hover{color:var(--accent);border-color:var(--accent)}
+.report-btn{position:fixed;right:16px;bottom:16px;z-index:25;height:40px;display:flex;align-items:center;gap:6px;padding:0 14px;border-radius:999px;border:1px solid var(--accent);background:var(--accent-soft);color:var(--accent-strong);font:600 13px var(--f);cursor:pointer;box-shadow:0 4px 14px rgba(0,0,0,.35)}
+.report-btn:hover{background:var(--accent);color:var(--accent-ink)}
 .modal-bg{position:fixed;inset:0;background:color-mix(in srgb,var(--ink) 45%,transparent);z-index:35;display:flex;align-items:center;justify-content:center;padding:16px}
 .modal-bg .modal{width:100%;max-height:calc(100vh - 32px);overflow:auto}
-@media (max-width:640px){.report-btn{bottom:calc(76px + env(safe-area-inset-bottom));width:36px;height:36px;font-size:16px}}
+@media (max-width:640px){.report-btn{bottom:calc(76px + env(safe-area-inset-bottom));height:36px;padding:0 12px}.report-btn-t{display:none}}
 .use-days{display:flex;align-items:flex-end;justify-content:space-between;gap:2px;height:64px}
 .use-days span{flex:1;min-width:3px;max-width:28px;background:var(--accent);border-radius:3px 3px 0 0}
 .use-bar{height:4px;background:var(--line);border-radius:2px;margin-top:3px}
@@ -393,7 +393,7 @@ input[type="checkbox"],input[type="radio"]{accent-color:var(--accent)}
 .modal-bg{background:rgba(3,6,10,.62)}
 @media (max-width:640px){.search-btn kbd{display:none}.search-btn{padding:8px 12px}}
 /* Журнал замечаний тестировщика: кнопка и окно внизу справа, рядом с «?» */
-.tn-btn{position:fixed;right:66px;bottom:16px;z-index:25;height:40px;display:flex;align-items:center;gap:6px;padding:0 14px;border-radius:999px;border:1px solid var(--accent);background:var(--accent-soft);color:var(--accent-strong);font:600 13px var(--f);cursor:pointer;box-shadow:0 4px 14px rgba(0,0,0,.35)}
+.tn-btn{position:fixed;right:166px;bottom:16px;z-index:25;height:40px;display:flex;align-items:center;gap:6px;padding:0 14px;border-radius:999px;border:1px solid var(--accent);background:var(--accent-soft);color:var(--accent-strong);font:600 13px var(--f);cursor:pointer;box-shadow:0 4px 14px rgba(0,0,0,.35)}
 .tn-btn:hover{background:var(--accent);color:var(--accent-ink)}
 .tn-dot{width:8px;height:8px;border-radius:50%;background:var(--warm);display:inline-block}
 .tn-panel{position:fixed;right:16px;bottom:16px;z-index:30;width:min(400px,calc(100vw - 32px));max-height:min(78vh,720px);overflow:auto;display:grid;gap:10px;box-shadow:0 14px 40px rgba(0,0,0,.5);border-color:var(--accent)}
