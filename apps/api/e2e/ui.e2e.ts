@@ -170,10 +170,10 @@ test('7. настройки клуба: черновик, проверка, ут
   noErrors(p); await ctx.close();
 });
 
-test('8. сообщить о проблеме: обращение с разделом попадает в поддержку', async () => {
+test('8. кнопка «Предложения»: обращение с разделом попадает в поддержку', async () => {
   const { ctx, p } = await open('e.orlova');
   await tab(p, 'Финансы');
-  await p.getByRole('button', { name: 'Сообщить о проблеме' }).click();
+  await p.getByRole('button', { name: 'Предложения', exact: true }).click();
   await p.getByRole('dialog').locator('textarea').fill('Не сходится касса за вчера');
   await p.getByRole('dialog').getByRole('button', { name: 'Отправить' }).click();
   await toast(p, /Обращение № \d+ отправлено/);
