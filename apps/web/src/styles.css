@@ -437,7 +437,7 @@ input[type="checkbox"],input[type="radio"]{accent-color:var(--accent)}
 .shot-canvas.tool-text{cursor:text}
 .shot-text{position:absolute;color:#fff;background:rgba(10,14,19,.92);border:2px solid;border-radius:6px;padding:2px 6px;font-weight:700;font-family:var(--f);resize:none;outline:none;font-size:14px;min-height:44px}
 @media (max-width:640px){.shot-l{display:none}.shot-ed{padding:8px}.shot-canvas{max-height:calc(100vh - 170px)}}
-.tn-snap{width:100%;justify-content:center;display:flex;gap:8px;align-items:center;padding:10px;font-weight:600}
+.tn-snap{width:100%;min-height:48px;font-size:16px;justify-content:center;display:flex;gap:8px;align-items:center}
 .tn-kinds{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
 .tn-kind{min-height:56px;border-radius:12px;border:2px solid var(--line);background:var(--surface-2);color:var(--ink);font:700 15px var(--f);cursor:pointer}
 .tn-kind:hover{border-color:var(--muted)}

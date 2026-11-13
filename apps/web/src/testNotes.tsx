@@ -188,7 +188,7 @@ export function TestNotesWidget({ me, tab, tabLabel, personOpen, clubId }: { me:
             onChange={(e) => setDraft({ ...draft, text: e.target.value })}
             onKeyDown={(e) => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); saveHere(); } }}
             onPaste={(e) => { const f = [...e.clipboardData.items].find((i) => i.type.startsWith('image/'))?.getAsFile(); if (f) { e.preventDefault(); addShot(f); } }} />
-          <button className="btn tn-snap" onClick={snap} disabled={capturing}><span aria-hidden="true">📷</span> {capturing ? 'Снимаю…' : 'Сделать скрин экрана'}</button>
+          <button className="btn pri tn-snap" onClick={snap} disabled={capturing}><span aria-hidden="true">📷</span> {capturing ? 'Снимаю…' : 'Сделать скрин экрана'}</button>
           {draft.shot && <div className="tn-shot"><img src={draft.shot} alt="Скриншот к записи" onClick={() => setEditing(draft.shot)} title="Открыть и дорисовать" style={{ cursor: 'zoom-in' }} />
             <div className="row" style={{ gap: 6 }}><button className="btn sm" onClick={() => setEditing(draft.shot)}>Дорисовать</button><button className="btn sm" onClick={() => setDraft({ ...draft, shot: null })}>Убрать скриншот</button></div></div>}
           {err && <div className="err">{err}</div>}
