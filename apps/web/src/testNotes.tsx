@@ -6,6 +6,7 @@
 import { Fragment, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { api, type Me } from './api.ts';
 import { dt, errText, toast } from './ui.ts';
+import { ShotEditor } from './shotEditor.tsx';
 
 type Kind = 'bug' | 'ux' | 'idea';
 type Status = 'new' | 'in_work' | 'done' | 'rejected';
@@ -69,18 +70,25 @@ async function shrink(blob: Blob): Promise<string> {
   return c.toDataURL('image/jpeg', 0.85);
 }
 
+/** Снимок видимой части страницы прямо в браузере — без системного диалога выбора экрана.
+ *  Окно журнала, кнопки и всплывающие окна в снимок не попадают. */
 async function captureScreen(): Promise<string | null> {
-  const md = navigator.mediaDevices as MediaDevices & { getDisplayMedia?: (o: unknown) => Promise<MediaStream> };
-  if (!md?.getDisplayMedia) return null;
-  const stream = await md.getDisplayMedia({ video: true, audio: false, preferCurrentTab: true, selfBrowserSurface: 'include' });
-  try {
-    const v = document.createElement('video'); v.srcObject = stream; v.muted = true; await v.play();
-    await new Promise((r) => setTimeout(r, 250));
-    const c = document.createElement('canvas'); c.width = v.videoWidth; c.height = v.videoHeight;
-    c.getContext('2d')!.drawImage(v, 0, 0);
-    const blob = await new Promise<Blob | null>((r) => c.toBlob(r, 'image/png'));
-    return blob ? shrink(blob) : null;
-  } finally { stream.getTracks().forEach((t) => t.stop()); }
+  const { toCanvas } = await import('html-to-image');
+  const skip = (n: Node) => !(n instanceof Element && n.matches('.tn-panel, .tn-btn, .report-btn, .shot-ed, .tn-ask, .toast'));
+  const W = window.innerWidth, H = window.innerHeight, sx = window.scrollX, sy = window.scrollY;
+  const opts = {
+    filter: skip, pixelRatio: Math.min(2, window.devicePixelRatio || 1), cacheBust: false,
+    backgroundColor: getComputedStyle(document.body).backgroundColor || '#0D1117',
+    width: document.documentElement.scrollWidth, height: document.documentElement.scrollHeight,
+  };
+  // Со шрифтами страницы снимок выглядит как экран; если шрифты не встроились — снимаем без них
+  const full = await toCanvas(document.body, opts).catch(() => toCanvas(document.body, { ...opts, skipFonts: true }));
+  // Оставляем то, что было на экране
+  const k = full.width / document.documentElement.scrollWidth;
+  const c = document.createElement('canvas'); c.width = Math.round(W * k); c.height = Math.round(H * k);
+  c.getContext('2d')!.drawImage(full, Math.round(sx * k), Math.round(sy * k), c.width, c.height, 0, 0, c.width, c.height);
+  const blob = await new Promise<Blob | null>((r) => c.toBlob(r, 'image/png'));
+  return blob ? shrink(blob) : null;
 }
 
 /* ---------- Окно журнала на странице ---------- */
@@ -131,40 +139,43 @@ export function TestNotesWidget({ me, tab, tabLabel, personOpen, clubId }: { me:
   }, []);
 
   const save = async (p: Page, d: Draft) => {
-    await api<TestNote>('POST', '/api/test-notes', { pageKey: p.key, pageLabel: p.label, kind: d.kind, body: d.text.trim(), clubId, shot: d.shot });
+    await api<TestNote>('POST', '/api/test-notes', { pageKey: p.key, pageLabel: p.label, kind: d.kind, body: d.text.trim() || 'Замечание на скриншоте', clubId, shot: d.shot });
     keepDraft(p.key, EMPTY);
   };
   const saveHere = async () => {
-    if (!draft.text.trim()) { setErr('Напишите замечание: что не так или что хотелось бы'); return; }
+    if (!draft.text.trim() && !draft.shot) { setErr('Напишите замечание или сделайте скрин экрана'); return; }
     setBusy(true); setErr('');
     try { await save(page, draft); setDraftState(EMPTY); toast('Запись сохранена в журнале замечаний'); load(page.key); } catch (x) { setErr(errText(x)); } finally { setBusy(false); }
   };
   const answer = async (yes: boolean) => {
     if (!ask) return;
     if (yes) {
-      if (!ask.draft.text.trim()) { toast('В записи нет текста — добавьте пару слов к скриншоту'); return; }
       try { await save(ask.page, ask.draft); toast(`Запись сохранена: ${ask.page.label}`); } catch (x) { toast(errText(x)); return; }
     } else keepDraft(ask.page.key, EMPTY);
     setAsk(null);
   };
 
-  const addShot = async (b: Blob) => { try { setDraft({ ...draft, shot: await shrink(b) }); } catch { setErr('Не получилось прочитать картинку'); } };
+  // Новый скриншот сразу открывается в редакторе поверх страницы: обвести, подписать, сохранить
+  const [editing, setEditing] = useState<string | null>(null);
+  const [capturing, setCapturing] = useState(false);
+  const addShot = async (b: Blob) => { try { setEditing(await shrink(b)); } catch { setErr('Не получилось прочитать картинку'); } };
   const snap = async () => {
-    try { const s = await captureScreen(); if (s) setDraft({ ...draft, shot: s }); } catch { /* отказались выбирать экран */ }
-  };
-  const canSnap = typeof navigator.mediaDevices?.getDisplayMedia === 'function' && window.innerWidth > 640;
-  const fileRef = useRef<HTMLInputElement>(null);
-
-  const remove = async (n: TestNote) => {
-    try { await api('DELETE', `/api/test-notes/${n.id}`); load(page.key); } catch (x) { toast(errText(x)); }
+    // Окно журнала на время снимка прячем, чтобы оно не закрывало страницу
+    setCapturing(true);
+    await new Promise((r) => setTimeout(r, 120));
+    try { const s = await captureScreen(); if (s) setEditing(s); else setErr('Не получилось снять экран'); } catch { setErr('Не получилось снять экран. Вставьте снимок через ⌘V'); } finally { setCapturing(false); }
   };
 
   return (
     <>
-      {!open && <button className="tn-btn" onClick={() => setOpen(true)} title="Журнал замечаний к этой странице">
+      {!open && !capturing && <button className="tn-btn" onClick={() => setOpen(true)} title="Журнал замечаний к этой странице">
         <span aria-hidden="true">✎</span><span className="tn-btn-t">Замечания</span>{!isEmpty(draft) && <i className="tn-dot" aria-label="есть черновик" />}</button>}
+      {editing && <ShotEditor src={editing} onCancel={() => setEditing(null)} onSave={(img, areaNotes) => {
+        // Если текст записи пустой — берём подписи областей со скриншота
+        const text = draft.text.trim() ? draft.text : areaNotes.map((t, i) => `${i + 1}. ${t}`).join('\n');
+        setDraft({ ...draft, text, shot: img }); setEditing(null); }} />}
       {open && (
-        <section className="tn-panel card" aria-label="Журнал замечаний">
+        <section className="tn-panel card" aria-label="Журнал замечаний" style={capturing ? { visibility: 'hidden' } : undefined}>
           <div className="row between" style={{ alignItems: 'flex-start', gap: 8 }}>
             <div style={{ minWidth: 0 }}>
               <div className="lbl">Журнал замечаний</div>
@@ -173,35 +184,18 @@ export function TestNotesWidget({ me, tab, tabLabel, personOpen, clubId }: { me:
             </div>
             <button className="btn sm" onClick={() => setOpen(false)} aria-label="Свернуть журнал">–</button>
           </div>
-          <div className="tabs" role="group" aria-label="Тип записи">
-            {KIND.map(([k, l]) => <button key={k} aria-pressed={draft.kind === k} onClick={() => setDraft({ ...draft, kind: draft.kind === k ? null : k })}>{l}</button>)}
-          </div>
-          <textarea rows={5} value={draft.text} placeholder="Что не так на этой странице или что хотелось бы. Скриншот можно вставить сюда: ⌘V"
+          <textarea rows={4} value={draft.text} placeholder="Что не так на этой странице или что хотелось бы"
             onChange={(e) => setDraft({ ...draft, text: e.target.value })}
             onKeyDown={(e) => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); saveHere(); } }}
             onPaste={(e) => { const f = [...e.clipboardData.items].find((i) => i.type.startsWith('image/'))?.getAsFile(); if (f) { e.preventDefault(); addShot(f); } }} />
-          {draft.shot && <div className="tn-shot"><img src={draft.shot} alt="Скриншот к записи" /><button className="btn sm" onClick={() => setDraft({ ...draft, shot: null })}>Убрать скриншот</button></div>}
+          <button className="btn tn-snap" onClick={snap} disabled={capturing}><span aria-hidden="true">📷</span> {capturing ? 'Снимаю…' : 'Сделать скрин экрана'}</button>
+          {draft.shot && <div className="tn-shot"><img src={draft.shot} alt="Скриншот к записи" onClick={() => setEditing(draft.shot)} title="Открыть и дорисовать" style={{ cursor: 'zoom-in' }} />
+            <div className="row" style={{ gap: 6 }}><button className="btn sm" onClick={() => setEditing(draft.shot)}>Дорисовать</button><button className="btn sm" onClick={() => setDraft({ ...draft, shot: null })}>Убрать скриншот</button></div></div>}
           {err && <div className="err">{err}</div>}
-          <div className="row" style={{ gap: 6, flexWrap: 'wrap' }}>
-            <button className="btn pri sm" disabled={busy || !draft.text.trim()} onClick={saveHere}>{busy ? 'Сохраняю…' : 'Сохранить'}</button>
-            <button className="btn sm" onClick={() => fileRef.current?.click()}>Скриншот из файла</button>
-            {canSnap && <button className="btn sm" onClick={snap}>Снять экран</button>}
-            <input ref={fileRef} type="file" accept="image/png,image/jpeg,image/webp" hidden onChange={(e) => { const f = e.target.files?.[0]; if (f) addShot(f); e.target.value = ''; }} />
+          <div className="tn-kinds" role="group" aria-label="Тип записи">
+            {KIND.map(([k, l]) => <button key={k} className={`tn-kind k-${k}`} aria-pressed={draft.kind === k} onClick={() => setDraft({ ...draft, kind: draft.kind === k ? null : k })}>{l}</button>)}
           </div>
-          <div className="small">⌘ Enter — сохранить. Черновик хранится, пока вы на другой странице.</div>
-          <div className="tn-list">
-            <div className="lbl">Мои записи по этой странице{notes ? `: ${notes.length}` : ''}</div>
-            {notes === null && <div className="small">Загрузка…</div>}
-            {notes?.length === 0 && <div className="small">Пока нет. Всё, что заметите здесь, пишите в это окно.</div>}
-            {notes?.map((n) => (
-              <div key={n.id} className="tn-item">
-                <div className="row between small"><span>№ {n.number} · {dt(n.createdAt)}{n.kind ? ` · ${KIND_TEXT[n.kind]}` : ''}{n.hasShot ? ' · скриншот' : ''}</span>
-                  <span className={STATUS_CHIP[n.status]}>{STATUS_TEXT[n.status]}</span></div>
-                <div className="tn-body">{n.body}</div>
-                {n.statusNote && <div className="small">Ответ: {n.statusNote}</div>}
-                {n.status === 'new' && <button className="link small" onClick={() => remove(n)}>Удалить</button>}
-              </div>))}
-          </div>
+          <button className="btn pri tn-save" disabled={busy || (!draft.text.trim() && !draft.shot)} onClick={saveHere}>{busy ? 'Сохраняю…' : 'Сохранить'}</button>
         </section>)}
       {ask && (
         <div className="modal-bg tn-ask" role="dialog" aria-modal="true" aria-label="Сохранить запись">
