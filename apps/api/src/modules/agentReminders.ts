@@ -11,20 +11,22 @@ import { badRequest, notFound } from '../errors.ts';
 import { PERMISSIONS as P } from '../roles.ts';
 import { staffOf } from './salesOps.ts';
 import { processWeeklyReview } from './agentWeekly.ts';
+import { processMorningHints } from './agentMorning.ts';
 
 type Actor = { tenantId: string; userId: string | null };
 export type AgentSettings = { enabled: boolean; taskRopMinutes: number; taskGmMinutes: number; taskOwnerMinutes: number; replyWaitMinutes: number;
-  leadReassignMinutes: number; quietFrom: number; quietTo: number };
+  leadReassignMinutes: number; quietFrom: number; quietTo: number; morningHints: boolean; morningHour: number };
 export const AGENT_DEFAULTS: AgentSettings = { enabled: true, taskRopMinutes: 60, taskGmMinutes: 240, taskOwnerMinutes: 1440, replyWaitMinutes: 15,
-  leadReassignMinutes: 10, quietFrom: 22, quietTo: 8 };
-const LIMITS: Record<keyof Omit<AgentSettings, 'enabled'>, [number, number]> = {
-  taskRopMinutes: [5, 2880], taskGmMinutes: [10, 10080], taskOwnerMinutes: [60, 20160], replyWaitMinutes: [3, 240], leadReassignMinutes: [0, 240], quietFrom: [0, 23], quietTo: [0, 23] };
+  leadReassignMinutes: 10, quietFrom: 22, quietTo: 8, morningHints: true, morningHour: 9 };
+const LIMITS: Record<keyof Omit<AgentSettings, 'enabled' | 'morningHints'>, [number, number]> = {
+  taskRopMinutes: [5, 2880], taskGmMinutes: [10, 10080], taskOwnerMinutes: [60, 20160], replyWaitMinutes: [3, 240], leadReassignMinutes: [0, 240], quietFrom: [0, 23], quietTo: [0, 23], morningHour: [5, 12] };
 
 export async function agentSettings(db: Db, clubId: string): Promise<AgentSettings> {
   const r = (await db.query(`select * from agent_settings where club_id = $1`, [clubId])).rows[0];
   if (!r) return { ...AGENT_DEFAULTS };
   return { enabled: r.enabled, taskRopMinutes: r.task_rop_minutes, taskGmMinutes: r.task_gm_minutes, taskOwnerMinutes: r.task_owner_minutes,
-    replyWaitMinutes: r.reply_wait_minutes, leadReassignMinutes: r.lead_reassign_minutes, quietFrom: r.quiet_from, quietTo: r.quiet_to };
+    replyWaitMinutes: r.reply_wait_minutes, leadReassignMinutes: r.lead_reassign_minutes, quietFrom: r.quiet_from, quietTo: r.quiet_to,
+    morningHints: r.morning_hints, morningHour: r.morning_hour };
 }
 
 export type Action = 'brief' | 'open' | 'snooze_1h' | 'snooze_tomorrow' | 'nudge' | 'reassign' | 'chat';
@@ -177,6 +179,7 @@ export async function processAgentClub(db: Db, actor: Actor, c: { id: string; h:
   const s = await agentSettings(db, c.id);
   if (!s.enabled) return { tasks: 0, replies: 0, reassigned: 0 };
   await processWeeklyReview(db, actor, c.id); // понедельник утром — разбор прошлой недели
+  if (s.morningHints && c.h >= s.morningHour && c.h < s.morningHour + 3) await processMorningHints(db, actor, c.id); // утренние «3 подсказки на сегодня»
   const quiet = s.quietFrom > s.quietTo ? c.h >= s.quietFrom || c.h < s.quietTo : c.h >= s.quietFrom && c.h < s.quietTo;
   if (quiet) return { tasks: 0, replies: 0, reassigned: 0 };
   return { tasks: await processTaskLadder(db, c.id, s), replies: await processReplyWait(db, c.id, s), reassigned: await processLeadReassign(db, actor, c.id, s) };
@@ -268,6 +271,7 @@ export function agentReminderRoutes(app: FastifyInstance, pool: pg.Pool) {
       const cur = await agentSettings(db, b.clubId);
       const next = { ...cur };
       if (b.enabled !== undefined) next.enabled = !!b.enabled;
+      if (b.morningHints !== undefined) next.morningHints = !!b.morningHints;
       for (const [k, [min, max]] of Object.entries(LIMITS) as [keyof typeof LIMITS, [number, number]][]) {
         if (b[k] === undefined) continue;
         const v = Number(b[k]);
@@ -275,10 +279,10 @@ export function agentReminderRoutes(app: FastifyInstance, pool: pg.Pool) {
         next[k] = v;
       }
       if (!(next.taskRopMinutes < next.taskGmMinutes && next.taskGmMinutes < next.taskOwnerMinutes)) throw badRequest('Сроки лестницы должны расти: РОП → управляющий → собственник');
-      await db.query(`insert into agent_settings(club_id, tenant_id, enabled, task_rop_minutes, task_gm_minutes, task_owner_minutes, reply_wait_minutes, lead_reassign_minutes, quiet_from, quiet_to, updated_by)
-        values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) on conflict (club_id) do update set enabled = $3, task_rop_minutes = $4, task_gm_minutes = $5, task_owner_minutes = $6,
-        reply_wait_minutes = $7, lead_reassign_minutes = $8, quiet_from = $9, quiet_to = $10, updated_by = $11, updated_at = now()`,
-      [b.clubId, ctx.tenantId, next.enabled, next.taskRopMinutes, next.taskGmMinutes, next.taskOwnerMinutes, next.replyWaitMinutes, next.leadReassignMinutes, next.quietFrom, next.quietTo, ctx.userId]);
+      await db.query(`insert into agent_settings(club_id, tenant_id, enabled, task_rop_minutes, task_gm_minutes, task_owner_minutes, reply_wait_minutes, lead_reassign_minutes, quiet_from, quiet_to, updated_by, morning_hints, morning_hour)
+        values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) on conflict (club_id) do update set enabled = $3, task_rop_minutes = $4, task_gm_minutes = $5, task_owner_minutes = $6,
+        reply_wait_minutes = $7, lead_reassign_minutes = $8, quiet_from = $9, quiet_to = $10, updated_by = $11, morning_hints = $12, morning_hour = $13, updated_at = now()`,
+      [b.clubId, ctx.tenantId, next.enabled, next.taskRopMinutes, next.taskGmMinutes, next.taskOwnerMinutes, next.replyWaitMinutes, next.leadReassignMinutes, next.quietFrom, next.quietTo, ctx.userId, next.morningHints, next.morningHour]);
       await audit(db, ctx, 'agent.settings', 'club', b.clubId, cur, next);
       return next;
     });
