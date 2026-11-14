@@ -1,5 +1,6 @@
-"""Движки: распознавание речи (faster-whisper) и языковая модель (vLLM с OpenAI-совместимым API).
-Оба работают на этом же сервере; записи и тексты наружу не уходят (ТЗ, раздел 6.3, правило 2)."""
+"""Движки: распознавание речи (faster-whisper) и языковая модель с OpenAI-совместимым API
+(llama.cpp на процессоре или vLLM на GPU). Оба работают внутри нашего контура; записи и тексты наружу не уходят
+(ТЗ, раздел 6.3, правило 2)."""
 
 from __future__ import annotations
 
@@ -13,7 +14,7 @@ from dataclasses import dataclass
 
 import httpx
 
-from .prompts import PROMPT_VERSION, SCHEMA, SYSTEM, USER
+from .prompts import CONFIG_SCHEMA, CONFIG_SYSTEM, EVAL_SCHEMA, EVAL_SYSTEM, PROMPT_VERSION, SCHEMA, SYSTEM, USER
 
 
 @dataclass
@@ -48,20 +49,30 @@ class WhisperASR:
         from faster_whisper import WhisperModel  # тяжёлый импорт: только на ИИ-сервере
 
         self.model_name = os.environ.get("ASR_MODEL", "large-v3")
+        device = os.environ.get("ASR_DEVICE", "auto")
+        if device == "auto":
+            import ctranslate2
+
+            device = "cuda" if ctranslate2.get_cuda_device_count() > 0 else "cpu"
+        # На процессоре float16 не работает: int8 — в 3–4 раза быстрее float32 почти без потери качества
+        compute = os.environ.get("ASR_COMPUTE") or ("float16" if device == "cuda" else "int8")
         self.model = WhisperModel(
             self.model_name,
-            device=os.environ.get("ASR_DEVICE", "auto"),
-            compute_type=os.environ.get("ASR_COMPUTE", "float16"),
+            device=device,
+            compute_type=compute,
+            cpu_threads=int(os.environ.get("ASR_THREADS", "0")),
             download_root=os.environ.get("MODELS_DIR", "/models"),
         )
+        self.device = device
+        self.beam = int(os.environ.get("ASR_BEAM", "5"))
         self.manager_channel = int(os.environ.get("ASR_MANAGER_CHANNEL", "0"))
 
     @property
     def engine(self) -> str:
-        return f"whisper-{self.model_name}"
+        return f"whisper-{self.model_name}" + ("-cpu" if self.device == "cpu" else "")
 
     def _run(self, path: str, language: str, speaker: str | None) -> tuple[list[Segment], float]:
-        segs, info = self.model.transcribe(path, language=language, vad_filter=True, beam_size=5)
+        segs, info = self.model.transcribe(path, language=language, vad_filter=True, beam_size=self.beam)
         return [Segment(speaker, s.start, s.end, s.text.strip(), s.avg_logprob) for s in segs if s.text.strip()], info.duration
 
     def transcribe(self, path: str, language: str = "ru") -> dict:
@@ -112,7 +123,7 @@ def mask(text: str) -> str:
 
 
 class OpenAICompatLLM:
-    """vLLM (или любой совместимый сервер внутри контура). Ответ ограничен JSON-схемой."""
+    """llama.cpp (процессор) или vLLM (GPU) — любой OpenAI-совместимый сервер внутри контура. Ответ ограничен JSON-схемой."""
 
     def __init__(self) -> None:
         self.url = os.environ.get("LLM_URL", "http://vllm:8000/v1").rstrip("/")
@@ -127,16 +138,16 @@ class OpenAICompatLLM:
     def health(self) -> bool:
         return self.client.get(f"{self.url}/models", headers={"authorization": f"Bearer {self.key}"}).status_code == 200
 
-    def complete(self, system: str, user: str) -> dict:
+    def complete(self, system: str, user: str, schema: dict = SCHEMA, name: str = "call_summary", max_tokens: int = 1200) -> dict:
         r = self.client.post(
             f"{self.url}/chat/completions",
             headers={"authorization": f"Bearer {self.key}"},
             json={
                 "model": self.model,
                 "temperature": 0.1,
-                "max_tokens": 1200,
+                "max_tokens": max_tokens,
                 "messages": [{"role": "system", "content": system}, {"role": "user", "content": user}],
-                "response_format": {"type": "json_schema", "json_schema": {"name": "call_summary", "schema": SCHEMA}},
+                "response_format": {"type": "json_schema", "json_schema": {"name": name, "schema": schema}},
             },
         )
         r.raise_for_status()
@@ -162,3 +173,37 @@ def summarize(llm, transcript: dict, ctx: dict) -> dict:
         conf = min(conf, float(asr))  # плохо распознанная запись не может дать уверенный итог
     summary = {k: out.get(k) for k in ("essence", "need", "objections", "agreements", "outcome", "nextStep")}
     return {"summary": summary, "confidence": round(max(0.0, min(1.0, conf)), 3), "engine": llm.engine}
+
+
+def evaluate(llm, transcript, checklist: list[dict]) -> dict:
+    """Оценка разговора по пунктам чек-листа стандарта (раздел «Обзоры»). Пункты, которых нет в чек-листе, отбрасываются."""
+    ids = [str(i.get("id")) for i in checklist if i.get("id")]
+    if not ids:
+        return {"items": [], "engine": llm.engine}
+    text = transcript.get("text") if isinstance(transcript, dict) else transcript if isinstance(transcript, str) else None
+    text = mask(str(text if text else json.dumps(transcript, ensure_ascii=False)))[:24000]
+    items = "\n".join(f"- {i['id']}: {i.get('text', '')}" for i in checklist if i.get("id"))
+    out = llm.complete(EVAL_SYSTEM, f"Чек-лист:\n{items}\n\nРасшифровка:\n{text}", EVAL_SCHEMA, "call_eval", 1500)
+    res, seen = [], set()
+    for it in out.get("items") or []:
+        i = str(it.get("id"))
+        if i in ids and i not in seen:
+            seen.add(i)
+            ok = it.get("ok")
+            res.append({"id": i, "ok": ok if isinstance(ok, bool) else None, "quote": str(it.get("quote") or "")[:300]})
+    return {"items": res, "engine": llm.engine}
+
+
+def config_suggest(llm, text: str, fields: list[dict]) -> dict:
+    """Предложение изменений настроек клуба по просьбе словами. Менять можно только перечисленные настройки."""
+    paths = {str(f.get("path")) for f in fields}
+    out = llm.complete(CONFIG_SYSTEM, f"Настройки: {json.dumps(fields, ensure_ascii=False)}\n\nПросьба: {text[:2000]}", CONFIG_SCHEMA, "config_suggest", 1000)
+    changes = []
+    for c in out.get("changes") or []:
+        if str(c.get("path")) in paths:
+            try:
+                value = json.loads(c["value"]) if isinstance(c.get("value"), str) else c.get("value")
+            except ValueError:
+                value = c.get("value")
+            changes.append({"path": str(c["path"]), "value": value})
+    return {"changes": changes, "explanation": str(out.get("explanation") or ""), "unknown": [str(u) for u in out.get("unknown") or []], "engine": llm.engine}

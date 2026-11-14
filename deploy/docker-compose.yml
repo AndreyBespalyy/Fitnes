@@ -38,7 +38,50 @@ services:
       - caddyconfig:/config
     depends_on:
       - app
+  # ИИ для звонков без видеокарты (выбор Андрея 14.11.2026): расшифровка Whisper и итоги небольшой моделью
+  # на процессоре этого же сервера. Записи и тексты никуда не уходят. Включается строкой COMPOSE_PROFILES=ai
+  # в deploy/.env (вместе с AI_URL=http://ai:8100 и AI_TOKEN), см. deploy/ai/README.md.
+  # cpu_shares ниже, чем у CRM: если процессор занят, CRM отвечает первой, а звонки ждут.
+  ai-llm:
+    image: ghcr.io/ggml-org/llama.cpp:server-b12004
+    profiles: ["ai"]
+    restart: unless-stopped
+    command: ["--host", "0.0.0.0", "--port", "8080",
+      "--hf-repo", "${AI_LLM_REPO:-bartowski/Qwen2.5-7B-Instruct-GGUF}", "--hf-file", "${AI_LLM_FILE:-Qwen2.5-7B-Instruct-Q4_K_M.gguf}",
+      "--ctx-size", "16384", "--parallel", "1", "--jinja", "--api-key", "${AI_LLM_KEY:-local}"]
+    environment:
+      LLAMA_CACHE: /models
+    volumes:
+      - aillm:/models
+    cpu_shares: 256
+    mem_limit: 12g
+  ai:
+    build:
+      context: ../services/ai
+      dockerfile: Dockerfile.cpu
+    profiles: ["ai"]
+    restart: unless-stopped
+    environment:
+      AI_TOKEN: ${AI_TOKEN:-}
+      ASR_MODEL: ${AI_ASR_MODEL:-large-v3-turbo}
+      ASR_DEVICE: cpu
+      ASR_COMPUTE: int8
+      ASR_BEAM: "2"
+      ASR_THREADS: ${AI_ASR_THREADS:-0}
+      ASR_MANAGER_CHANNEL: ${ASR_MANAGER_CHANNEL:-0}
+      LLM_URL: http://ai-llm:8080/v1
+      LLM_MODEL: ${AI_LLM_FILE:-Qwen2.5-7B-Instruct-Q4_K_M.gguf}
+      LLM_KEY: ${AI_LLM_KEY:-local}
+      LLM_TIMEOUT: "900"
+    volumes:
+      - aiwhisper:/models
+    cpu_shares: 256
+    mem_limit: 6g
+    depends_on:
+      - ai-llm
 volumes:
+  aillm:
+  aiwhisper:
   dbdata:
   storage:
   caddydata:

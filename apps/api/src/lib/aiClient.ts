@@ -1,5 +1,7 @@
 // Клиент ИИ-сервера (services/ai). Сервер свой, внутренний: записи и расшифровки во внешние сервисы не уходят.
-// Адрес и ключ задаются AI_URL и AI_TOKEN. Вместо своего сервера можно подключить Яндекс (YANDEX_API_KEY, YANDEX_FOLDER_ID).
+// Адрес и ключ задаются AI_URL и AI_TOKEN. Выбор Андрея 14.11.2026: на пилоте свой сервер без видеокарты
+// (Whisper + Qwen2.5-7B на процессоре, deploy/docker-compose.yml, профиль ai), AI_URL=http://ai:8100.
+// Вместо своего сервера можно подключить Яндекс (YANDEX_API_KEY, YANDEX_FOLDER_ID).
 // Если не задано ни то ни другое, ИИ выключен: записи копятся и ждут подключения.
 import { sttRecognize, ygptComplete, ygptJson, type YandexConfig, yandexConfigFromEnv } from './yandex.ts';
 
@@ -15,7 +17,8 @@ export type Summary = {
   outcome: 'interested' | 'thinking' | 'refused' | 'bought' | 'other' | null;
   nextStep: NextStep | null;
 };
-/** url — свой ИИ-сервер (services/ai); yandex — SpeechKit + YandexGPT (выбор Андрея 14.11.2026). Свой сервер главнее, если заданы оба. */
+/** url — свой ИИ-сервер (services/ai); yandex — SpeechKit + YandexGPT (запасной платный вариант). Свой сервер главнее, если заданы оба:
+ * звонки, оценка по чек-листу и помощник настроек идут через него, а Яндекс остаётся только для ИИ-агента (agent*.ts). */
 export type AiConfig = { url: string; token?: string; fetch: Fetch; timeoutMs?: number; yandex?: YandexConfig };
 
 export function aiConfigFromEnv(f: Fetch = fetch): AiConfig | null {
@@ -71,7 +74,7 @@ export async function aiSummarize(cfg: AiConfig, transcript: Transcript, context
   }
   return call<{ summary: Summary | null; confidence: number | null; engine: string; reason?: string }>(cfg, '/v1/summarize', {
     method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ transcript, context }),
-  }, 5 * 60_000);
+  }, 15 * 60_000); // на процессоре длинный разговор модель читает несколько минут
 }
 
 /* ---------- проверка и нормализация резюме (от ИИ и от менеджера одинаково) ---------- */
@@ -137,7 +140,7 @@ export async function aiConfigSuggest(cfg: AiConfig, text: string, fields: Confi
   }
   return call<ConfigSuggestion>(cfg, '/v1/config-suggest', {
     method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ text, fields }),
-  }, 60_000);
+  }, 3 * 60_000);
 }
 
 /* ---------- оценка разговора по чек-листу стандарта ---------- */
@@ -153,5 +156,5 @@ export async function aiEvaluateCall(cfg: AiConfig, transcript: unknown, checkli
   }
   return call<CallEvalResult>(cfg, '/v1/evaluate', {
     method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ transcript, checklist }),
-  }, 5 * 60_000);
+  }, 15 * 60_000);
 }

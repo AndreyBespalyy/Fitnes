@@ -62,3 +62,42 @@ SCHEMA = {
     },
     "required": ["sufficient", "reason", "essence", "need", "objections", "agreements", "outcome", "nextStep", "confidence"],
 }
+
+
+EVAL_SYSTEM = """Ты проверяешь телефонный разговор менеджера фитнес-клуба по пунктам чек-листа стандарта.
+По каждому пункту верни ok = true, если менеджер это сделал, false — если не сделал, null — если по разговору нельзя понять.
+quote — короткая дословная цитата из разговора, подтверждающая оценку (или пустая строка).
+Оценивай только то, что есть в расшифровке. Верни все пункты чек-листа с их id."""
+
+EVAL_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "items": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {"id": {"type": "string"}, "ok": {"type": ["boolean", "null"]}, "quote": {"type": "string"}},
+                "required": ["id", "ok", "quote"],
+            },
+        }
+    },
+    "required": ["items"],
+}
+
+CONFIG_SYSTEM = """Ты помогаешь настроить фитнес-клуб. Даны настройки (path, label, type, min, max, value) и просьба словами.
+Верни changes — список изменений {path, value}, где value записан как JSON (число, строка в кавычках, true/false);
+explanation — кратко по-русски, что меняешь; unknown — части просьбы, для которых нет настройки.
+Меняй только перечисленные path и соблюдай min и max. Если просьба непонятна, верни пустой changes."""
+
+CONFIG_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "changes": {
+            "type": "array",
+            "items": {"type": "object", "properties": {"path": {"type": "string"}, "value": {"type": "string"}}, "required": ["path", "value"]},
+        },
+        "explanation": {"type": "string"},
+        "unknown": {"type": "array", "items": {"type": "string"}},
+    },
+    "required": ["changes", "explanation", "unknown"],
+}

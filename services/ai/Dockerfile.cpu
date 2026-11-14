@@ -1,0 +1,11 @@
+# ИИ-сервер без видеокарты: распознавание речи на процессоре (faster-whisper, int8).
+# Языковая модель — отдельный контейнер llama.cpp (deploy/docker-compose.yml, профиль ai).
+FROM python:3.12-slim
+RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg && rm -rf /var/lib/apt/lists/*
+WORKDIR /srv
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+COPY app ./app
+ENV MODELS_DIR=/models ASR_DEVICE=cpu
+EXPOSE 8100
+CMD ["python", "-m", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8100"]
