@@ -184,7 +184,7 @@ export function testNoteRoutes(app: FastifyInstance, pool: pg.Pool, storage: str
     return withCtx(pool, ctx, async (db) => (await db.query(`select u.id, u.full_name as "fullName", u.login, u.is_tester as "isTester",
         (select string_agg(distinct r.name, ', ') from user_assignments a join roles r on r.code = a.role_code where a.user_id = u.id) as roles,
         (select count(*)::int from test_notes n where n.user_id = u.id) as notes
-      from users u where u.status = 'active' order by u.is_tester desc, u.full_name`)).rows);
+      from users u where u.status = 'active' and not u.is_bot order by u.is_tester desc, u.full_name`)).rows);
   });
 
   app.patch('/api/test-notes/testers/:id', async (req) => {

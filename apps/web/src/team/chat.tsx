@@ -47,6 +47,11 @@ const I = {
   club: 'M3 21h18M5 21V8l7-5 7 5v13M9 21v-6h6v6', phone: 'M8 2h8a2 2 0 0 1 2 2v16a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2M11 18h2',
 };
 
+/** **жирный** в тексте сообщения (так пишет ИИ-помощник) */
+function boldify(s: string): ReactNode[] {
+  return s.split(/(\*\*[^*\n]+\*\*)/g).map((p, i) => (p.length > 4 && p.startsWith('**') && p.endsWith('**') ? <b key={i}>{p.slice(2, -2)}</b> : p));
+}
+
 export function Avatar({ chat, name, size: sz = 40 }: { chat?: Pick<ChatItem, 'kind' | 'title' | 'dept'>; name?: string; size?: number }) {
   const kind = chat?.kind ?? 'direct';
   const label = name ?? chat?.title ?? '';
@@ -105,6 +110,7 @@ export function TeamChat({ meId, initialChat, onUnread, emptyHint, header }: { m
     return (list ?? []).filter((c) => !s || c.title.toLowerCase().includes(s));
   }, [list, q]);
   const activeItem = list?.find((c) => c.id === active);
+  const openAi = async () => { try { const r = await api<{ id: string }>('POST', '/api/agent/chat'); await loadList(); open(r.id); } catch (x) { setListErr(err(x)); } };
 
   return (
     <div className={`tm ${active ? 'has-active' : ''}`}>
@@ -114,6 +120,8 @@ export function TeamChat({ meId, initialChat, onUnread, emptyHint, header }: { m
           <h2>Чаты</h2>
           <button className="tm-icon-btn pri" onClick={() => setCreating(true)} aria-label="Новый чат" title="Новый чат"><Ico d={I.plus} /></button>
         </div>
+        <button className="tm-ai" onClick={openAi} title="Спросите о задачах, перенесите срок, узнайте суть ситуации по клиенту">
+          <span className="tm-ai-ico" aria-hidden="true">✦</span><span><b>ИИ-помощник</b><small>«мои задачи», «перенеси Анну на завтра»</small></span></button>
         <label className="tm-search"><Ico d={I.search} s={16} /><input type="search" value={q} onChange={(e) => setQ(e.target.value)} placeholder="Найти чат" aria-label="Найти чат" /></label>
         {listErr && <div className="tm-err">{listErr}</div>}
         {list === null && !listErr && <p className="tm-muted tm-pad">Загрузка…</p>}
@@ -127,7 +135,7 @@ export function TeamChat({ meId, initialChat, onUnread, emptyHint, header }: { m
                   <span className="tm-chat-bottom">
                     <span className="tm-chat-last">
                       {c.lastBody === null && !c.lastFile ? <i>{c.kind === 'direct' ? 'Напишите первым' : `${c.members} участн.`}</i>
-                        : <>{c.lastSystem ? '' : c.lastMine ? 'Вы: ' : c.kind !== 'direct' && c.lastAuthor ? `${c.lastAuthor.split(' ')[0]}: ` : ''}{c.lastBody || (c.lastFile ? '📎 Файл' : '')}</>}
+                        : <>{c.lastSystem ? '' : c.lastMine ? 'Вы: ' : c.kind !== 'direct' && c.lastAuthor ? `${c.lastAuthor.split(' ')[0]}: ` : ''}{c.lastBody?.replace(/\*\*/g, '') || (c.lastFile ? '📎 Файл' : '')}</>}
                     </span>
                     {c.muted && <span className="tm-muted-ico" title="Без уведомлений"><Ico d={I.mute} s={14} /></span>}
                     {c.unread > 0 && <span className={`tm-badge ${c.muted ? 'grey' : ''}`}>{c.unread > 99 ? '99+' : c.unread}</span>}
@@ -292,7 +300,7 @@ function Conversation({ id, meId, item, onBack, onChanged, onLeft }: { id: strin
                     ? <a href={`/api/team/files/${m.file.id}`} target="_blank" rel="noreferrer" onClick={(e) => e.stopPropagation()}><img className="tm-img" src={`/api/team/files/${m.file.id}`} alt={m.file.name} loading="lazy" /></a>
                     : m.file.id ? <a className="tm-file" href={`/api/team/files/${m.file.id}`} target="_blank" rel="noreferrer" onClick={(e) => e.stopPropagation()}><Ico d={I.file} s={22} /><span><b>{m.file.name}</b><small>{size(m.file.size)}</small></span></a>
                       : <span className="tm-file"><Ico d={I.file} s={22} /><span><b>{m.file.name}</b><small>Отправляется…</small></span></span>)}
-                  {m.body && <div className="tm-text">{m.body}</div>}
+                  {m.body && <div className="tm-text">{boldify(m.body)}</div>}
                 </>}
                 <div className="tm-meta">
                   {m.editedAt && !m.deleted && <span>изменено</span>}

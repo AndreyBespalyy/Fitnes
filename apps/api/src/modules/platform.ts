@@ -95,7 +95,7 @@ export function platformRoutes(app: FastifyInstance, appPool: pg.Pool, opts: { o
       c.number as "contractNumber", c.plan, c.clubs_limit as "clubsLimit", c.users_limit as "usersLimit", c.fee_kop::float as "feeKop",
       to_char(c.valid_to, 'YYYY-MM-DD') as "validTo", to_char(c.signed_on, 'YYYY-MM-DD') as "signedOn", c.note,
       (select count(*)::int from clubs x where x.tenant_id = t.id and x.status = 'active' and not x.is_demo) as clubs,
-      (select count(*)::int from users u where u.tenant_id = t.id and u.status = 'active') as users,
+      (select count(*)::int from users u where u.tenant_id = t.id and u.status = 'active' and not u.is_bot) as users,
       (select count(*)::int from persons p where p.tenant_id = t.id and p.merged_into_id is null) as persons,
       (select max(s.last_seen_at) from sessions s where s.tenant_id = t.id) as "lastActivity",
       (select count(*)::int from support_tickets k where k.tenant_id = t.id and k.status = 'open') as "openTickets",
