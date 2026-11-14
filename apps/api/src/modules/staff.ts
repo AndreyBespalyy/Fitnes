@@ -32,7 +32,7 @@ const LIST = `select u.id, u.login, u.full_name as "fullName", u.phone, u.status
 
 function visibleFilter(ctx: Ctx) {
   // Руководитель клуба видит сотрудников своих клубов; сетевые роли видят всех
-  return ctx.allClubs ? '' : `where exists (select 1 from user_assignments x where x.user_id = u.id and x.club_id = any($1::uuid[]))`;
+  return ctx.allClubs ? 'where not u.is_bot' : `where not u.is_bot and exists (select 1 from user_assignments x where x.user_id = u.id and x.club_id = any($1::uuid[]))`;
 }
 
 async function loadUser(db: Db, id: string) {

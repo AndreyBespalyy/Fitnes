@@ -23,7 +23,7 @@ export function loginSecurityRoutes(app: FastifyInstance, pool: pg.Pool) {
           (select max(s.created_at) from sessions s where s.user_id = u.id) as "lastLoginAt",
           exists (select 1 from user_assignments a where a.user_id = u.id and a.role_code = 'owner') as owner,
           (select string_agg(distinct r.name, ', ') from user_assignments a join roles r on r.code = a.role_code where a.user_id = u.id) as roles
-        from users u order by u.status, (u.password_changed_at is not null), u.full_name`)).rows;
+        from users u where not u.is_bot order by u.status, (u.password_changed_at is not null), u.full_name`)).rows;
       // Адреса с неудачными попытками за неделю: сколько, по скольким логинам, остановлен ли сейчас
       const ips = (await db.query('select * from auth_ip_report($1, $2)', [ctx.tenantId, IP_WINDOW_MIN])).rows.map((r) => ({ ...r, stopped: r.recent >= IP_MAX_FAILS, suspicious: r.logins >= IP_ALERT_LOGINS }));
       const alerts = (await db.query(`select ip, at from login_alerts where at > now() - interval '7 days' order by at desc limit 20`)).rows;

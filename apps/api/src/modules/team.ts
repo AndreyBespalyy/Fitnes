@@ -207,7 +207,7 @@ const inviteText = (inviter: string, club: string | null, link: string, login: s
   `На странице — инструкция для iPhone и Android, это займёт минуту.\n` +
   `Вход: ${login ? `логин ${login}` : 'ваш логин'} и пароль от CRM.`;
 
-export function teamRoutes(app: FastifyInstance, pool: pg.Pool, storage: string) {
+export function teamRoutes(app: FastifyInstance, pool: pg.Pool, storage: string, onMessage?: (ctx: Ctx, chatId: string, text: string) => Promise<void>) {
   // Короткая ссылка из приглашения: /m/<код> → страница установки приложения
   app.get('/m/:token', async (req, reply) => {
     const { token } = req.params as { token: string };
@@ -399,7 +399,7 @@ export function teamRoutes(app: FastifyInstance, pool: pg.Pool, storage: string)
     const b = (req.body ?? {}) as { body?: string; replyTo?: string; important?: boolean; file?: { fileName?: string; dataBase64?: string } };
     const text = (b.body ?? '').replace(/\s+$/, '').slice(0, 4000);
     if (!text.trim() && !b.file) throw badRequest('Пустое сообщение');
-    return withCtx(pool, ctx, async (db) => {
+    const res = await withCtx(pool, ctx, async (db) => {
       const m = await member(db, ctx, id);
       if (m.only_admins_post && !m.is_admin) throw forbidden('В этом канале пишут только руководители');
       if (b.important && !canAnnounce(ctx, m)) throw forbidden('Объявления отправляют руководители');
@@ -420,8 +420,11 @@ export function teamRoutes(app: FastifyInstance, pool: pg.Pool, storage: string)
       await db.query('update team_members set last_read_at = now() where chat_id = $1 and user_id = $2', [id, ctx.userId]);
       if (b.important) await audit(db, ctx, 'team.announcement', 'team_chat', id, null, { message: row.id });
       const msg = (await db.query(`select ${MSG_COLS} from ${MSG_FROM} where x.id = $1`, [row.id])).rows[0];
-      return clean(msg);
+      return { msg: clean(msg), direct: m.kind === 'direct' };
     });
+    // Личный чат с ИИ-помощником: помощник отвечает после сохранения сообщения
+    if (res.direct && text.trim() && onMessage) void onMessage(ctx, id, text);
+    return res.msg;
   });
 
   app.patch('/api/team/messages/:id', async (req) => {
