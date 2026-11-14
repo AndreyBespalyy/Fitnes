@@ -435,6 +435,8 @@ input[type="checkbox"],input[type="radio"]{accent-color:var(--accent)}
 .shot-wrap{position:relative;display:inline-block;max-width:100%}
 .shot-canvas{display:block;max-width:100%;max-height:calc(100vh - 130px);width:auto;height:auto;border-radius:8px;box-shadow:0 10px 40px rgba(0,0,0,.6);touch-action:none;cursor:crosshair}
 .shot-canvas.tool-text{cursor:text}
+/* Длинная страница: показываем по ширине и листаем вниз */
+.shot-canvas.tall{max-height:none}
 .shot-text{position:absolute;color:#fff;background:rgba(10,14,19,.92);border:2px solid;border-radius:6px;padding:2px 6px;font-weight:700;font-family:var(--f);resize:none;outline:none;font-size:14px;min-height:44px}
 @media (max-width:640px){.shot-l{display:none}.shot-ed{padding:8px}.shot-canvas{max-height:calc(100vh - 170px)}}
 .tn-snap{width:100%;min-height:48px;font-size:16px;justify-content:center;display:flex;gap:8px;align-items:center}

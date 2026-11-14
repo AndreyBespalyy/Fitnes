@@ -70,23 +70,28 @@ async function shrink(blob: Blob): Promise<string> {
   return c.toDataURL('image/jpeg', 0.85);
 }
 
-/** Снимок видимой части страницы прямо в браузере — без системного диалога выбора экрана.
+/** Снимок страницы прямо в браузере — без системного диалога выбора экрана.
+ *  Если страница длиннее экрана — снимается вся страница целиком.
  *  Окно журнала, кнопки и всплывающие окна в снимок не попадают. */
 async function captureScreen(): Promise<string | null> {
   const { toCanvas } = await import('html-to-image');
   const skip = (n: Node) => !(n instanceof Element && n.matches('.tn-panel, .tn-btn, .report-btn, .shot-ed, .tn-ask, .toast'));
-  const W = window.innerWidth, H = window.innerHeight, sx = window.scrollX, sy = window.scrollY;
+  const de = document.documentElement;
+  const W = window.innerWidth, H = window.innerHeight, sx = window.scrollX;
+  const PW = de.scrollWidth, PH = Math.max(de.scrollHeight, H);
+  // Браузеры не дают холст больше ~16 Мп (Safari на iPhone) и выше 16 000 px — для длинных страниц снижаем чёткость
+  const pr = Math.max(0.3, Math.min(2, window.devicePixelRatio || 1, Math.sqrt(16e6 / (PW * PH)), 16000 / PH));
   const opts = {
-    filter: skip, pixelRatio: Math.min(2, window.devicePixelRatio || 1), cacheBust: false,
+    filter: skip, pixelRatio: pr, cacheBust: false,
     backgroundColor: getComputedStyle(document.body).backgroundColor || '#0D1117',
-    width: document.documentElement.scrollWidth, height: document.documentElement.scrollHeight,
+    width: PW, height: PH,
   };
   // Со шрифтами страницы снимок выглядит как экран; если шрифты не встроились — снимаем без них
   const full = await toCanvas(document.body, opts).catch(() => toCanvas(document.body, { ...opts, skipFonts: true }));
-  // Оставляем то, что было на экране
-  const k = full.width / document.documentElement.scrollWidth;
-  const c = document.createElement('canvas'); c.width = Math.round(W * k); c.height = Math.round(H * k);
-  c.getContext('2d')!.drawImage(full, Math.round(sx * k), Math.round(sy * k), c.width, c.height, 0, 0, c.width, c.height);
+  // По ширине — то, что видно на экране; по высоте — вся страница
+  const k = full.width / PW;
+  const c = document.createElement('canvas'); c.width = Math.round(Math.min(W, PW) * k); c.height = full.height;
+  c.getContext('2d')!.drawImage(full, Math.round(sx * k), 0, c.width, c.height, 0, 0, c.width, c.height);
   const blob = await new Promise<Blob | null>((r) => c.toBlob(r, 'image/png'));
   return blob ? shrink(blob) : null;
 }
