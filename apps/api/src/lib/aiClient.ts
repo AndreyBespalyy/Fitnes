@@ -1,5 +1,7 @@
 // Клиент ИИ-сервера (services/ai). Сервер свой, внутренний: записи и расшифровки во внешние сервисы не уходят.
-// Адрес и ключ задаются AI_URL и AI_TOKEN. Если AI_URL не задан, ИИ выключен: записи копятся и ждут подключения.
+// Адрес и ключ задаются AI_URL и AI_TOKEN. Вместо своего сервера можно подключить Яндекс (YANDEX_API_KEY, YANDEX_FOLDER_ID).
+// Если не задано ни то ни другое, ИИ выключен: записи копятся и ждут подключения.
+import { sttRecognize, ygptComplete, ygptJson, type YandexConfig, yandexConfigFromEnv } from './yandex.ts';
 
 export type Fetch = typeof fetch;
 export type Segment = { speaker: string | null; start: number; end: number; text: string };
@@ -13,12 +15,16 @@ export type Summary = {
   outcome: 'interested' | 'thinking' | 'refused' | 'bought' | 'other' | null;
   nextStep: NextStep | null;
 };
-export type AiConfig = { url: string; token?: string; fetch: Fetch; timeoutMs?: number };
+/** url — свой ИИ-сервер (services/ai); yandex — SpeechKit + YandexGPT (выбор Андрея 14.11.2026). Свой сервер главнее, если заданы оба. */
+export type AiConfig = { url: string; token?: string; fetch: Fetch; timeoutMs?: number; yandex?: YandexConfig };
 
 export function aiConfigFromEnv(f: Fetch = fetch): AiConfig | null {
   const url = process.env.AI_URL?.trim();
-  return url ? { url: url.replace(/\/+$/, ''), token: process.env.AI_TOKEN, fetch: f } : null;
+  if (url) return { url: url.replace(/\/+$/, ''), token: process.env.AI_TOKEN, fetch: f };
+  const yandex = yandexConfigFromEnv(f);
+  return yandex ? { url: '', fetch: f, yandex } : null;
 }
+const ya = (cfg: AiConfig) => (!cfg.url && cfg.yandex ? cfg.yandex : null);
 
 async function call<T>(cfg: AiConfig, path: string, init: RequestInit, timeoutMs: number): Promise<T> {
   const headers = new Headers(init.headers);
@@ -35,17 +41,34 @@ async function call<T>(cfg: AiConfig, path: string, init: RequestInit, timeoutMs
 }
 
 export async function aiHealth(cfg: AiConfig) {
+  const y = ya(cfg);
+  if (y) { await ygptComplete(y, 'Ответь одним словом.', 'Проверка связи', { maxTokens: 5 }); return { ok: true, asr: 'Yandex SpeechKit', llm: `YandexGPT (${y.model ?? 'yandexgpt/latest'})` }; }
   return call<{ ok: boolean; asr?: string; llm?: string; promptVersion?: string }>(cfg, '/health', { method: 'GET' }, 5_000);
 }
 
 export async function aiTranscribe(cfg: AiConfig, audio: Buffer, fileName: string, mime: string) {
+  const y = ya(cfg);
+  if (y) return sttRecognize(y, audio, mime);
   const form = new FormData();
   form.set('file', new Blob([new Uint8Array(audio)], { type: mime }), fileName);
   form.set('language', 'ru');
   return call<Transcript & { engine: string }>(cfg, '/v1/transcribe', { method: 'POST', body: form }, 15 * 60_000);
 }
 
+const SUMMARY_PROMPT = `Ты помогаешь менеджеру фитнес-клуба. По расшифровке телефонного разговора с клиентом составь итог.
+Поля JSON: essence — суть разговора (2–4 предложения), need — потребность клиента, objections — массив возражений,
+agreements — о чём договорились, outcome — одно из interested, thinking, refused, bought, other,
+nextStep — {title, kind: call|meeting|message|other, dueAt: дата-время ISO 8601 с часовым поясом или null} либо null.
+Пиши по-русски, только то, что прозвучало в разговоре. Если разговора по сути не было, верни {"essence": ""}.`;
+
 export async function aiSummarize(cfg: AiConfig, transcript: Transcript, context: Record<string, unknown>) {
+  const y = ya(cfg);
+  if (y) {
+    const lines = transcript.segments?.length ? transcript.segments.map((s) => `${s.speaker ?? ''}: ${s.text}`).join('\n') : transcript.text;
+    const raw = await ygptJson<unknown>(y, SUMMARY_PROMPT, `Контекст: ${JSON.stringify(context)}\n\nРасшифровка:\n${lines.slice(0, 24000)}`);
+    const summary = normalizeSummary(raw);
+    return { summary, confidence: summary ? 0.8 : null, engine: `yandexgpt:${y.model ?? 'yandexgpt/latest'}`, reason: summary ? undefined : 'Недостаточно данных в разговоре' };
+  }
   return call<{ summary: Summary | null; confidence: number | null; engine: string; reason?: string }>(cfg, '/v1/summarize', {
     method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ transcript, context }),
   }, 5 * 60_000);
@@ -105,6 +128,13 @@ export type ConfigFieldBrief = { path: string; label: string; type: string; min?
 export type ConfigSuggestion = { changes: { path: string; value: unknown }[]; preset?: string; explanation?: string; unknown?: string[]; engine?: string };
 /** Предложение изменений настроек по просьбе словами. Уходят только названия и значения настроек клуба. */
 export async function aiConfigSuggest(cfg: AiConfig, text: string, fields: ConfigFieldBrief[]) {
+  const y = ya(cfg);
+  if (y) {
+    const r = await ygptJson<ConfigSuggestion>(y, `Ты помогаешь настроить фитнес-клуб. Даны настройки (path, label, type, min, max, value) и просьба словами.
+Верни JSON {changes: [{path, value}], explanation: кратко по-русски что меняешь, unknown: [части просьбы, для которых нет настройки]}. Меняй только перечисленные path, соблюдай min и max.`,
+      `Настройки: ${JSON.stringify(fields)}\n\nПросьба: ${text}`);
+    return { changes: Array.isArray(r.changes) ? r.changes : [], explanation: r.explanation, unknown: r.unknown, engine: 'yandexgpt' } as ConfigSuggestion;
+  }
   return call<ConfigSuggestion>(cfg, '/v1/config-suggest', {
     method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ text, fields }),
   }, 60_000);
@@ -114,6 +144,13 @@ export async function aiConfigSuggest(cfg: AiConfig, text: string, fields: Confi
 export type CallEvalResult = { items: { id: string; ok: boolean | null; quote?: string }[]; engine?: string };
 /** Оценка расшифровки по пунктам чек-листа. Расшифровка уходит только на свой ИИ-сервер клуба. */
 export async function aiEvaluateCall(cfg: AiConfig, transcript: unknown, checklist: { id: string; text: string }[]) {
+  const y = ya(cfg);
+  if (y) {
+    const r = await ygptJson<CallEvalResult>(y, `Оцени телефонный разговор менеджера фитнес-клуба по пунктам чек-листа.
+Верни JSON {items: [{id, ok: true|false|null, quote: короткая цитата из разговора}]}. null — если по разговору нельзя понять.`,
+      `Чек-лист: ${JSON.stringify(checklist)}\n\nРасшифровка: ${JSON.stringify(transcript).slice(0, 24000)}`);
+    return { items: Array.isArray(r.items) ? r.items : [], engine: 'yandexgpt' };
+  }
   return call<CallEvalResult>(cfg, '/v1/evaluate', {
     method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ transcript, checklist }),
   }, 5 * 60_000);
