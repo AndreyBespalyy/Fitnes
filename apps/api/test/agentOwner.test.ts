@@ -117,3 +117,24 @@ test('разбор: отдел продаж и тренеры не путают�
   assert.deepEqual(parseTopics('как работают тренеры'), ['trainers']);
   assert.deepEqual(parseTopics('как работают менеджеры и тренеры'), ['trainers', 'staff']);
 });
+
+test('в данных помощника — занятия клиента: тренер, зал, клуб, пришёл ли', async () => {
+  const centr = (await sql(`select id, tenant_id from clubs where name like '%Центр%'`))[0];
+  const r = await req('POST', '/api/leads', 'm.volkova', { clubId: centr.id, fullName: 'Вера Лесная', phone: '+79005553311', sourceCode: 'walk_in' });
+  assert.equal(r.statusCode, 201, r.body);
+  const { personId, opportunityId } = r.json();
+  const kim = (await sql(`select id from users where login = 'a.kim'`))[0].id;
+  const room = (await sql(`insert into rooms(tenant_id, club_id, name) values ($1,$2,'Зал йоги (тест)') returning id`, [centr.tenant_id, centr.id]))[0].id;
+  const type = (await sql(`insert into class_types(tenant_id, club_id, name, kind) values ($1,$2,'Йога (тест)','group') returning id`, [centr.tenant_id, centr.id]))[0].id;
+  for (const [ago, st] of [[3, 'attended'], [1, 'no_show']] as const) {
+    const s = (await sql(`insert into class_sessions(tenant_id, club_id, type_id, room_id, trainer_id, starts_at, ends_at, capacity, status)
+      values ($1,$2,$3,$4,$5, now() - make_interval(days => $6), now() - make_interval(days => $6) + interval '1 hour', 10, 'done') returning id`, [centr.tenant_id, centr.id, type, room, kim, ago]))[0].id;
+    await sql(`insert into class_bookings(tenant_id, club_id, session_id, person_id, status) values ($1,$2,$3,$4,$5)`, [centr.tenant_id, centr.id, s, personId, st]);
+  }
+  const b = (await req('GET', `/api/agent/brief/opportunity/${opportunityId}?force=1`, 'a.bespalyy')).json();
+  assert.match(b.text, /\*\*Занятия\*\*/);
+  assert.match(b.text, /пришёл 1, \*\*не пришёл 1\*\*; чаще всего занимается у тренера Артём Ким/);
+  assert.match(b.text, /Йога \(тест\), тренер Артём Ким, Зал йоги \(тест\), Клуб «Центр»: \*\*не пришёл\*\*/);
+  const c = await ask('что с клиентом Вера Лесная');
+  assert.match(c, /Занятия/);
+});
