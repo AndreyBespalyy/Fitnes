@@ -16,7 +16,7 @@ export const BRIEF_MAX = 6000;
 const onlyMine = (ctx: Ctx) => !can(ctx, P.crmViewAll);
 const rub = (kop: number | string | null | undefined) => `${Math.round(Number(kop ?? 0) / 100).toLocaleString('ru-RU')} ₽`;
 /** Телефоны и e-mail в текстах заменяются: в сводку и в YandexGPT они не попадают */
-const noContacts = (s: string) => s.replace(/\+?\d[\d\s()-]{8,}\d/g, '[телефон]').replace(/[\w.+-]+@[\w-]+\.[\w.-]+/g, '[e-mail]');
+export const noContacts = (s: string) => s.replace(/\+?\d[\d\s()-]{8,}\d/g, '[телефон]').replace(/[\w.+-]+@[\w-]+\.[\w.-]+/g, '[e-mail]');
 const cut = (s: unknown, n: number) => { const t = noContacts(String(s ?? '')).replace(/\s+/g, ' ').trim(); return t.length > n ? `${t.slice(0, n - 1)}…` : t; };
 
 /* ---------- сбор фактов ---------- */

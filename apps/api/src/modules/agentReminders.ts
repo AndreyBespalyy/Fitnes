@@ -25,7 +25,7 @@ export async function agentSettings(db: Db, clubId: string): Promise<AgentSettin
 }
 
 export type Action = 'brief' | 'open' | 'snooze_1h' | 'snooze_tomorrow' | 'nudge' | 'reassign' | 'chat';
-type Card = { kind: string; title: string; body: string; objectType: 'task' | 'opportunity' | 'lead' | 'conversation'; objectId: string;
+type Card = { kind: string; title: string; body: string; objectType: 'task' | 'opportunity' | 'lead' | 'conversation' | null; objectId: string | null;
   actions: Action[]; link: { tab: string; p?: Record<string, string> } | null };
 
 /** Карточка-уведомление с кнопками */
