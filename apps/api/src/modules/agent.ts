@@ -36,7 +36,8 @@ export type Facts = {
   waitingReplySince: string | null;
   memberships: { product: string; status: string; startsOn: string; endsOn: string | null; visitsLeft: number | null; nextChargeOn: string | null }[];
   debts: { title: string; dueOn: string; amount: string }[];
-  visits: { last: string | null; last30: number };
+  visits: { last: string | null; last30: number; recent: { at: string; club: string }[] };
+  classes: ClientClass[];
   team: { at: string; chat: string; personal: boolean; author: string | null; text: string }[];
   observations: { at: string; text: string }[];
 };
@@ -84,7 +85,9 @@ async function personFacts(db: Db, personId: string, oppId: string | null, f: Fa
   f.debts = (await db.query(`select title, due_on, amount_kop from charges where person_id = $1 and status = 'due' and due_on <= current_date order by due_on limit 5`, [personId])).rows
     .map((r) => ({ title: r.title, dueOn: r.due_on, amount: rub(r.amount_kop) }));
   const v = (await db.query(`select max(visited_at) as last, count(*) filter (where visited_at > now() - interval '30 days')::int as n from visits where person_id = $1`, [personId])).rows[0];
-  f.visits = { last: v?.last ?? null, last30: v?.n ?? 0 };
+  const recent = (await db.query(`select v.visited_at as at, c.name as club from visits v join clubs c on c.id = v.club_id where v.person_id = $1 order by v.visited_at desc limit 5`, [personId])).rows;
+  f.visits = { last: v?.last ?? null, last30: v?.n ?? 0, recent };
+  f.classes = await clientClasses(db, personId);
   // Обсуждения в мессенджере сотрудников: по имени клиента, по последним цифрам телефона или по ссылке на карточку
   const phones = (await db.query(`select right(normalized_value, 10) as d from person_contacts where person_id = $1 and type = 'phone'`, [personId])).rows.map((r) => r.d as string).filter((d) => d.length >= 10);
   const name = String(p.full_name).trim();
@@ -121,7 +124,7 @@ async function oppFacts(db: Db, oppId: string, f: Facts) {
 
 function emptyFacts(type: Facts['target']['type'], id: string, club: { name: string; timezone: string }): Facts {
   return { now: new Date().toISOString(), timezone: club.timezone, clubName: club.name, target: { type, id }, task: null, person: null, opportunity: null,
-    tasks: [], leads: [], meetings: [], calls: [], clientMessages: [], waitingReplySince: null, memberships: [], debts: [], visits: { last: null, last30: 0 }, team: [], observations: [] };
+    tasks: [], leads: [], meetings: [], calls: [], clientMessages: [], waitingReplySince: null, memberships: [], debts: [], visits: { last: null, last30: 0, recent: [] }, classes: [], team: [], observations: [] };
 }
 
 export async function collectFacts(db: Db, ctx: Ctx, type: 'task' | 'opportunity', id: string): Promise<{ facts: Facts; clubId: string }> {
@@ -234,8 +237,10 @@ export function rulesBrief(f: Facts) {
     out.push('**Абонемент и посещения**');
     for (const m of f.memberships.slice(0, 2)) out.push(`• ${m.product} — ${m.status}, с ${fmtDate(m.startsOn, tz, false)}${m.endsOn ? ` по ${fmtDate(m.endsOn, tz, false)}` : ''}${m.visitsLeft != null ? `, осталось посещений: ${m.visitsLeft}` : ''}${m.nextChargeOn ? `, следующее списание ${fmtDate(m.nextChargeOn, tz, false)}` : ''}`);
     out.push(`• Посещений за 30 дней: ${f.visits.last30}${f.visits.last ? `, последнее ${fmtDate(f.visits.last, tz)}` : ''}`);
+    if (f.visits.recent.length > 1) out.push(`• Последние приходы: ${f.visits.recent.map((x) => `${fmtDate(x.at, tz)}${new Set(f.visits.recent.map((r) => r.club)).size > 1 ? ` (${x.club})` : ''}`).join(', ')}`);
     out.push('');
   }
+  if (f.classes.length) out.push(...classesText(f.classes, tz), '');
   if (f.clientMessages.length) {
     out.push('**Переписка с клиентом** (последние сообщения)');
     for (const m of f.clientMessages.slice(-5)) out.push(`• ${fmtDate(m.at, tz)}, ${m.from}: ${cut(m.text, 200)}`);
@@ -270,6 +275,25 @@ export function rulesBrief(f: Facts) {
 }
 
 /** Не длиннее 6000 знаков: лишнее отрезается по строкам */
+export type ClientClass = { at: string; name: string; kind: string; trainer: string | null; room: string | null; club: string; status: string; trial: boolean; lateCancel: boolean };
+const CLASS_STATUS: Record<string, string> = { attended: 'пришёл', no_show: 'не пришёл', booked: 'записан', waitlist: 'в листе ожидания', cancelled: 'отменил запись' };
+/** Занятия клиента с привязкой к тренировке: что, когда, тренер, зал, клуб, пришёл ли (просьба Андрея 14.11.2026) */
+export async function clientClasses(db: Db, personId: string, limit = 12): Promise<ClientClass[]> {
+  return (await db.query(`select s.starts_at as at, ct.name, ct.kind, u.full_name as trainer, r.name as room, c.name as club, b.status, b.trial, b.late_cancel as "lateCancel"
+    from class_bookings b join class_sessions s on s.id = b.session_id join class_types ct on ct.id = s.type_id join clubs c on c.id = s.club_id
+      left join users u on u.id = s.trainer_id left join rooms r on r.id = s.room_id
+    where b.person_id = $1 order by s.starts_at desc limit $2`, [personId, limit])).rows.map((x) => ({ ...x, status: CLASS_STATUS[x.status] ?? x.status }));
+}
+export function classesText(cl: ClientClass[], tz: string) {
+  const out = ['**Занятия**'];
+  const done = cl.filter((x) => x.status === 'пришёл'); const miss = cl.filter((x) => x.status === 'не пришёл');
+  const tr = new Map<string, number>(); for (const x of done) if (x.trainer) tr.set(x.trainer, (tr.get(x.trainer) ?? 0) + 1);
+  const fav = [...tr.entries()].sort((a, b) => b[1] - a[1])[0];
+  out.push(`• Из последних ${cl.length} записей: пришёл ${done.length}, **не пришёл ${miss.length}**${fav ? `; чаще всего занимается у тренера ${fav[0]} (${fav[1]})` : ''}`);
+  for (const x of cl.slice(0, 8)) out.push(`• ${fmtDate(x.at, tz)} — ${x.name}${x.kind === 'personal' ? ' (персональная)' : ''}${x.trial ? ' (пробное)' : ''}, тренер ${x.trainer ?? '—'}${x.room ? `, ${x.room}` : ''}, ${x.club}: **${x.status}**${x.lateCancel ? ' (поздняя отмена)' : ''}`);
+  return out;
+}
+
 export function fitBrief(text: string) {
   const t = text.replace(/\n{3,}/g, '\n\n').trim();
   if (t.length <= BRIEF_MAX) return t;
@@ -284,7 +308,7 @@ const BRIEF_PROMPT = `Ты — ИИ-помощник в CRM сети фитне�
 По фактам из CRM (JSON) напиши сводку, чтобы за минуту понять ситуацию и что делать дальше.
 Правила:
 - Только по-русски, простыми словами, без канцелярита. Не больше 5000 знаков.
-- Разделы с заголовками в отдельной строке, выделенными **жирным**: **Главное**, **Что сделать сейчас**, затем по необходимости **Клиент и абонемент**, **Разговоры**, **Переписка**, **Что уже делали**, **Риски**.
+- Разделы с заголовками в отдельной строке, выделенными **жирным**: **Главное**, **Что сделать сейчас**, затем по необходимости **Клиент и абонемент**, **Занятия** (какие тренировки, у какого тренера, где, пришёл ли), **Разговоры**, **Переписка**, **Что уже делали**, **Риски**.
 - В «Главном» 2–4 предложения: кто клиент, на каком шаге, что сейчас важно.
 - «Что сделать сейчас» — 1–5 пунктов списком «• », от самого срочного, конкретно (что, кому, до какого времени).
 - **Жирным** выделяй только самое важное: сроки, просрочки, суммы долга, ключевые возражения, договорённости.
@@ -331,6 +355,10 @@ export function agentRoutes(app: FastifyInstance, pool: pg.Pool, yandex: YandexC
     const ctx = requirePerm(req, P.crmWork);
     const { type, id } = req.params as { type: string; id: string };
     const { force } = req.query as { force?: string };
+    if (type === 'process') {
+      const { processBrief } = await import('./agentProcesses.ts');
+      return withCtx(pool, ctx, (db) => processBrief(db, ctx, yandex, id, force === '1'));
+    }
     if (type !== 'task' && type !== 'opportunity') throw badRequest('Неизвестный тип');
     return withCtx(pool, ctx, (db) => situationBrief(db, ctx, yandex, type, id, force === '1'));
   });

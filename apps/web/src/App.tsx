@@ -59,6 +59,8 @@ const IntakePage = page(() => import('./intake.tsx'), 'IntakePage');
 const ConfigPage = page(() => import('./config.tsx'), 'ConfigPage');
 const ReviewsPage = page(() => import('./insights.tsx'), 'ReviewsPage');
 const SalesOpsPage = page(() => import('./salesOps.tsx'), 'SalesOpsPage');
+const ProcessesPage = page(() => import('./processes.tsx'), 'ProcessesPage');
+const WeeklyPage = page(() => import('./weekly.tsx'), 'WeeklyPage');
 const TeamPage = page(() => import('./team.tsx'), 'TeamPage');
 const TestNotesPage = page(() => import('./testNotes.tsx'), 'TestNotesPage');
 
@@ -128,7 +130,7 @@ function ChangePassword({ me, forced, onDone, onLogout }: { me: Me; forced?: boo
   );
 }
 
-type Tab = 'dash' | 'hot' | 'calls' | 'leads' | 'board' | 'tasks' | 'home' | 'clubs' | 'tariffs' | 'contracts' | 'site' | 'fiscal' | 'finance' | 'import' | 'chats' | 'access' | 'messaging' | 'pipelines' | 'staff' | 'stafftime' | 'config' | 'reviews' | 'onboarding' | 'help' | 'schedule' | 'retention' | 'shop' | 'corp' | 'trainer' | 'desk' | 'load' | 'cohorts' | 'pnl' | 'usage' | 'intake' | 'sales' | 'team' | 'notes' | 'profile';
+type Tab = 'dash' | 'hot' | 'calls' | 'leads' | 'board' | 'tasks' | 'home' | 'clubs' | 'tariffs' | 'contracts' | 'site' | 'fiscal' | 'finance' | 'import' | 'chats' | 'access' | 'messaging' | 'pipelines' | 'staff' | 'stafftime' | 'config' | 'reviews' | 'onboarding' | 'help' | 'schedule' | 'retention' | 'shop' | 'corp' | 'trainer' | 'desk' | 'load' | 'cohorts' | 'pnl' | 'usage' | 'intake' | 'sales' | 'processes' | 'weekly' | 'team' | 'notes' | 'profile';
 
 function Shell({ me, onLogout }: { me: Me; onLogout: () => void }) {
   const firstTab: Tab = 'dash';
@@ -188,6 +190,8 @@ function Shell({ me, onLogout }: { me: Me; onLogout: () => void }) {
     ['dash', 'Рабочий стол', true],
     ['team', 'Мессенджер', true],
     ['tasks', 'Задачи', can(me, 'crm.work')],
+    ['processes', 'Бизнес-процессы', can(me, 'crm.work')],
+    ['weekly', 'Разбор недели', can(me, 'dash.view') || can(me, 'crm.view_all')],
     ['hot', 'Кому звонить', can(me, 'crm.work')],
     ['calls', 'Звонки', can(me, 'crm.work')],
     ['sales', 'Отдел продаж', can(me, 'crm.work')],
@@ -269,6 +273,8 @@ function Shell({ me, onLogout }: { me: Me; onLogout: () => void }) {
         {tab === 'hot' && <HotPage me={me} clubs={clubs} clubId={clubId} openPerson={openPerson} />}
         {tab === 'team' && <TeamPage me={me} clubs={clubs} clubId={clubId} />}
         {tab === 'sales' && <SalesOpsPage me={me} clubs={clubs} clubId={clubId} openPerson={openPerson} />}
+        {tab === 'weekly' && <WeeklyPage clubs={clubs} clubId={clubId} />}
+        {tab === 'processes' && <ProcessesPage me={me} clubs={clubs} clubId={clubId} openPerson={openPerson} />}
         {tab === 'calls' && <CallsPage me={me} clubs={clubs} clubId={clubId} openPerson={openPerson} />}
         {tab === 'tasks' && <TasksPage key={ver} me={me} clubId={clubId} openPerson={openPerson} />}
         {tab === 'leads' && <LeadsPage key={ver} me={me} clubs={clubs} clubId={clubId} openPerson={openPerson} />}

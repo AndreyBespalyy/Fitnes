@@ -11,7 +11,8 @@ type Member = { id: string; fullName: string; isAdmin: boolean; auto: boolean; l
 type ChatInfo = { id: string; kind: ChatItem['kind']; title: string; onlyAdminsPost: boolean; isAdmin: boolean; muted: boolean; canAnnounce: boolean; canPost: boolean; canManage: boolean; members: Member[] };
 type FileMeta = { id: string; name: string; mime: string; size: number };
 type Msg = { id: string; userId: string | null; author: string | null; body: string; important: boolean; createdAt: string; editedAt: string | null; deleted: boolean;
-  replyTo: string | null; replyBody: string | null; replyAuthor: string | null; file: FileMeta | null; pending?: boolean };
+  replyTo: string | null; replyBody: string | null; replyAuthor: string | null; file: FileMeta | null; pending?: boolean;
+  meta?: { kind?: string; meetingId?: string; status?: 'confirmed' | 'declined' } | null };
 type Person = { id: string; fullName: string; login: string; roles: string[]; clubs: string[]; app: string | null };
 
 const err = (x: unknown) => (x instanceof ApiError ? x.message : 'Нет связи с сервером');
@@ -292,7 +293,7 @@ function Conversation({ id, meId, item, onBack, onChanged, onLeft }: { id: strin
               {!mine && kind !== 'direct' && <span className="tm-row-ava">{!cont && <Avatar name={m.author ?? '?'} size={30} />}</span>}
               <div className={`tm-bubble ${m.important ? 'imp' : ''} ${m.deleted ? 'del' : ''} ${m.pending ? 'pending' : ''} ${sel === m.id ? 'sel' : ''}`}
                 onClick={() => !m.deleted && !m.pending && setSel(sel === m.id ? null : m.id)}>
-                {m.important && <div className="tm-imp-lbl"><Ico d={I.megaphone} s={14} /> Объявление</div>}
+                {m.important && !m.meta?.kind && <div className="tm-imp-lbl"><Ico d={I.megaphone} s={14} /> Объявление</div>}
                 {!mine && kind !== 'direct' && !cont && <div className="tm-author">{m.author}</div>}
                 {m.replyTo && <div className="tm-quote"><b>{m.replyAuthor ?? ''}</b><span>{m.replyBody || '📎 Файл'}</span></div>}
                 {m.deleted ? <i className="tm-muted">Сообщение удалено</i> : <>
@@ -301,6 +302,8 @@ function Conversation({ id, meId, item, onBack, onChanged, onLeft }: { id: strin
                     : m.file.id ? <a className="tm-file" href={`/api/team/files/${m.file.id}`} target="_blank" rel="noreferrer" onClick={(e) => e.stopPropagation()}><Ico d={I.file} s={22} /><span><b>{m.file.name}</b><small>{size(m.file.size)}</small></span></a>
                       : <span className="tm-file"><Ico d={I.file} s={22} /><span><b>{m.file.name}</b><small>Отправляется…</small></span></span>)}
                   {m.body && <div className="tm-text">{boldify(m.body)}</div>}
+                  {m.meta?.kind === 'meeting_invite' && m.meta.meetingId && <MeetingButtons meetingId={m.meta.meetingId} status={m.meta.status}
+                    onDone={(st) => setMsgs((cur) => cur.map((x) => (x.meta?.meetingId === m.meta!.meetingId ? { ...x, meta: { ...x.meta, status: st } } : x)))} />}
                 </>}
                 <div className="tm-meta">
                   {m.editedAt && !m.deleted && <span>изменено</span>}
@@ -461,5 +464,28 @@ function ChatInfoSheet({ info, meId, onClose, reload, onLeft, toggleMute }: { in
       </ul>
       {info.kind === 'group' && <div className="tm-sheet-foot"><button className="tm-btn bad" onClick={() => run(async () => { await api('DELETE', `/api/team/chats/${info.id}/members/${meId}`); onClose(); onLeft(); })}>Выйти из группы</button></div>}
     </Sheet>
+  );
+}
+
+/** Приглашение на собрание от ИИ-помощника: «Подтвердить участие» / «Не смогу» */
+function MeetingButtons({ meetingId, status, onDone }: { meetingId: string; status?: 'confirmed' | 'declined'; onDone: (s: 'confirmed' | 'declined') => void }) {
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState('');
+  const send = async (answer: 'confirmed' | 'declined') => {
+    setBusy(true); setErr('');
+    try { await api('POST', `/api/agent/meetings/${meetingId}/answer`, { answer }); onDone(answer); }
+    catch (e) { setErr(e instanceof ApiError ? e.message : 'Не получилось, попробуйте ещё раз'); }
+    finally { setBusy(false); }
+  };
+  return (
+    <div className="tm-meet" onClick={(e) => e.stopPropagation()}>
+      {status === 'confirmed' && <span className="tm-meet-ok">✓ Вы подтвердили участие</span>}
+      {status === 'declined' && <span className="tm-meet-no">Вы ответили, что не сможете</span>}
+      <div className="tm-meet-btns">
+        {status !== 'confirmed' && <button type="button" className="tm-meet-yes" disabled={busy} onClick={() => void send('confirmed')}>Подтвердить участие</button>}
+        {status !== 'declined' && <button type="button" className="tm-meet-later" disabled={busy} onClick={() => void send('declined')}>{status === 'confirmed' ? 'Не смогу' : 'Не смогу прийти'}</button>}
+      </div>
+      {err && <small className="tm-meet-err">{err}</small>}
+    </div>
   );
 }

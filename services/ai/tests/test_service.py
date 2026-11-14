@@ -32,7 +32,7 @@ class FakeLLM:
         self.answer = answer
         self.seen = None
 
-    def complete(self, system, user):
+    def complete(self, system, user, *_):
         self.seen = user
         return self.answer
 
@@ -101,6 +101,38 @@ class ServiceTest(unittest.TestCase):
         app.state.llm = Broken({})
         r = self.c.post("/v1/summarize", json={"transcript": {"text": " ".join(["слово"] * 20)}}, headers=self.h)
         self.assertEqual(r.status_code, 502)
+
+    def test_evaluate(self):
+        app.state.llm = FakeLLM({"items": [
+            {"id": "greet", "ok": True, "quote": "Добрый день, фитнес-клуб Центр"},
+            {"id": "close", "ok": "да", "quote": ""},
+            {"id": "lishniy", "ok": False, "quote": ""},
+        ]})
+        r = self.c.post("/v1/evaluate", json={
+            "transcript": {"text": "Менеджер: Добрый день, фитнес-клуб Центр. Карта 4276 1234 5678 9012"},
+            "checklist": [{"id": "greet", "text": "Поздоровался и назвал клуб"}, {"id": "close", "text": "Записал на визит"}],
+        }, headers=self.h)
+        self.assertEqual(r.status_code, 200, r.text)
+        items = r.json()["items"]
+        self.assertEqual([i["id"] for i in items], ["greet", "close"])  # чужие пункты отброшены
+        self.assertIs(items[0]["ok"], True)
+        self.assertIsNone(items[1]["ok"])  # не логическое значение -> «нельзя понять»
+        self.assertNotIn("4276", app.state.llm.seen)
+        self.assertEqual(self.c.post("/v1/evaluate", json={"transcript": {}, "checklist": []}).status_code, 401)
+
+    def test_config_suggest(self):
+        app.state.llm = FakeLLM({"changes": [
+            {"path": "freeze.maxDays", "value": "30"}, {"path": "late.text", "value": "\"Напомнить\""},
+            {"path": "chuzhaya", "value": "1"},
+        ], "explanation": "Заморозка до 30 дней", "unknown": ["скидка на кофе"]})
+        r = self.c.post("/v1/config-suggest", json={"text": "заморозка до 30 дней", "fields": [
+            {"path": "freeze.maxDays", "label": "Дней заморозки", "type": "number", "value": 14},
+            {"path": "late.text", "label": "Текст", "type": "string", "value": ""},
+        ]}, headers=self.h)
+        self.assertEqual(r.status_code, 200, r.text)
+        b = r.json()
+        self.assertEqual(b["changes"], [{"path": "freeze.maxDays", "value": 30}, {"path": "late.text", "value": "Напомнить"}])
+        self.assertEqual(b["unknown"], ["скидка на кофе"])
 
     def test_wer(self):
         self.assertEqual(wer("я хочу абонемент", "я хочу абонемент"), 0)

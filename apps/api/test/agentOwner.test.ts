@@ -51,12 +51,12 @@ test('разбор: темы, период, вероятность', () => {
 
 test('собственник: продажи и прогноз с вероятностью, посещаемость, тренеры, отдел продаж', async () => {
   const s = await ask('Как продажи в этом месяце и выполним ли план?');
-  assert.match(s, /\*\*Понял вопрос как:\*\* продажи и план, прогноз — вся сеть/);
+  assert.match(s, /^\*\*Продажи\*\* · вся сеть, ноябрь/); assert.doesNotMatch(s, /Понял вопрос/);
   assert.match(s, /\*\*Продажи\*\*/);
   assert.match(s, /\*\*Прогноз\*\*/);
   assert.match(s, /Шанс выполнить план .*\*\*(≈ \d+|меньше 5|больше 95) %|план на месяц не задан/);
   const a = await ask('посещаемость за неделю в Центре');
-  assert.match(a, /Понял вопрос как:\*\* посещаемость — Клуб «Центр», последние 7 дней/);
+  assert.match(a, /^\*\*Посещаемость\*\* · Клуб «Центр», последние 7 дней/);
   assert.match(a, /Посещений: \*\*\d+\*\*/);
   const tr = await ask('как работают тренеры за месяц');
   assert.match(tr, /\*\*Тренеры\*\*/);
@@ -77,7 +77,7 @@ test('сотрудник и клиент по имени, уточнение п�
   const q = await ask('ну и как оно?');
   assert.match(q, /О чём рассказать\?/);
   const ans = await ask('3');
-  assert.match(ans, /Понял вопрос как:\*\* посещаемость/);
+  assert.match(ans, /^\*\*Посещаемость\*\*/);
   // Два человека с одним именем — уточнение
   await sql(`insert into users(tenant_id, login, password_hash, full_name, must_change_password) select tenant_id, 'm.volkova2', password_hash, 'Мария Петрова', false from users where login = 'm.volkova'`);
   await sql(`insert into user_assignments(tenant_id, user_id, role_code, club_id) select u.tenant_id, u.id, 'manager', c.id from users u, clubs c where u.login = 'm.volkova2' and c.name like '%Центр%'`);
@@ -116,4 +116,25 @@ test('разбор: отдел продаж и тренеры не путают�
   assert.deepEqual(parseTopics('покажи отдел продаж'), ['staff']);
   assert.deepEqual(parseTopics('как работают тренеры'), ['trainers']);
   assert.deepEqual(parseTopics('как работают менеджеры и тренеры'), ['trainers', 'staff']);
+});
+
+test('в данных помощника — занятия клиента: тренер, зал, клуб, пришёл ли', async () => {
+  const centr = (await sql(`select id, tenant_id from clubs where name like '%Центр%'`))[0];
+  const r = await req('POST', '/api/leads', 'm.volkova', { clubId: centr.id, fullName: 'Вера Лесная', phone: '+79005553311', sourceCode: 'walk_in' });
+  assert.equal(r.statusCode, 201, r.body);
+  const { personId, opportunityId } = r.json();
+  const kim = (await sql(`select id from users where login = 'a.kim'`))[0].id;
+  const room = (await sql(`insert into rooms(tenant_id, club_id, name) values ($1,$2,'Зал йоги (тест)') returning id`, [centr.tenant_id, centr.id]))[0].id;
+  const type = (await sql(`insert into class_types(tenant_id, club_id, name, kind) values ($1,$2,'Йога (тест)','group') returning id`, [centr.tenant_id, centr.id]))[0].id;
+  for (const [ago, st] of [[3, 'attended'], [1, 'no_show']] as const) {
+    const s = (await sql(`insert into class_sessions(tenant_id, club_id, type_id, room_id, trainer_id, starts_at, ends_at, capacity, status)
+      values ($1,$2,$3,$4,$5, now() - make_interval(days => $6), now() - make_interval(days => $6) + interval '1 hour', 10, 'done') returning id`, [centr.tenant_id, centr.id, type, room, kim, ago]))[0].id;
+    await sql(`insert into class_bookings(tenant_id, club_id, session_id, person_id, status) values ($1,$2,$3,$4,$5)`, [centr.tenant_id, centr.id, s, personId, st]);
+  }
+  const b = (await req('GET', `/api/agent/brief/opportunity/${opportunityId}?force=1`, 'a.bespalyy')).json();
+  assert.match(b.text, /\*\*Занятия\*\*/);
+  assert.match(b.text, /пришёл 1, \*\*не пришёл 1\*\*; чаще всего занимается у тренера Артём Ким/);
+  assert.match(b.text, /Йога \(тест\), тренер Артём Ким, Зал йоги \(тест\), Клуб «Центр»: \*\*не пришёл\*\*/);
+  const c = await ask('что с клиентом Вера Лесная');
+  assert.match(c, /Занятия/);
 });

@@ -15,10 +15,11 @@ function inline(s: string): ReactNode[] {
 export function BriefText({ text }: { text: string }) {
   const blocks: ReactNode[] = [];
   let list: string[] = [];
-  const flush = () => { if (list.length) { blocks.push(<ul key={`l${blocks.length}`} className="brief-ul">{list.map((x, i) => <li key={i}>{inline(x)}</li>)}</ul>); list = []; } };
+  const flush = () => { if (list.length) { blocks.push(<ul key={`l${blocks.length}`} className="brief-ul">{list.map((x, i) => <li key={i}>{x.split('\n').map((y, j) => <span key={j}>{j > 0 && <br />}{inline(y)}</span>)}</li>)}</ul>); list = []; } };
   for (const raw of text.split('\n')) {
     const l = raw.trim();
     if (!l) { flush(); continue; }
+    if (/^\s{2,}/.test(raw) && list.length) { list[list.length - 1] += `\n${l}`; continue; } // продолжение пункта списка
     const li = l.match(/^(?:[•\-*]|\d+[.)])\s+(.*)$/);
     if (li && !/^\*\*/.test(l)) { list.push(li[1]); continue; }
     flush();
@@ -30,7 +31,7 @@ export function BriefText({ text }: { text: string }) {
   return <div className="brief">{blocks}</div>;
 }
 
-export function SituationButton({ type, id, small = true, label = 'Коротко о ситуации' }: { type: 'task' | 'opportunity'; id: string; small?: boolean; label?: string }) {
+export function SituationButton({ type, id, small = true, label = 'Коротко о ситуации' }: { type: 'task' | 'opportunity' | 'process'; id: string; small?: boolean; label?: string }) {
   const [open, setOpen] = useState(false);
   return (<>
     <button className={`btn ${small ? 'sm' : ''} brief-btn`} onClick={(e) => { e.stopPropagation(); setOpen(true); }} title="ИИ-помощник соберёт всё по этой ситуации: задачи, звонки, переписку, обсуждения">
@@ -39,7 +40,7 @@ export function SituationButton({ type, id, small = true, label = 'Коротк�
   </>);
 }
 
-export function SituationDialog({ type, id, onClose }: { type: 'task' | 'opportunity'; id: string; onClose: () => void }) {
+export function SituationDialog({ type, id, onClose }: { type: 'task' | 'opportunity' | 'process'; id: string; onClose: () => void }) {
   const [b, setB] = useState<Brief | null>(null);
   const [err, setErr] = useState('');
   const [busy, setBusy] = useState(false);
