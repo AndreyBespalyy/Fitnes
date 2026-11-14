@@ -3,8 +3,15 @@
 // Решение Андрея 12.11.2026: вся связь — в CRM, без Telegram.
 import { useEffect, useRef, useState, type CSSProperties } from 'react';
 import { api, type Go } from './api.ts';
+import { SituationDialog } from './agent.tsx';
+import { errText, toast } from './ui.ts';
 
-type Note = { id: string; kind: string; title: string; body: string | null; link: Go | null; createdAt: string; readAt: string | null };
+type Note = { id: string; kind: string; title: string; body: string | null; link: Go | null; createdAt: string; readAt: string | null;
+  objectType?: string | null; objectId?: string | null; actions?: string[] | null; acted?: string | null };
+
+// Кнопки карточки ИИ-помощника: что можно сделать прямо из уведомления
+const ACTION: Record<string, string> = { brief: 'Коротко о ситуации', open: 'Открыть', chat: 'Открыть переписку', snooze_1h: 'Через час', snooze_tomorrow: 'Завтра',
+  nudge: 'Напомнить исполнителю', reassign: 'Передать другому' };
 
 const when = (s: string) => {
   const d = new Date(s); const now = new Date();
@@ -12,7 +19,8 @@ const when = (s: string) => {
   return d.toDateString() === now.toDateString() ? t : `${d.toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit' })} ${t}`;
 };
 
-export function NotificationsBell({ go }: { go: (g: Go) => void }) {
+export function NotificationsBell({ go, openPerson }: { go: (g: Go) => void; openPerson?: (id: string) => void }) {
+  const [brief, setBrief] = useState<{ type: 'task' | 'opportunity'; id: string } | null>(null);
   const [items, setItems] = useState<Note[]>([]);
   const [unread, setUnread] = useState(0);
   const [open, setOpen] = useState(false);
@@ -42,7 +50,20 @@ export function NotificationsBell({ go }: { go: (g: Go) => void }) {
   };
   const openNote = (n: Note) => {
     if (!n.readAt) mark([n.id]);
-    if (n.link?.tab) { setOpen(false); go({ tab: n.link.tab, p: n.link.p }); }
+    if (n.link?.tab) {
+      setOpen(false);
+      const { person, ...p } = n.link.p ?? {};
+      go({ tab: n.link.tab, p });
+      if (person && openPerson) openPerson(person);
+    }
+  };
+  const act = async (n: Note, a: string) => {
+    if (a === 'brief') { if (n.objectId && (n.objectType === 'task' || n.objectType === 'opportunity')) setBrief({ type: n.objectType, id: n.objectId }); return; }
+    if (a === 'open' || a === 'chat') { openNote(n); return; }
+    try {
+      const r = await api<{ message: string }>('POST', `/api/agent/notifications/${n.id}/action`, { action: a });
+      toast(r.message || 'Готово'); load();
+    } catch (x) { toast(errText(x)); }
   };
 
   return (
@@ -64,13 +85,17 @@ export function NotificationsBell({ go }: { go: (g: Go) => void }) {
                 <button type="button" onClick={() => openNote(n)}>
                   <span className="bell-t">{n.title}</span>
                   {n.body && <span className="bell-b">{n.body}</span>}
-                  <span className="bell-w">{when(n.createdAt)}</span>
+                  <span className="bell-w">{when(n.createdAt)}{n.acted ? ` · сделано: ${ACTION[n.acted] ?? n.acted}` : ''}</span>
                 </button>
+                {!!n.actions?.length && (
+                  <div className="bell-acts">{n.actions.filter((a) => a !== 'brief' || n.objectType === 'task' || n.objectType === 'opportunity').map((a) => (
+                    <button key={a} type="button" className={`btn sm ${a === 'brief' ? 'brief-btn' : ''}`} onClick={() => act(n, a)}>{a === 'brief' ? '✦ ' : ''}{ACTION[a] ?? a}</button>))}</div>)}
               </li>
             ))}
           </ul>
         </div>
       )}
+      {brief && <SituationDialog type={brief.type} id={brief.id} onClose={() => setBrief(null)} />}
     </div>
   );
 }

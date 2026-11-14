@@ -45,7 +45,7 @@ export async function opsSettings(db: Db, clubId: string): Promise<OpsSettings> 
 }
 
 /** Сотрудники клуба в ролях (действующие назначения) */
-async function staffOf(db: Db, clubId: string, roles: string[]) {
+export async function staffOf(db: Db, clubId: string, roles: string[]) {
   return (await db.query(`select distinct u.id, u.full_name as name, a.role_code as role from users u join user_assignments a on a.user_id = u.id
     where (a.club_id = $1 or (a.club_id is null and a.role_code = 'owner')) and a.role_code = any($2) and u.status = 'active'
       and a.active_from <= current_date and (a.active_to is null or a.active_to >= current_date) order by u.full_name`, [clubId, roles])).rows as { id: string; name: string; role: string }[];
@@ -453,7 +453,7 @@ export function salesOpsRoutes(app: FastifyInstance, pool: pg.Pool) {
   app.get('/api/notifications', async (req) => {
     const ctx = requireCtx(req);
     return withCtx(pool, ctx, async (db) => {
-      const items = (await db.query(`select id, kind, title, body, link, created_at as "createdAt", read_at as "readAt" from staff_notifications
+      const items = (await db.query(`select id, kind, title, body, link, created_at as "createdAt", read_at as "readAt", object_type as "objectType", object_id as "objectId", actions, acted, acted_at as "actedAt" from staff_notifications
         where user_id = $1 order by created_at desc limit 50`, [ctx.userId])).rows;
       const unread = (await db.query('select count(*)::int as n from staff_notifications where user_id = $1 and read_at is null', [ctx.userId])).rows[0].n as number;
       return { items, unread };

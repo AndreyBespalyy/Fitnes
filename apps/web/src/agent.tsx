@@ -1,7 +1,7 @@
 // ИИ-агент: кнопка «Коротко о ситуации» в задаче и сделке. Окно с текстом до 6000 знаков, главное выделено жирным.
 import { useEffect, useState, type ReactNode } from 'react';
 import { api } from './api.ts';
-import { dt, errText } from './ui.ts';
+import { dt, errText, toast } from './ui.ts';
 
 type Brief = { text: string; engine: string; createdAt: string; cached: boolean; note?: string | null;
   sources: { tasks: number; calls: number; clientMessages: number; team: number; stages: number; observations: number } };
@@ -66,6 +66,35 @@ export function SituationDialog({ type, id, onClose }: { type: 'task' | 'opportu
         <div className="row"><button className="btn sm" disabled={busy} onClick={() => load(true)}>{busy ? 'Обновляю…' : 'Обновить'}</button>
           <button className="btn sm pri" onClick={onClose}>Понятно</button></div>
       </div>
+    </div>
+  );
+}
+
+/* ---------- Настройки ИИ-помощника клуба: лестница напоминаний и авто-передача заявок ---------- */
+type AgentSets = { enabled: boolean; taskRopMinutes: number; taskGmMinutes: number; taskOwnerMinutes: number; replyWaitMinutes: number;
+  leadReassignMinutes: number; quietFrom: number; quietTo: number; canEdit: boolean };
+export function AgentSettingsCard({ clubId }: { clubId: string }) {
+  const [f, setF] = useState<AgentSets | null>(null);
+  const [err, setErr] = useState('');
+  useEffect(() => { setF(null); api<AgentSets>('GET', `/api/agent/settings?clubId=${clubId}`).then(setF).catch((x) => setErr(errText(x))); }, [clubId]);
+  if (!f) return err ? <div className="err">{err}</div> : null;
+  const ro = !f.canEdit;
+  const num = (k: keyof AgentSets, label: string) => <label className="f">{label}<input type="number" disabled={ro} value={f[k] as number} onChange={(e) => setF({ ...f, [k]: Number(e.target.value) })} /></label>;
+  const save = async () => { setErr(''); try { const { canEdit: _c, ...b } = f; await api('PUT', '/api/agent/settings', { clubId, ...b }); toast('Сохранено'); } catch (x) { setErr(errText(x)); } };
+  return (
+    <div className="card" style={{ display: 'grid', gap: 10, maxWidth: 640 }}>
+      <h2 style={{ margin: 0 }}>✦ ИИ-помощник: напоминания</h2>
+      <p className="small muted" style={{ margin: 0 }}>Помощник присылает карточки с кнопками в колокольчик и на телефон. Если исполнитель не реагирует, сигнал поднимается выше по лестнице. Клиентам помощник сам не пишет.</p>
+      {err && <div className="err">{err}</div>}
+      {ro && <p className="small muted" style={{ margin: 0 }}>Менять может управляющий или собственник.</p>}
+      <label className="row" style={{ gap: 8 }}><input type="checkbox" style={{ width: 'auto' }} disabled={ro} checked={f.enabled} onChange={(e) => setF({ ...f, enabled: e.target.checked })} />Напоминания и эскалация включены</label>
+      <div className="grid2">
+        {num('taskRopMinutes', 'Просроченная задача → РОП, через мин')}{num('taskGmMinutes', '→ управляющий, через мин')}
+        {num('taskOwnerMinutes', '→ собственник, через мин')}{num('replyWaitMinutes', 'Клиент ждёт ответа в переписке, мин')}
+        {num('leadReassignMinutes', 'Передать заявку другому менеджеру, если не взяли за мин (0 — не передавать)')}
+        <div className="grid2">{num('quietFrom', 'Тишина с, ч')}{num('quietTo', 'до, ч')}</div>
+      </div>
+      {!ro && <div><button className="btn pri" onClick={save}>Сохранить</button></div>}
     </div>
   );
 }

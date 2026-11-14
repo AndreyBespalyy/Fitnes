@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import { api, can, type Club, type Me, navParams } from './api.ts';
 import { dt, errText, toast } from './ui.ts';
+import { AgentSettingsCard } from './agent.tsx';
 
 const d2 = (s: string) => s.split('-').reverse().slice(0, 2).join('.');
 const rubles = (kop: number) => `${Math.round(kop / 100).toLocaleString('ru-RU')} ₽`;
@@ -27,7 +28,7 @@ export function SalesOpsPage({ me, clubs, clubId, openPerson }: { me: Me; clubs:
       {view === 'newbies' && <Newbies clubId={club} openPerson={openPerson} />}
       {view === 'funnel' && <Funnel clubId={club} />}
       {view === 'base' && <BaseCleanup clubId={club} openPerson={openPerson} />}
-      {view === 'settings' && <Settings clubId={club} />}
+      {view === 'settings' && <><Settings clubId={club} /><AgentSettingsCard clubId={club} /></>}
     </div>
   );
 }
