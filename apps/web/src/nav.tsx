@@ -9,7 +9,7 @@ const GROUPS: [string, string][] = [
   ['today', 'Сегодня'], ['sales', 'Клиенты и продажи'], ['club', 'Клуб'], ['money', 'Деньги и аналитика'], ['team', 'Команда'], ['setup', 'Настройки'], ['other', 'Прочее'],
 ];
 const GROUP: Record<string, string> = {
-  dash: 'today', tasks: 'today', hot: 'today', calls: 'today', desk: 'today', trainer: 'today',
+  dash: 'today', tasks: 'today', processes: 'today', hot: 'today', calls: 'today', desk: 'today', trainer: 'today',
   sales: 'sales', leads: 'sales', board: 'sales', home: 'sales', chats: 'sales', retention: 'sales', reviews: 'sales', corp: 'sales',
   schedule: 'club', access: 'club', load: 'club', shop: 'club', tariffs: 'club', contracts: 'club',
   finance: 'money', fiscal: 'money', pnl: 'money', cohorts: 'money',
@@ -20,6 +20,7 @@ const GROUP: Record<string, string> = {
 
 const P: Record<string, string> = {
   dash: 'M3 11l9-7 9 7v9a1 1 0 0 1-1 1h-5v-6h-6v6H4a1 1 0 0 1-1-1z',
+  processes: 'M4 6h6v4H4zM14 14h6v4h-6zM7 10v4a2 2 0 0 0 2 2h5M17 6h3M17 10V6',
   tasks: 'M9 11l3 3 8-8M20 12v7a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h9',
   hot: 'M12 3c1 4 5 5 5 10a5 5 0 0 1-10 0c0-3 2-4 2-7 2 1 3 3 3 3',
   calls: 'M5 4h4l2 5-2.5 1.5a11 11 0 0 0 5 5L15 13l5 2v4a2 2 0 0 1-2 2A16 16 0 0 1 3 6a2 2 0 0 1 2-2',
