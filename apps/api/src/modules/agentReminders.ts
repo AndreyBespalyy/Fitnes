@@ -10,6 +10,7 @@ import { audit, withCtx, type Ctx, type Db } from '../db.ts';
 import { badRequest, notFound } from '../errors.ts';
 import { PERMISSIONS as P } from '../roles.ts';
 import { staffOf } from './salesOps.ts';
+import { processWeeklyReview } from './agentWeekly.ts';
 
 type Actor = { tenantId: string; userId: string | null };
 export type AgentSettings = { enabled: boolean; taskRopMinutes: number; taskGmMinutes: number; taskOwnerMinutes: number; replyWaitMinutes: number;
@@ -175,6 +176,7 @@ export async function processAgentClub(db: Db, actor: Actor, c: { id: string; h:
   await advanceProcesses(db, actor, c.id); // бизнес-процессы: выполненный шаг → следующий
   const s = await agentSettings(db, c.id);
   if (!s.enabled) return { tasks: 0, replies: 0, reassigned: 0 };
+  await processWeeklyReview(db, actor, c.id); // понедельник утром — разбор прошлой недели
   const quiet = s.quietFrom > s.quietTo ? c.h >= s.quietFrom || c.h < s.quietTo : c.h >= s.quietFrom && c.h < s.quietTo;
   if (quiet) return { tasks: 0, replies: 0, reassigned: 0 };
   return { tasks: await processTaskLadder(db, c.id, s), replies: await processReplyWait(db, c.id, s), reassigned: await processLeadReassign(db, actor, c.id, s) };

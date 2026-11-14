@@ -15,10 +15,11 @@ function inline(s: string): ReactNode[] {
 export function BriefText({ text }: { text: string }) {
   const blocks: ReactNode[] = [];
   let list: string[] = [];
-  const flush = () => { if (list.length) { blocks.push(<ul key={`l${blocks.length}`} className="brief-ul">{list.map((x, i) => <li key={i}>{inline(x)}</li>)}</ul>); list = []; } };
+  const flush = () => { if (list.length) { blocks.push(<ul key={`l${blocks.length}`} className="brief-ul">{list.map((x, i) => <li key={i}>{x.split('\n').map((y, j) => <span key={j}>{j > 0 && <br />}{inline(y)}</span>)}</li>)}</ul>); list = []; } };
   for (const raw of text.split('\n')) {
     const l = raw.trim();
     if (!l) { flush(); continue; }
+    if (/^\s{2,}/.test(raw) && list.length) { list[list.length - 1] += `\n${l}`; continue; } // продолжение пункта списка
     const li = l.match(/^(?:[•\-*]|\d+[.)])\s+(.*)$/);
     if (li && !/^\*\*/.test(l)) { list.push(li[1]); continue; }
     flush();
