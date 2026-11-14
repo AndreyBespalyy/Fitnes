@@ -258,7 +258,7 @@ function Shell({ me, onLogout }: { me: Me; onLogout: () => void }) {
       <div className="main-col">
       <header className="top">
         <button className="search-btn" onClick={() => setCmdk(true)}><span aria-hidden="true">⌕</span><span className="search-ph">Клиент, телефон или раздел</span><kbd>{/Mac|iPhone|iPad/.test(navigator.platform) ? '⌘K' : 'Ctrl K'}</kbd></button>
-        <div className="sp"><Suspense fallback={null}><LocalKktAgent me={me} clubId={clubId} /></Suspense><TeamButton onOpen={() => setTab('team')} /><NotificationsBell go={go} />
+        <div className="sp"><Suspense fallback={null}><LocalKktAgent me={me} clubId={clubId} /></Suspense><TeamButton onOpen={() => setTab('team')} /><NotificationsBell go={go} openPerson={openPerson} />
           <span className="who-me"><span className="ava" aria-hidden="true">{me.full_name.split(' ').map((w) => w[0]).slice(0, 2).join('')}</span><span className="who-txt"><b>{me.full_name}</b><small>{roleNames}</small></span></span>
           <button className="btn sm" onClick={logout}>Выйти</button></div>
       </header>
