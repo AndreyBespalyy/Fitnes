@@ -4,6 +4,7 @@
 import type { FastifyInstance } from 'fastify';
 import type pg from 'pg';
 import { processMeetingReminders } from './agentMeetings.ts';
+import { advanceProcesses } from './agentProcesses.ts';
 import { can, requireCtx, requirePerm } from '../auth.ts';
 import { audit, withCtx, type Ctx, type Db } from '../db.ts';
 import { badRequest, notFound } from '../errors.ts';
@@ -171,6 +172,7 @@ export async function processLeadReassign(db: Db, actor: Actor, clubId: string, 
 /* ---------- цикл ---------- */
 export async function processAgentClub(db: Db, actor: Actor, c: { id: string; h: number }) {
   await processMeetingReminders(db, c.id); // собрания — всегда, даже в тихие часы: напоминание за час до начала
+  await advanceProcesses(db, actor, c.id); // бизнес-процессы: выполненный шаг → следующий
   const s = await agentSettings(db, c.id);
   if (!s.enabled) return { tasks: 0, replies: 0, reassigned: 0 };
   const quiet = s.quietFrom > s.quietTo ? c.h >= s.quietFrom || c.h < s.quietTo : c.h >= s.quietFrom && c.h < s.quietTo;

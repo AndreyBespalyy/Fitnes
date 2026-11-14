@@ -30,7 +30,7 @@ export function BriefText({ text }: { text: string }) {
   return <div className="brief">{blocks}</div>;
 }
 
-export function SituationButton({ type, id, small = true, label = 'Коротко о ситуации' }: { type: 'task' | 'opportunity'; id: string; small?: boolean; label?: string }) {
+export function SituationButton({ type, id, small = true, label = 'Коротко о ситуации' }: { type: 'task' | 'opportunity' | 'process'; id: string; small?: boolean; label?: string }) {
   const [open, setOpen] = useState(false);
   return (<>
     <button className={`btn ${small ? 'sm' : ''} brief-btn`} onClick={(e) => { e.stopPropagation(); setOpen(true); }} title="ИИ-помощник соберёт всё по этой ситуации: задачи, звонки, переписку, обсуждения">
@@ -39,7 +39,7 @@ export function SituationButton({ type, id, small = true, label = 'Коротк�
   </>);
 }
 
-export function SituationDialog({ type, id, onClose }: { type: 'task' | 'opportunity'; id: string; onClose: () => void }) {
+export function SituationDialog({ type, id, onClose }: { type: 'task' | 'opportunity' | 'process'; id: string; onClose: () => void }) {
   const [b, setB] = useState<Brief | null>(null);
   const [err, setErr] = useState('');
   const [busy, setBusy] = useState(false);

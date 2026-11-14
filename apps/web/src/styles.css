@@ -461,3 +461,26 @@ input[type="checkbox"],input[type="radio"]{accent-color:var(--accent)}
 .bell-acts{display:flex;flex-wrap:wrap;gap:6px;padding:0 14px 10px}
 .top .bell-pop .bell-acts button{border:1px solid var(--line);border-radius:8px;padding:5px 10px;font-size:13px;background:var(--bg)}
 .top .bell-pop .bell-acts button.brief-btn{border-color:color-mix(in srgb,var(--accent) 45%,transparent);color:var(--accent-strong)}
+
+/* Бизнес-процессы */
+.proc{display:grid;gap:8px}
+.proc-head{display:flex;gap:12px;justify-content:space-between;align-items:flex-start;flex-wrap:wrap}
+.proc-title{font-size:16px}
+.proc-acts{display:flex;gap:6px;flex-wrap:wrap}
+.proc-bar{height:6px;border-radius:99px;background:var(--surface-2);overflow:hidden}
+.proc-bar i{display:block;height:100%;background:var(--accent);border-radius:99px}
+.proc-cur{display:flex;gap:10px;justify-content:space-between;align-items:center;flex-wrap:wrap;padding:8px 10px;border-radius:10px;background:var(--surface-2)}
+.proc-cur.late{outline:1px solid #f87171}
+.proc-late{color:#f87171;font-weight:700}
+.proc-steps{margin:4px 0 0;padding-left:20px;display:grid;gap:4px}
+.proc-steps li.done{opacity:.75}
+.proc-form{display:grid;grid-template-columns:minmax(200px,1.2fr) minmax(200px,1fr) minmax(160px,1fr) auto;gap:8px;align-items:start}
+@media (max-width:800px){.proc-form{grid-template-columns:1fr}}
+.proc-found{position:absolute;z-index:20;left:0;right:0;top:100%;background:var(--surface);border:1px solid var(--line);border-radius:10px;display:grid;overflow:hidden}
+.proc-found button{background:none;border:0;color:inherit;text-align:left;padding:8px 10px;cursor:pointer}
+.proc-found button:hover{background:var(--surface-2)}
+.proc-person{padding:8px 10px;border:1px solid var(--line);border-radius:10px}
+.proc-step-row{display:flex;gap:6px;align-items:center;flex-wrap:wrap}
+.proc-step-row input:not([type=number]){flex:1;min-width:200px}
+.proc-n{width:22px;text-align:center;font-weight:700;color:var(--accent)}
+.linkish{background:none;border:0;color:var(--accent);cursor:pointer;padding:0;justify-self:start}

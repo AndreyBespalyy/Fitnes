@@ -10,6 +10,8 @@ import { audit, withCtx, type Ctx, type Db } from '../db.ts';
 import { PERMISSIONS as P } from '../roles.ts';
 import { ygptJson, type YandexConfig } from '../lib/yandex.ts';
 import { fmtDate, situationBrief } from './agent.ts';
+import { processDigest, processFromText } from './agentProcesses.ts';
+import { ROLE_NAME } from './agentProcesses.ts';
 import { MEETING_RE, MEETING_STATUS_RE, meetingPendingReply, meetingStatus, proposeMeeting } from './agentMeetings.ts';
 import { OWNER_HELP, isLeader, ownerAnswer, ownerPendingReply } from './agentOwner.ts';
 
@@ -178,6 +180,8 @@ export async function botReply(db: Db, ctx: Ctx, text: string, yandex: YandexCon
     const mp = await meetingPendingReply(db, ctx, text);
     if (mp) return mp;
     if (MEETING_RE.test(text.trim())) return proposeMeeting(db, ctx, text);
+    if (/^(создай|сделай|добавь|запиши|опиши)\s+(новый\s+)?(бизнес[- ]?)?процесс/i.test(text.trim())) return processByWords(db, ctx, text, yandex);
+    if (/^(процессы|как идут процессы|бизнес[- ]?процессы|что с процессами)/i.test(text.trim())) return processesText(db);
     const p = await ownerPendingReply(db, ctx, text, yandex);
     if (p) return p;
     if (/^(напомни|поторопи|пни|передай|передать|переназначь)\s+(?!мне\b)/i.test(text.trim())) {
@@ -257,4 +261,23 @@ export function agentChatRoutes(app: FastifyInstance, pool: pg.Pool) {
     const ctx = requireCtx(req);
     return withCtx(pool, ctx, async (db) => ({ id: (await ensureBotChat(db, ctx)).id }));
   });
+}
+
+/** «Создай процесс: …» — шаблон из описания словами (6Б) */
+async function processByWords(db: Db, ctx: Ctx, text: string, yandex: YandexConfig | null) {
+  const d = await processFromText(text, yandex);
+  if (!d.steps.length) return 'Не понял шаги процесса. Опишите их по порядку: «создай процесс Жалоба: администратор принимает жалобу за час; управляющий разбирается за сутки; затем менеджер звонит клиенту через неделю».';
+  const id = (await db.query(`insert into process_templates(tenant_id, name, description, steps, created_by) values ($1,$2,$3,$4,$5) returning id`,
+    [ctx.tenantId, d.name.slice(0, 200), 'Создан ИИ-помощником по описанию словами', JSON.stringify(d.steps), ctx.userId])).rows[0].id;
+  await audit(db, ctx, 'process.template_created', 'process_template', id, null, { name: d.name, via: 'agent_chat', engine: d.engine });
+  const h = (x: number) => (x >= 24 && x % 24 === 0 ? `${x / 24} дн.` : x < 1 ? `${Math.round(x * 60)} мин` : `${x} ч`);
+  return [`Сохранил шаблон процесса **«${d.name}»**:`, d.steps.map((s, i) => `${i + 1}. ${s.title} — ${ROLE_NAME[s.role] ?? s.role}, ${h(s.hours)}`).join('\n'),
+    'Поправить шаги и запустить — раздел «Бизнес-процессы». Каждый шаг станет задачей исполнителя, следующий я запущу сам, просрочки — по лестнице эскалации.'].join('\n\n');
+}
+
+async function processesText(db: Db) {
+  const clubs = (await db.query(`select id from clubs`)).rows.map((r) => r.id as string);
+  const rows = await processDigest(db, clubs);
+  if (!rows.length) return 'Запущенных процессов нет. Запустить — раздел «Бизнес-процессы», описать новый — «создай процесс: …».';
+  return [`**Идут процессы (${rows.length})**`, ...rows.map((r) => `• ${r.late ? '⚠️ ' : ''}**${r.title}** — ${r.done} из ${r.total}${r.cur ? `; сейчас: ${r.cur}` : ''}${r.late ? '; **срок процесса прошёл**' : ''}`)].join('\n');
 }

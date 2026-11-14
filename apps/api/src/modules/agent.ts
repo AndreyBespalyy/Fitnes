@@ -355,6 +355,10 @@ export function agentRoutes(app: FastifyInstance, pool: pg.Pool, yandex: YandexC
     const ctx = requirePerm(req, P.crmWork);
     const { type, id } = req.params as { type: string; id: string };
     const { force } = req.query as { force?: string };
+    if (type === 'process') {
+      const { processBrief } = await import('./agentProcesses.ts');
+      return withCtx(pool, ctx, (db) => processBrief(db, ctx, yandex, id, force === '1'));
+    }
     if (type !== 'task' && type !== 'opportunity') throw badRequest('Неизвестный тип');
     return withCtx(pool, ctx, (db) => situationBrief(db, ctx, yandex, type, id, force === '1'));
   });
