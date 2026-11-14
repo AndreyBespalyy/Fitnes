@@ -51,12 +51,12 @@ test('разбор: темы, период, вероятность', () => {
 
 test('собственник: продажи и прогноз с вероятностью, посещаемость, тренеры, отдел продаж', async () => {
   const s = await ask('Как продажи в этом месяце и выполним ли план?');
-  assert.match(s, /\*\*Понял вопрос как:\*\* продажи и план, прогноз — вся сеть/);
+  assert.match(s, /^\*\*Продажи\*\* · вся сеть, ноябрь/); assert.doesNotMatch(s, /Понял вопрос/);
   assert.match(s, /\*\*Продажи\*\*/);
   assert.match(s, /\*\*Прогноз\*\*/);
   assert.match(s, /Шанс выполнить план .*\*\*(≈ \d+|меньше 5|больше 95) %|план на месяц не задан/);
   const a = await ask('посещаемость за неделю в Центре');
-  assert.match(a, /Понял вопрос как:\*\* посещаемость — Клуб «Центр», последние 7 дней/);
+  assert.match(a, /^\*\*Посещаемость\*\* · Клуб «Центр», последние 7 дней/);
   assert.match(a, /Посещений: \*\*\d+\*\*/);
   const tr = await ask('как работают тренеры за месяц');
   assert.match(tr, /\*\*Тренеры\*\*/);
@@ -77,7 +77,7 @@ test('сотрудник и клиент по имени, уточнение п�
   const q = await ask('ну и как оно?');
   assert.match(q, /О чём рассказать\?/);
   const ans = await ask('3');
-  assert.match(ans, /Понял вопрос как:\*\* посещаемость/);
+  assert.match(ans, /^\*\*Посещаемость\*\*/);
   // Два человека с одним именем — уточнение
   await sql(`insert into users(tenant_id, login, password_hash, full_name, must_change_password) select tenant_id, 'm.volkova2', password_hash, 'Мария Петрова', false from users where login = 'm.volkova'`);
   await sql(`insert into user_assignments(tenant_id, user_id, role_code, club_id) select u.tenant_id, u.id, 'manager', c.id from users u, clubs c where u.login = 'm.volkova2' and c.name like '%Центр%'`);

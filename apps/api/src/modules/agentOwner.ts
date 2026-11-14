@@ -1,6 +1,6 @@
 // ИИ-агент, этап 4 (просьба Андрея 14.11.2026): помощник собственника и руководителей в чате «ИИ-помощник».
 // Принимает вопрос в свободной форме (продажи и план, прогноз, посещаемость, тренеры, сотрудник, клиент, проблемные места),
-// раскладывает его на части («Понял вопрос как: …»), при сомнениях уточняет вопросом с вариантами,
+// если всё понятно — сразу отвечает (без пересказа вопроса), при сомнениях уточняет вопросом с вариантами,
 // отвечает по данным CRM, даёт советы и прогнозы с вероятностью. Может вмешаться: «напомни Марии», «передай задачи Марии Ксении».
 // Если подключён YandexGPT — понимает свободные формулировки и пишет советы; без него всё работает по правилам.
 import { can } from '../auth.ts';
@@ -523,7 +523,6 @@ export async function ownerAnswer(db: Db, ctx: Ctx, text: string, yandex: Yandex
   await setPending(db, ctx, null);
 
   const clubLabel = clubs.length === all.length && all.length > 1 ? 'вся сеть' : clubs.map((c) => c.name).join(', ');
-  const understood = [...new Set(topics.map((x) => (x === 'staff' && who?.type === 'employee' ? `сотрудник ${who.label}` : x === 'client' && who ? `клиент ${who.label}` : TOPIC_NAME[x])))];
   const sections: Section[] = [];
   const onlyAdvice = topics.length === 1 && topics[0] === 'advice';
   const want = new Set<Topic>(onlyAdvice ? ['sales', 'forecast', 'attendance', 'problems'] : topics);
@@ -548,8 +547,10 @@ export async function ownerAnswer(db: Db, ctx: Ctx, text: string, yandex: Yandex
       if (llm) advice = llm;
     } catch { /* советы по правилам */ }
   }
-  const head = `**Понял вопрос как:** ${understood.join(', ')} — ${clubLabel}${want.has('client') && !want.has('sales') && !want.has('attendance') && !want.has('staff') ? '' : `, ${per.label}`}.`;
-  const parts = [head, ...(onlyAdvice ? [] : body), advice ? `**Советы**\n${advice}` : '', onlyAdvice && !advice ? 'Серьёзных проблем по данным не вижу: план, посещаемость и задачи в норме.' : ''].filter(Boolean);
+  // Сразу ответ, без пересказа вопроса (просьба Андрея 14.11.2026); клуб и период — коротко в заголовке первого раздела
+  const ctxLabel = want.has('client') && !want.has('sales') && !want.has('attendance') && !want.has('staff') ? '' : ` · ${clubLabel}, ${per.label}`;
+  const shown = onlyAdvice ? [] : body.map((b, i) => (i === 0 ? b.replace(/^\*\*(.+?)\*\*/, `**$1**${ctxLabel}`) : b));
+  const parts = [...shown, advice ? `**Советы**${onlyAdvice ? ctxLabel : ''}\n${advice}` : '', onlyAdvice && !advice ? 'Серьёзных проблем по данным не вижу: план, посещаемость и задачи в норме.' : ''].filter(Boolean);
   return fitAnswer(parts.join('\n\n'));
 }
 
