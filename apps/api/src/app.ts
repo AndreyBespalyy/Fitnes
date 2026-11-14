@@ -64,6 +64,7 @@ import { teamRoutes, startTeamPushWorker } from './modules/team.ts';
 import { agentRoutes } from './modules/agent.ts';
 import { agentReminderRoutes, startAgentWorker } from './modules/agentReminders.ts';
 import { agentChatRoutes, handleBotMessage } from './modules/agentChat.ts';
+import { agentMeetingRoutes } from './modules/agentMeetings.ts';
 import { yandexConfigFromEnv, type YandexConfig } from './lib/yandex.ts';
 
 export async function buildApp(pool: pg.Pool, opts: { webDist?: string; secureCookie?: boolean; logger?: boolean; storageDir?: string; fiscalWorker?: boolean; messagingWorker?: boolean; billingWorker?: boolean; aiWorker?: boolean; scoringWorker?: boolean; pushWorker?: boolean; insightsWorker?: boolean; scheduleWorker?: boolean; retentionWorker?: boolean; surveyWorker?: boolean; staffBotWorker?: boolean; salesOpsWorker?: boolean; teamPushWorker?: boolean; agentWorker?: boolean; ai?: AiConfig | null; yandex?: YandexConfig | null; fetch?: typeof fetch } = {}) {
@@ -171,6 +172,7 @@ export async function buildApp(pool: pg.Pool, opts: { webDist?: string; secureCo
   teamRoutes(app, pool, storage, (ctx, chatId, text) => handleBotMessage(pool, ctx, chatId, text, yandex));
   agentRoutes(app, pool, yandex);
   agentChatRoutes(app, pool);
+  agentMeetingRoutes(app, pool);
   agentReminderRoutes(app, pool);
   testNoteRoutes(app, pool, storage);
   platformRoutes(app, pool, { ownerUrl: process.env.PLATFORM_DATABASE_URL || process.env.OWNER_DATABASE_URL, secureCookie: !!opts.secureCookie });

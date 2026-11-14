@@ -10,6 +10,7 @@ import { audit, withCtx, type Ctx, type Db } from '../db.ts';
 import { PERMISSIONS as P } from '../roles.ts';
 import { ygptJson, type YandexConfig } from '../lib/yandex.ts';
 import { fmtDate, situationBrief } from './agent.ts';
+import { MEETING_RE, MEETING_STATUS_RE, meetingPendingReply, meetingStatus, proposeMeeting } from './agentMeetings.ts';
 import { OWNER_HELP, isLeader, ownerAnswer, ownerPendingReply } from './agentOwner.ts';
 
 export const BOT_NAME = 'ИИ-помощник';
@@ -172,7 +173,11 @@ reply — если kind=unknown: короткий дружелюбный отв�
 export async function botReply(db: Db, ctx: Ctx, text: string, yandex: YandexConfig | null): Promise<string> {
   const leader = isLeader(ctx);
   // Руководитель: сначала — ответ на уточняющий вопрос помощника и команды «напомни Марии» / «передай задачи Марии Ксении»
+  if (MEETING_STATUS_RE.test(text)) return meetingStatus(db, ctx);
   if (leader) {
+    const mp = await meetingPendingReply(db, ctx, text);
+    if (mp) return mp;
+    if (MEETING_RE.test(text.trim())) return proposeMeeting(db, ctx, text);
     const p = await ownerPendingReply(db, ctx, text, yandex);
     if (p) return p;
     if (/^(напомни|поторопи|пни|передай|передать|переназначь)\s+(?!мне\b)/i.test(text.trim())) {

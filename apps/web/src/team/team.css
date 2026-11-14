@@ -154,3 +154,13 @@
 .tm-ai span{display:grid;gap:2px}
 .tm-ai small{opacity:.7;font-size:12px}
 .tm-ai .tm-ai-ico{display:grid;place-items:center;width:36px;height:36px;border-radius:50%;background:var(--accent,#ff7a2f);color:#fff;font-size:18px;flex:none}
+
+/* Приглашение на собрание от ИИ-помощника */
+.tm-meet{margin-top:10px;display:flex;flex-direction:column;gap:8px}
+.tm-meet-btns{display:flex;gap:8px;flex-wrap:wrap}
+.tm-meet-yes{border:0;background:var(--accent);color:var(--accent-ink);border-radius:999px;padding:8px 16px;font-weight:700;font-size:14px;cursor:pointer}
+.tm-meet-later{border:1px solid var(--line, rgba(255,255,255,.18));background:transparent;color:inherit;border-radius:999px;padding:8px 14px;font-size:13px;cursor:pointer}
+.tm-meet-yes:disabled,.tm-meet-later:disabled{opacity:.6;cursor:default}
+.tm-meet-ok{color:#4ade80;font-weight:700}
+.tm-meet-no{opacity:.75}
+.tm-meet-err{color:#f87171}

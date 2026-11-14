@@ -7,7 +7,7 @@ import { can } from '../auth.ts';
 import { audit, type Ctx, type Db } from '../db.ts';
 import { PERMISSIONS as P } from '../roles.ts';
 import { ygptComplete, ygptJson, type YandexConfig } from '../lib/yandex.ts';
-import { fmtDate, noContacts, situationBrief } from './agent.ts';
+import { classesText, clientClasses, fmtDate, noContacts, situationBrief } from './agent.ts';
 import { card, leastLoaded, reassignOpenWork } from './agentReminders.ts';
 import { clientsFact, kpi, lightOf, monthInfo, planFact, salesFact, targets } from './dash.ts';
 
@@ -38,18 +38,18 @@ const STOP = new Set(['как', 'что', 'где', 'когда', 'скольк�
 const MONTHS = ['январ', 'феврал', 'март', 'апрел', 'ма[йея]', 'июн', 'июл', 'август', 'сентябр', 'октябр', 'ноябр', 'декабр'];
 
 export type Period = { from: string; to: string; label: string; month?: string };
-type Club = { id: string; name: string; timezone: string };
-type Who = { type: 'employee' | 'client'; id: string; label: string; role?: string };
-type Pending = { kind: 'topic' | 'who'; text: string; options?: Who[] };
+export type Club = { id: string; name: string; timezone: string };
+export type Who = { type: 'employee' | 'client'; id: string; label: string; role?: string };
+export type Pending = { kind: 'topic' | 'who' | 'meeting' | 'meeting_club'; data?: unknown; text: string; options?: Who[] };
 type Section = { title: string; lines: string[]; tips: string[] };
 
 const rub = (kop: number) => `${Math.round(kop / 100).toLocaleString('ru-RU').replace(/[ ,]/g, ' ')} ₽`;
 const pctOf = (a: number, b: number) => (b > 0 ? Math.round((a * 100) / b) : 0);
 const dd = (d: string) => `${d.slice(8, 10)}.${d.slice(5, 7)}`;
-const addDays = (d: string, n: number) => { const x = new Date(`${d}T00:00:00Z`); x.setUTCDate(x.getUTCDate() + n); return x.toISOString().slice(0, 10); };
+export const addDays = (d: string, n: number) => { const x = new Date(`${d}T00:00:00Z`); x.setUTCDate(x.getUTCDate() + n); return x.toISOString().slice(0, 10); };
 const daysBetween = (a: string, b: string) => Math.round((Date.parse(`${b}T00:00:00Z`) - Date.parse(`${a}T00:00:00Z`)) / 86_400_000);
 const change = (cur: number, prev: number) => (prev === 0 ? (cur ? 'раньше было 0' : 'без изменений') : `${cur >= prev ? '+' : '−'}${Math.abs(Math.round(((cur - prev) * 100) / prev))} % к прошлому периоду`);
-const norm = (s: string) => s.toLowerCase().replace(/ё/g, 'е');
+export const norm = (s: string) => s.toLowerCase().replace(/ё/g, 'е');
 
 /* ---------- статистика: вероятность по нормальному приближению ---------- */
 function erf(x: number) {
@@ -118,17 +118,17 @@ function scoreName(words: string[], fullName: string) {
   return words.filter((w) => tokens.some((tk) => stemMatch(w, tk))).length;
 }
 
-async function visibleClubs(db: Db) {
+export async function visibleClubs(db: Db) {
   return (await db.query(`select id, name, timezone from clubs order by name`)).rows as Club[];
 }
-function pickClubs(text: string, clubs: Club[]) {
+export function pickClubs(text: string, clubs: Club[]) {
   const t = norm(text);
   if (/(по сети|все клубы|всем клубам|по всем)/.test(t)) return clubs;
   const hit = clubs.filter((c) => norm(c.name).replace(/[«»"]/g, ' ').split(/\s+/).filter((w) => w.length >= 3 && w !== 'клуб')
     .some((w) => new RegExp(`(?:^|[^а-я])${w.slice(0, 4)}`).test(t)));
   return hit.length ? hit : clubs;
 }
-async function todayOf(db: Db, tz: string) {
+export async function todayOf(db: Db, tz: string) {
   return (await db.query(`select to_char((now() at time zone $1)::date, 'YYYY-MM-DD') as d`, [tz])).rows[0].d as string;
 }
 
@@ -377,6 +377,8 @@ async function clientSection(db: Db, ctx: Ctx, yandex: YandexConfig | null, who:
     m.length ? `Абонемент: ${m[0].product_name}${m[0].ends_on ? `, до ${fmtDate(m[0].ends_on, tz, false)}` : ''}${m[0].status === 'cancelled' ? ' (отменён)' : ''}.` : 'Абонементов нет.',
     `Посещений за 30 дней: ${v.n30}${v.last ? `, последнее — ${fmtDate(v.last, tz)}` : ''}.`,
   ];
+  const cl = await clientClasses(db, who.id);
+  if (cl.length) lines.push('', ...classesText(cl, tz));
   return { title: `Клиент: ${who.label}`, lines, tips: [] };
 }
 
@@ -429,17 +431,18 @@ const OWNER_HELP = `Как руководителю мне можно задав
 • «как работает Мария?», «покажи отдел продаж» — показатели сотрудника и команды;
 • «что с клиентом Анна Чатова» — коротко о ситуации по клиенту;
 • «что горит», «где проблемы» — узкие места и что с ними сделать;
-• «напомни Марии», «передай задачи Марии Ксении» — вмешаюсь сам.
+• «напомни Марии», «передай задачи Марии Ксении» — вмешаюсь сам;
+• «назначь собрание: отдел продаж и Ким, завтра с 10 до 18, на час, тема: план» — подберу время с наименьшими потерями и разошлю приглашения; «кто подтвердил» — ответы участников.
 Если вопрос понятен не до конца — переспрошу.`;
 export { OWNER_HELP };
 
 export const isLeader = (ctx: Ctx) => can(ctx, P.dashView) || can(ctx, P.crmViewAll);
 
-async function setPending(db: Db, ctx: Ctx, p: Pending | null) {
+export async function setPending(db: Db, ctx: Ctx, p: Pending | null) {
   await db.query(`insert into agent_chat_state(user_id, tenant_id, pending) values ($1,$2,$3) on conflict (user_id) do update set pending = $3, updated_at = now()`,
     [ctx.userId, ctx.tenantId, p ? JSON.stringify(p) : null]);
 }
-async function getPending(db: Db, ctx: Ctx) {
+export async function getPending(db: Db, ctx: Ctx) {
   return (await db.query(`select pending from agent_chat_state where user_id = $1 and updated_at > now() - interval '30 minutes'`, [ctx.userId])).rows[0]?.pending as Pending | null | undefined;
 }
 
@@ -449,7 +452,7 @@ const ACTION_RE = /^(напомни|поторопи|пни|передай|пе�
 /** Ответ на уточнение («1», «Волкову», «посещаемость»), если помощник ждал его */
 export async function ownerPendingReply(db: Db, ctx: Ctx, text: string, yandex: YandexConfig | null): Promise<string | null> {
   const p = await getPending(db, ctx);
-  if (!p) return null;
+  if (!p || (p.kind !== 'topic' && p.kind !== 'who')) return null;
   const t = norm(text.trim());
   if (p.kind === 'topic') {
     const n = Number(t.match(/^(\d)\b/)?.[1] ?? 0);
@@ -555,7 +558,7 @@ export async function ownerAnswer(db: Db, ctx: Ctx, text: string, yandex: Yandex
 }
 
 /** Сотрудники в порядке упоминания (для «передай задачи Марии Ксении»): для каждого слова-имени — подходящие сотрудники */
-async function orderedEmployees(db: Db, text: string, clubs: Club[]): Promise<Who[][]> {
+export async function orderedEmployees(db: Db, text: string, clubs: Club[]): Promise<Who[][]> {
   const words = nameWords(text, clubs);
   const staff = (await db.query(`select distinct on (u.id) u.id, u.full_name, r.name as role from users u join user_assignments a on a.user_id = u.id join roles r on r.code = a.role_code
     where not u.is_bot and u.status = 'active' and (a.club_id = any($1) or a.club_id is null) and (a.active_to is null or a.active_to >= current_date) order by u.id, r.sort`, [clubs.map((c) => c.id)])).rows;

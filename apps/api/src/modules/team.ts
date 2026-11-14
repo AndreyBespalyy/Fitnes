@@ -129,7 +129,7 @@ function decodeFile(f: { fileName?: string; dataBase64?: string }) {
 }
 
 /* ---------- Сообщения ---------- */
-const MSG_COLS = `x.id, x.user_id as "userId", u.full_name as "author", x.body, x.important, x.created_at as "createdAt", x.edited_at as "editedAt", x.deleted_at is not null as deleted,
+const MSG_COLS = `x.id, x.user_id as "userId", u.full_name as "author", x.body, x.important, x.meta, x.created_at as "createdAt", x.edited_at as "editedAt", x.deleted_at is not null as deleted,
   x.reply_to as "replyTo", r.body as "replyBody", ru.full_name as "replyAuthor", r.deleted_at is not null as "replyDeleted",
   case when f.id is null then null else json_build_object('id', f.id, 'name', f.name, 'mime', f.mime, 'size', f.size_bytes) end as file`;
 const MSG_FROM = `team_messages x left join users u on u.id = x.user_id left join team_messages r on r.id = x.reply_to left join users ru on ru.id = r.user_id left join team_files f on f.id = x.file_id`;
