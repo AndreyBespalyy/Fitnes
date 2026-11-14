@@ -12,6 +12,7 @@ import { ygptJson, type YandexConfig } from '../lib/yandex.ts';
 import { fmtDate, situationBrief } from './agent.ts';
 import { processDigest, processFromText } from './agentProcesses.ts';
 import { ROLE_NAME } from './agentProcesses.ts';
+import { WEEKLY_RE, weeklyChatAnswer } from './agentWeekly.ts';
 import { MEETING_RE, MEETING_STATUS_RE, meetingPendingReply, meetingStatus, proposeMeeting } from './agentMeetings.ts';
 import { OWNER_HELP, isLeader, ownerAnswer, ownerPendingReply } from './agentOwner.ts';
 
@@ -180,6 +181,7 @@ export async function botReply(db: Db, ctx: Ctx, text: string, yandex: YandexCon
     const mp = await meetingPendingReply(db, ctx, text);
     if (mp) return mp;
     if (MEETING_RE.test(text.trim())) return proposeMeeting(db, ctx, text);
+    if (WEEKLY_RE.test(text)) return weeklyChatAnswer(db, ctx, text, yandex);
     if (/^(создай|сделай|добавь|запиши|опиши)\s+(новый\s+)?(бизнес[- ]?)?процесс/i.test(text.trim())) return processByWords(db, ctx, text, yandex);
     if (/^(процессы|как идут процессы|бизнес[- ]?процессы|что с процессами)/i.test(text.trim())) return processesText(db);
     const p = await ownerPendingReply(db, ctx, text, yandex);
