@@ -10,6 +10,7 @@ import { audit, withCtx, type Ctx, type Db } from '../db.ts';
 import { PERMISSIONS as P } from '../roles.ts';
 import { ygptJson, type YandexConfig } from '../lib/yandex.ts';
 import { fmtDate, situationBrief } from './agent.ts';
+import { OWNER_HELP, isLeader, ownerAnswer, ownerPendingReply } from './agentOwner.ts';
 
 export const BOT_NAME = 'ИИ-помощник';
 
@@ -169,7 +170,22 @@ ref — номер задачи из списка или имя клиента, 
 reply — если kind=unknown: короткий дружелюбный ответ по делу (без выдумок о данных CRM).`;
 
 export async function botReply(db: Db, ctx: Ctx, text: string, yandex: YandexConfig | null): Promise<string> {
+  const leader = isLeader(ctx);
+  // Руководитель: сначала — ответ на уточняющий вопрос помощника и команды «напомни Марии» / «передай задачи Марии Ксении»
+  if (leader) {
+    const p = await ownerPendingReply(db, ctx, text, yandex);
+    if (p) return p;
+    if (/^(напомни|поторопи|пни|передай|передать|переназначь)\s+(?!мне\b)/i.test(text.trim())) {
+      const a = await ownerAnswer(db, ctx, text, yandex);
+      if (!/^Не понял, о каком сотруднике/.test(a) || /^(передай|передать|переназначь)/i.test(text.trim())) return a;
+    }
+  }
   let it = ruleIntent(text);
+  if (leader && it.kind === 'brief') {
+    const t = await findTask(db, ctx, it.ref ?? '');
+    if (!t || t === 'many') return ownerAnswer(db, ctx, text, yandex);
+  }
+  if (leader && (it.kind === 'digest' || it.kind === 'unknown')) return ownerAnswer(db, ctx, text, yandex);
   let llmReply = '';
   if (it.kind === 'unknown' && yandex) {
     try {
@@ -178,7 +194,7 @@ export async function botReply(db: Db, ctx: Ctx, text: string, yandex: YandexCon
     } catch { /* без нейросети — по правилам */ }
   }
   switch (it.kind) {
-    case 'help': return WELCOME;
+    case 'help': return leader ? `${WELCOME}\n\n${OWNER_HELP}` : WELCOME;
     case 'list': case 'overdue': {
       const ts = await myTasks(db, ctx.userId, it.kind === 'overdue');
       await remember(db, ctx, ts.map((t) => t.id));
