@@ -13,6 +13,7 @@ import { PersonPasses } from './access.tsx';
 import { PersonCards } from './payments.tsx';
 import { CallDialog, PersonCalls } from './calls.tsx';
 import { PersonCallFlags, TakeLeadButton } from './salesOps.tsx';
+import { SituationButton } from './agent.tsx';
 
 type Stage = { id: string; name: string; kind: 'open' | 'won' | 'lost'; openCount?: number };
 type Pipeline = { id: string; clubId: string; name: string; purpose: string; isDefaultForLeads: boolean; isActive: boolean; stages: Stage[] };
@@ -181,6 +182,7 @@ export function TasksPage({ me, clubId, openPerson }: { me: Me; clubId: string; 
                   {t.personId && <button className="btn sm" onClick={() => openPerson(t.personId!)}>{t.personName}</button>}
                   {t.personId && (t.kind === 'call' || t.kind === 'first_response') && !t.doneAt && <DialButton personId={t.personId} />}
                   {t.callId && <button className="btn sm pri" onClick={() => setCall(t.callId)}>Итог разговора</button>}
+                  <SituationButton type="task" id={t.id} />
                   <button className={`btn sm ${t.callId ? '' : 'pri'}`} onClick={() => setDoing(t)}>Выполнить</button>
                 </div>
               </div>
@@ -281,7 +283,7 @@ export function PersonCard({ me, id, onClose }: { me: Me; id: string; onClose: (
           {card.opportunities.map((o) => (
             <div key={o.id} className="card" style={{ display: 'grid', gap: 8 }}>
               <div className="row between"><h2>{o.pipelineName}</h2>
-                <span className={`chip ${o.status === 'won' ? 'ok' : o.status === 'lost' ? 'bad' : 'acc'}`}>{o.status === 'open' ? 'в работе' : o.status === 'won' ? 'успешно' : 'отказ'}</span></div>
+                <span className="row" style={{ gap: 6 }}><SituationButton type="opportunity" id={o.id} /><span className={`chip ${o.status === 'won' ? 'ok' : o.status === 'lost' ? 'bad' : 'acc'}`}>{o.status === 'open' ? 'в работе' : o.status === 'won' ? 'успешно' : 'отказ'}</span></span></div>
               <div className="small">{o.clubName} · ответственный: {o.ownerName ?? 'не назначен'}{o.lostReason ? ` · причина отказа: ${o.lostReason}` : ''}</div>
               <div className="stagebar">{o.stages.map((s) => (
                 <button key={s.id} className={s.kind} aria-current={s.id === o.stageId} disabled={!work || o.status !== 'open' || s.id === o.stageId}
@@ -324,7 +326,8 @@ export function PersonCard({ me, id, onClose }: { me: Me; id: string; onClose: (
             {card.tasks.length === 0 && <p className="muted" style={{ margin: 0 }}>Задач нет.</p>}
             {card.tasks.map((t) => (
               <div key={t.id} className={`item ${t.overdue ? 'over' : ''}`}>
-                <div className="row between"><span><b>{t.title}</b> <span className="chip">{KIND[t.kind] ?? t.kind}</span></span><span className="small">{t.doneAt ? `выполнено ${dt(t.doneAt)}` : `до ${dt(t.dueAt)}`}</span></div>
+                <div className="row between"><span><b>{t.title}</b> <span className="chip">{KIND[t.kind] ?? t.kind}</span></span>
+                  <span className="row" style={{ gap: 6 }}><span className="small">{t.doneAt ? `выполнено ${dt(t.doneAt)}` : `до ${dt(t.dueAt)}`}</span>{!t.doneAt && <SituationButton type="task" id={t.id} label="Коротко" />}</span></div>
                 {t.result && <div className="small">Результат: {t.result}</div>}
               </div>))}
           </div>
