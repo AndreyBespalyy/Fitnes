@@ -141,8 +141,9 @@ export async function collectFacts(db: Db, ctx: Ctx, type: 'task' | 'opportunity
       const c = (await db.query(`select person_id from calls where id = $1`, [t.call_id])).rows[0];
       if (c?.person_id) await personFacts(db, c.person_id, t.opportunity_id, f);
     }
+    const seen = new Set(f.observations.map((o) => `${new Date(o.at).getTime()}|${o.text}`));
     f.observations.push(...(await db.query(`select created_at, body from agent_observations where task_id = $1 order by created_at desc limit 5`, [id])).rows
-      .map((r) => ({ at: r.created_at, text: r.body })));
+      .map((r) => ({ at: r.created_at, text: r.body })).filter((o) => !seen.has(`${new Date(o.at).getTime()}|${o.text}`)));
     return { facts: f, clubId: t.club_id };
   }
   const o = (await db.query(`select o.id, o.club_id, o.owner_id, o.person_id, c.name, c.timezone from opportunities o join clubs c on c.id = o.club_id where o.id = $1`, [id])).rows[0];

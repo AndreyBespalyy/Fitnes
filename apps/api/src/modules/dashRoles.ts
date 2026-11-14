@@ -219,7 +219,7 @@ async function systemPanel(db: Db, clubs: Club[]): Promise<Panel> {
       (select count(*) from clubs c where c.status = 'active' and not c.is_demo and (select count(*) from club_onboarding o where o.club_id = c.id) < 17)::int as onboarding,
       (select count(*) from users where status = 'active')::int as staff,
       (select count(*) from users where status = 'active' and must_change_password)::int as "mustChange",
-      (select count(*) from users u where u.status = 'active' and not exists (select 1 from user_assignments a where a.user_id = u.id and (a.active_to is null or a.active_to >= current_date)))::int as "noRole",
+      (select count(*) from users u where u.status = 'active' and not u.is_bot and not exists (select 1 from user_assignments a where a.user_id = u.id and (a.active_to is null or a.active_to >= current_date)))::int as "noRole",
       (select count(*) from support_tickets where status = 'open')::int as tickets,
       (select count(*) from import_batches where club_id = any($1) and status in ('draft', 'checked'))::int as imports`, [ids]);
   return {
