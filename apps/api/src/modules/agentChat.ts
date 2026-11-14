@@ -13,6 +13,7 @@ import { fmtDate, situationBrief } from './agent.ts';
 import { processDigest, processFromText } from './agentProcesses.ts';
 import { ROLE_NAME } from './agentProcesses.ts';
 import { WEEKLY_RE, weeklyChatAnswer } from './agentWeekly.ts';
+import { HINTS_RE, hintsChatAnswer } from './agentMorning.ts';
 import { MEETING_RE, MEETING_STATUS_RE, meetingPendingReply, meetingStatus, proposeMeeting } from './agentMeetings.ts';
 import { OWNER_HELP, isLeader, ownerAnswer, ownerPendingReply } from './agentOwner.ts';
 
@@ -28,6 +29,7 @@ export async function ensureBot(db: Db, tenantId: string) {
 }
 
 const WELCOME = `Здравствуйте! Я ИИ-помощник. Пишите мне простыми словами:
+• «подсказки на сегодня» или «с чего начать» — 3 самых полезных шага на день (сам присылаю каждое утро);
 • «мои задачи» — что у вас на сегодня;
 • «что просрочено»;
 • «перенеси 2 на завтра» или «перенеси Анну через час»;
@@ -177,6 +179,7 @@ export async function botReply(db: Db, ctx: Ctx, text: string, yandex: YandexCon
   const leader = isLeader(ctx);
   // Руководитель: сначала — ответ на уточняющий вопрос помощника и команды «напомни Марии» / «передай задачи Марии Ксении»
   if (MEETING_STATUS_RE.test(text)) return meetingStatus(db, ctx);
+  if (HINTS_RE.test(text.trim())) return hintsChatAnswer(db, ctx);
   if (leader) {
     const mp = await meetingPendingReply(db, ctx, text);
     if (mp) return mp;

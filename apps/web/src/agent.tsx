@@ -73,7 +73,7 @@ export function SituationDialog({ type, id, onClose }: { type: 'task' | 'opportu
 
 /* ---------- Настройки ИИ-помощника клуба: лестница напоминаний и авто-передача заявок ---------- */
 type AgentSets = { enabled: boolean; taskRopMinutes: number; taskGmMinutes: number; taskOwnerMinutes: number; replyWaitMinutes: number;
-  leadReassignMinutes: number; quietFrom: number; quietTo: number; canEdit: boolean };
+  leadReassignMinutes: number; quietFrom: number; quietTo: number; morningHints: boolean; morningHour: number; canEdit: boolean };
 export function AgentSettingsCard({ clubId }: { clubId: string }) {
   const [f, setF] = useState<AgentSets | null>(null);
   const [err, setErr] = useState('');
@@ -95,6 +95,8 @@ export function AgentSettingsCard({ clubId }: { clubId: string }) {
         {num('leadReassignMinutes', 'Передать заявку другому менеджеру, если не взяли за мин (0 — не передавать)')}
         <div className="grid2">{num('quietFrom', 'Тишина с, ч')}{num('quietTo', 'до, ч')}</div>
       </div>
+      <label className="row" style={{ gap: 8 }}><input type="checkbox" style={{ width: 'auto' }} disabled={ro} checked={f.morningHints} onChange={(e) => setF({ ...f, morningHints: e.target.checked })} />Утром присылать каждому сотруднику «3 подсказки на сегодня»</label>
+      {f.morningHints && <div className="grid2">{num('morningHour', 'Во сколько присылать, ч (5–12, время клуба)')}</div>}
       {!ro && <div><button className="btn pri" onClick={save}>Сохранить</button></div>}
     </div>
   );
