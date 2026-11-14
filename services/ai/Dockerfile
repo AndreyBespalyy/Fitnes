@@ -1,4 +1,4 @@
-# ИИ-сервер: распознавание речи на GPU. Языковая модель — отдельный контейнер vLLM (deploy/ai/docker-compose.yml).
+# ИИ-сервер: распознавание речи на GPU (вариант без видеокарты — Dockerfile.cpu). Языковая модель — отдельный контейнер vLLM (deploy/ai/docker-compose.yml).
 FROM nvidia/cuda:12.4.1-cudnn-runtime-ubuntu22.04
 RUN apt-get update && apt-get install -y --no-install-recommends python3 python3-pip ffmpeg && rm -rf /var/lib/apt/lists/*
 WORKDIR /srv
