@@ -189,7 +189,7 @@ export function ShotEditor({ src, onSave, onCancel }: { src: string; onSave: (da
       </div>
       <div className="shot-stage">
         <div className="shot-wrap">
-          <canvas ref={canvas} className={`shot-canvas tool-${tool}`} onPointerDown={down} onPointerMove={move} onPointerUp={up} onPointerCancel={up} />
+          <canvas ref={canvas} className={`shot-canvas tool-${tool}${img && img.height / img.width > 1.3 * window.innerHeight / window.innerWidth ? ' tall' : ''}`} onPointerDown={down} onPointerMove={move} onPointerUp={up} onPointerCancel={up} />
           {typing && field && <textarea autoFocus className="shot-text" rows={2} value={typing.text} placeholder={`Что не так в области ${areaNo(typing.idx)}?`}
             style={{ left: field.left, top: field.top, width: field.width, borderColor: field.color }}
             onChange={(e) => setTyping({ ...typing, text: e.target.value })}
