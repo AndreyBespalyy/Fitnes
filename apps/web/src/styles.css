@@ -519,3 +519,8 @@ input[type="checkbox"],input[type="radio"]{accent-color:var(--accent)}
 .fs-active .fs-dot{background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}
 .fs-late .fs-dot{background:var(--bad);border-color:var(--bad)}
 .fs-pending{opacity:.7}
+
+/* Кнопка «ИИ-помощник» в шапке (15.11.2026) */
+.top .ai-top{display:inline-flex;align-items:center;gap:6px;color:var(--accent-ink);background:var(--accent);border-color:var(--accent);font-weight:600}
+.top .ai-top:hover{filter:brightness(1.08)}
+@media (max-width:720px){.top .ai-top .ai-top-l{display:none}}
