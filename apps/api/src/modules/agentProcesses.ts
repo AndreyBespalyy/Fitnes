@@ -10,7 +10,8 @@ import { audit, withCtx, type Ctx, type Db } from '../db.ts';
 import { badRequest, forbidden, notFound } from '../errors.ts';
 import { PERMISSIONS as P } from '../roles.ts';
 import { ygptComplete, ygptJson, type YandexConfig } from '../lib/yandex.ts';
-import { collectFacts, fitBrief, fmtDate, noContacts, rulesBrief } from './agent.ts';
+import { collectFacts, fitBrief, fmtDate, noContacts, rulesBrief, type Facts } from './agent.ts';
+import { processFlow } from './agentFlow.ts';
 import { card, leastLoaded } from './agentReminders.ts';
 
 export type Step = { title: string; role: string; hours: number };
@@ -236,7 +237,7 @@ export async function processBrief(db: Db, ctx: Ctx, yandex: YandexConfig | null
   if (!force) {
     const c = (await db.query(`select body, engine, created_at from agent_briefs where object_type = 'process' and object_id = $1 and input_hash = $2 and engine = $3 and created_at > now() - interval '3 hours' order by created_at desc limit 1`,
       [id, hash, engineWanted])).rows[0];
-    if (c) return { text: c.body as string, engine: c.engine as string, createdAt: c.created_at as string, cached: true, sources: { steps: steps.length } };
+    if (c) return { text: c.body as string, engine: c.engine as string, createdAt: c.created_at as string, cached: true, sources: { steps: steps.length }, flow: processFlow(p, steps, clientFacts as Facts | null) };
   }
   let text = processRules(p, steps, clientBrief); let engine = engineWanted; let note: string | null = null;
   if (yandex) {
@@ -245,7 +246,7 @@ export async function processBrief(db: Db, ctx: Ctx, yandex: YandexConfig | null
   }
   const row = (await db.query(`insert into agent_briefs(tenant_id, club_id, object_type, object_id, input_hash, body, engine, facts, created_by) values ($1,$2,'process',$3,$4,$5,$6,$7,$8) returning created_at`,
     [ctx.tenantId, p.club_id, id, hash, text, engine, JSON.stringify({ steps: steps.length }), ctx.userId])).rows[0];
-  return { text, engine, createdAt: row.created_at as string, cached: false, sources: { steps: steps.length }, note };
+  return { text, engine, createdAt: row.created_at as string, cached: false, sources: { steps: steps.length }, note, flow: processFlow(p, steps, clientFacts as Facts | null) };
 }
 
 /** Короткий список для руководителя в чате и «что горит» */
