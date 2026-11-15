@@ -4,11 +4,12 @@ import { createPortal } from 'react-dom';
 import { api } from './api.ts';
 import { dt, errText, toast } from './ui.ts';
 
-type FlowEvent = { at: string; kind: string; title: string; detail?: string; full?: string; bad?: boolean };
+type FlowEvent = { at: string; kind: string; title: string; detail?: string; full?: string; bad?: boolean; who?: string[] };
+type FlowPerson = { name: string; did: string[]; last: string | null };
 type FlowAct = 'chat' | 'person' | 'deal' | 'task' | 'tasks';
 type FlowStep = { title: string; detail?: string; urgent?: boolean; act?: FlowAct; branches?: { when: string; then: string }[] };
 type FlowStage = { title: string; status: 'done' | 'active' | 'pending' | 'skipped'; who: string | null; when: string | null; result: string | null; late: boolean };
-type Flow = { head: string; history: FlowEvent[]; now: string; steps: FlowStep[]; stages?: FlowStage[]; personId?: string | null };
+type Flow = { head: string; history: FlowEvent[]; now: string; steps: FlowStep[]; stages?: FlowStage[]; personId?: string | null; people?: FlowPerson[] };
 
 const ACT_LABEL: Record<FlowAct, string> = { chat: 'Открыть переписку', person: 'Открыть карточку клиента', deal: 'Открыть сделку', task: 'Открыть задачу', tasks: 'К задачам' };
 /** Куда ведёт шаг: карточка клиента (там переписка, сделка, оплата и продление) или раздел «Задачи» */
@@ -25,6 +26,8 @@ const EV_ICON: Record<string, string> = { lead: '📥', call: '📞', stage: '�
 /** «Коротко о ситуации» схемой: как развивалась ситуация → где сейчас → что делать по шагам с развилками «если … →» */
 export function FlowView({ flow, onGo }: { flow: Flow; onGo?: () => void }) {
   const [openEv, setOpenEv] = useState<number | null>(null);
+  const [who, setWho] = useState<string | null>(null); // фильтр ленты по сотруднику
+  const hist = who ? flow.history.filter((e) => e.who?.includes(who)) : flow.history;
   const run = (act: FlowAct) => { const u = actUrl(act, flow.personId); if (u) { onGo?.(); goTo(u); } };
   return (
     <div className="flow">
@@ -39,9 +42,19 @@ export function FlowView({ flow, onGo }: { flow: Flow; onGo?: () => void }) {
               {x.result && <div className="small">Итог: {x.result}</div>}</div>
           </li>))}</ol>
       </>)}
+      {flow.people && flow.people.length > 0 && (<>
+        <div className="flow-sec">Кто работал с клиентом</div>
+        <div className="flow-people">{flow.people.map((x) => (
+          <button key={x.name} className="flow-pp" aria-pressed={who === x.name} onClick={() => { setWho(who === x.name ? null : x.name); setOpenEv(null); }}
+            title="Показать в ленте только события этого сотрудника">
+            <b>{x.name}</b><span className="small">{x.did.join(' · ')}</span>{x.last && <span className="small muted">последний раз {dt(x.last)}</span>}
+          </button>))}</div>
+        {who && <div className="small muted">В ленте — только события: {who}. <button className="link" onClick={() => setWho(null)}>Показать все</button></div>}
+      </>)}
       {flow.history.length > 0 && (<>
         <div className="flow-sec">Как развивалась ситуация</div>
-        <ol className="flow-tl">{flow.history.map((e, i) => (
+        {hist.length === 0 && <div className="small muted">В последних событиях этого сотрудника нет — подробности во вкладке «Текстом».</div>}
+        <ol className="flow-tl">{hist.map((e, i) => (
           <li key={i} className={e.bad ? 'bad' : ''}>
             <span className="tl-ic" aria-hidden="true">{EV_ICON[e.kind] ?? '•'}</span>
             <div><span className="small muted">{dt(e.at)}</span> {e.full
@@ -93,7 +106,7 @@ export function BriefText({ text }: { text: string }) {
   return <div className="brief">{blocks}</div>;
 }
 
-export function SituationButton({ type, id, small = true, label = 'Коротко о ситуации' }: { type: 'task' | 'opportunity' | 'process'; id: string; small?: boolean; label?: string }) {
+export function SituationButton({ type, id, small = true, label = 'Коротко о ситуации' }: { type: 'task' | 'opportunity' | 'process' | 'person'; id: string; small?: boolean; label?: string }) {
   const [open, setOpen] = useState(false);
   return (<>
     <button className={`btn ${small ? 'sm' : ''} brief-btn`} onClick={(e) => { e.stopPropagation(); setOpen(true); }} title="ИИ-помощник соберёт всё по этой ситуации: задачи, звонки, переписку, обсуждения">
@@ -102,7 +115,7 @@ export function SituationButton({ type, id, small = true, label = 'Коротк�
   </>);
 }
 
-export function SituationDialog({ type, id, onClose }: { type: 'task' | 'opportunity' | 'process'; id: string; onClose: () => void }) {
+export function SituationDialog({ type, id, onClose }: { type: 'task' | 'opportunity' | 'process' | 'person'; id: string; onClose: () => void }) {
   const [b, setB] = useState<Brief | null>(null);
   const [err, setErr] = useState('');
   const [busy, setBusy] = useState(false);

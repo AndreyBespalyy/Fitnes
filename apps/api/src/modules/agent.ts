@@ -23,7 +23,7 @@ export const cut = (s: unknown, n: number) => { const t = noContacts(String(s ??
 /* ---------- сбор фактов ---------- */
 export type Facts = {
   now: string; timezone: string; clubName: string;
-  target: { type: 'task' | 'opportunity'; id: string };
+  target: { type: 'task' | 'opportunity' | 'person'; id: string };
   task: null | { title: string; kind: string; dueAt: string; doneAt: string | null; result: string | null; overdueHours: number; assignee: string | null; createdAt: string };
   person: null | { id: string; name: string; segment: string; since: string; homeClub: string | null };
   opportunity: null | { id: string; pipeline: string; stage: string; status: string; owner: string | null; amountExpected: string | null; createdAt: string;
@@ -48,6 +48,8 @@ const KIND: Record<string, string> = { first_response: 'первый ответ'
 const OUTCOME: Record<string, string> = { interested: 'интересно', thinking: 'думает', refused: 'отказ', bought: 'купил', other: 'другое' };
 
 async function personFacts(db: Db, personId: string, oppId: string | null, f: Facts) {
+  // По карточке клиента берём больше истории: все разговоры и переписку, а не только последние
+  const wide = f.target.type === 'person';
   const p = (await db.query(`select p.id, p.full_name, p.segment, p.created_at, c.name as club from persons p left join clubs c on c.id = p.home_club_id where p.id = $1`, [personId])).rows[0];
   if (!p) return;
   f.person = { id: p.id, name: p.full_name, segment: p.segment, since: p.created_at, homeClub: p.club };
@@ -65,7 +67,7 @@ async function personFacts(db: Db, personId: string, oppId: string | null, f: Fa
   f.calls = (await db.query(
     `select c.started_at, c.direction, u.full_name as manager, c.duration_sec, coalesce(s.final, s.draft) as s, c.transcript ->> 'text' as tr
      from calls c left join users u on u.id = c.user_id left join call_summaries s on s.call_id = c.id
-     where c.person_id = $1 order by c.started_at desc limit 6`, [personId])).rows
+     where c.person_id = $1 order by c.started_at desc limit $2`, [personId, wide ? 15 : 6])).rows
     .map((r, i) => ({
       at: r.started_at, direction: r.direction === 'in' ? 'входящий' : 'исходящий', manager: r.manager, durationSec: r.duration_sec,
       essence: r.s?.essence || null, need: r.s?.need || null, objections: Array.isArray(r.s?.objections) ? r.s.objections : [],
@@ -75,7 +77,7 @@ async function personFacts(db: Db, personId: string, oppId: string | null, f: Fa
     }));
   const msgs = (await db.query(
     `select m.created_at, m.direction, m.body, m.auto, u.full_name as author from msg_messages m join msg_conversations c on c.id = m.conversation_id
-     left join users u on u.id = m.author_id where c.person_id = $1 order by m.created_at desc limit 30`, [personId])).rows;
+     left join users u on u.id = m.author_id where c.person_id = $1 order by m.created_at desc limit $2`, [personId, wide ? 80 : 30])).rows;
   f.clientMessages = msgs.reverse().map((m) => ({ at: m.created_at, from: m.direction === 'in' ? 'клиент' : m.auto ? 'автосообщение' : (m.author ?? 'клуб'), text: cut(m.body, 500) }));
   const lastIn = msgs.filter((m) => m.direction === 'in').at(-1);
   const lastOut = msgs.filter((m) => m.direction === 'out' && !m.auto).at(-1);
@@ -128,8 +130,19 @@ function emptyFacts(type: Facts['target']['type'], id: string, club: { name: str
     tasks: [], leads: [], meetings: [], calls: [], clientMessages: [], waitingReplySince: null, memberships: [], debts: [], visits: { last: null, last30: 0, recent: [] }, classes: [], team: [], observations: [] };
 }
 
-export async function collectFacts(db: Db, ctx: Ctx, type: 'task' | 'opportunity', id: string): Promise<{ facts: Facts; clubId: string }> {
+export async function collectFacts(db: Db, ctx: Ctx, type: 'task' | 'opportunity' | 'person', id: string): Promise<{ facts: Facts; clubId: string }> {
   if (!/^[0-9a-f-]{36}$/i.test(id)) throw notFound('Не найдено');
+  if (type === 'person') {
+    const p = (await db.query(`select p.id, c.id as club_id, c.name, c.timezone from persons p
+      join clubs c on c.id = coalesce(p.home_club_id, (select id from clubs order by created_at limit 1)) where p.id = $1`, [id])).rows[0];
+    if (!p) throw notFound('Клиент не найден');
+    const f = emptyFacts('person', id, { name: p.name, timezone: p.timezone });
+    // Открытая сделка клиента — чтобы были этапы и ответственный
+    const o = (await db.query(`select id from opportunities where person_id = $1 order by (status = 'open') desc, created_at desc limit 1`, [id])).rows[0];
+    if (o) await oppFacts(db, o.id, f);
+    await personFacts(db, id, o?.id ?? null, f);
+    return { facts: f, clubId: p.club_id };
+  }
   if (type === 'task') {
     const t = (await db.query(
       `select t.*, u.full_name as assignee, c.name as club_name, c.timezone, extract(epoch from now() - t.due_at) / 3600 as over_h
@@ -305,11 +318,12 @@ export function fitBrief(text: string) {
 }
 
 /* ---------- текст от YandexGPT ---------- */
-const BRIEF_PROMPT = `Ты — ИИ-помощник в CRM сети фитнес-клубов. Сотрудник нажал «Коротко о ситуации» по задаче или сделке.
+const BRIEF_PROMPT = `Ты — ИИ-помощник в CRM сети фитнес-клубов. Сотрудник нажал «Коротко о ситуации» по задаче, сделке или в карточке клиента.
 По фактам из CRM (JSON) напиши сводку, чтобы за минуту понять ситуацию и что делать дальше.
 Правила:
 - Только по-русски, простыми словами, без канцелярита. Не больше 5000 знаков.
-- Разделы с заголовками в отдельной строке, выделенными **жирным**: **Главное**, **Что сделать сейчас**, затем по необходимости **Клиент и абонемент**, **Занятия** (какие тренировки, у какого тренера, где, пришёл ли), **Разговоры**, **Переписка**, **Что уже делали**, **Риски**.
+- Разделы с заголовками в отдельной строке, выделенными **жирным**: **Главное**, **Что сделать сейчас**, затем по необходимости **Клиент и абонемент**, **Занятия** (какие тренировки, у какого тренера, где, пришёл ли), **Разговоры**, **Переписка**, **Что уже делали**, **Кто работал с клиентом** (сотрудники и что каждый делал), **Риски**.
+- Если сводка по карточке клиента (target.type = person) — разбери всю переписку и все разговоры: о чём клиент спрашивал, чем недоволен, что ему обещали и выполнено ли.
 - В «Главном» 2–4 предложения: кто клиент, на каком шаге, что сейчас важно.
 - «Что сделать сейчас» — 1–5 пунктов списком «• », от самого срочного, конкретно (что, кому, до какого времени).
 - **Жирным** выделяй только самое важное: сроки, просрочки, суммы долга, ключевые возражения, договорённости.
@@ -324,7 +338,7 @@ export async function llmBrief(y: YandexConfig, f: Facts) {
 }
 
 /* ---------- сводка с кэшем ---------- */
-export async function situationBrief(db: Db, ctx: Ctx, yandex: YandexConfig | null, type: 'task' | 'opportunity', id: string, force = false) {
+export async function situationBrief(db: Db, ctx: Ctx, yandex: YandexConfig | null, type: 'task' | 'opportunity' | 'person', id: string, force = false) {
   const { facts, clubId } = await collectFacts(db, ctx, type, id);
   // Отпечаток без «сейчас»: сводка обновляется, когда изменились данные, или раз в 3 часа (сроки и «давно не связывались» сдвигаются)
   const { now, ...stable } = facts;
@@ -360,7 +374,7 @@ export function agentRoutes(app: FastifyInstance, pool: pg.Pool, yandex: YandexC
       const { processBrief } = await import('./agentProcesses.ts');
       return withCtx(pool, ctx, (db) => processBrief(db, ctx, yandex, id, force === '1'));
     }
-    if (type !== 'task' && type !== 'opportunity') throw badRequest('Неизвестный тип');
+    if (type !== 'task' && type !== 'opportunity' && type !== 'person') throw badRequest('Неизвестный тип');
     return withCtx(pool, ctx, (db) => situationBrief(db, ctx, yandex, type, id, force === '1'));
   });
 

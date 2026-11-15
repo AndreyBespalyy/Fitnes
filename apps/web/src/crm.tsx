@@ -259,7 +259,8 @@ export function PersonCard({ me, id, onClose }: { me: Me; id: string; onClose: (
         {!card ? <p className="muted">Загрузка…</p> : (<>
           <div><h1>{card.person.fullName}</h1>
             <div className="row" style={{ marginTop: 4 }}><span className="chip acc">{card.person.segment}</span>
-              <span className="small">{card.person.homeClubName ?? 'клиент другого клуба сети'} · в базе с {dt(card.person.createdAt)}</span></div></div>
+              <span className="small">{card.person.homeClubName ?? 'клиент другого клуба сети'} · в базе с {dt(card.person.createdAt)}</span></div>
+            {can(me, 'crm.work') && <div style={{ marginTop: 10 }}><SituationButton type="person" id={card.person.id} small={false} /></div>}</div>
           <div className="card kv">{card.contacts.map((c, i) => <span key={i} style={{ display: 'contents' }}><span>{c.type === 'phone' ? 'Телефон' : c.type === 'email' ? 'E-mail' : c.type === 'telegram' ? 'Telegram' : c.type === 'whatsapp' ? 'WhatsApp' : c.type}</span><span className="num">{c.value}{c.type === 'phone' && c.isPrimary && <> <DialButton personId={id} label="" /></>}</span></span>)}</div>
           {can(me, 'memberships.view') && (
             <label className="item row" style={{ gap: 10 }}>

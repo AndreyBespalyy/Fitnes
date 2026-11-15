@@ -569,3 +569,22 @@ input[type="checkbox"],input[type="radio"]{accent-color:var(--accent)}
 .top .ai-top{display:inline-flex;align-items:center;gap:6px;color:var(--accent-ink);background:var(--accent);border-color:var(--accent);font-weight:600}
 .top .ai-top:hover{filter:brightness(1.08)}
 @media (max-width:720px){.top .ai-top .ai-top-l{display:none}}
+
+/* «Коротко о ситуации»: кто работал с клиентом (нажатие — фильтр ленты) */
+.flow-people{display:grid;gap:8px;grid-template-columns:repeat(auto-fill,minmax(210px,1fr))}
+.flow-pp{display:grid;gap:2px;text-align:left;padding:9px 11px;border:1px solid var(--line);border-radius:10px;background:var(--surface-2,var(--surface));color:var(--ink);cursor:pointer;font:inherit}
+.flow-pp:hover{border-color:var(--accent)}
+.flow-pp[aria-pressed="true"]{border-color:var(--accent);background:var(--accent-soft)}
+
+/* Разделы рабочего стола на телефоне: «☰» справа вверху, видна при прокрутке */
+.burger{display:none}
+@media (max-width:760px){
+  .dash-tabs{display:none}
+  .burger{display:flex;justify-content:flex-end;align-items:flex-start;position:sticky;z-index:4;height:52px;margin-bottom:-4px;pointer-events:none}
+  .burger>*{pointer-events:auto}
+  .burger-btn{display:inline-flex;gap:8px;align-items:center;min-height:44px;padding:0 14px;border-radius:12px;border:1px solid var(--line);background:var(--surface);color:var(--ink);font:700 15px var(--f);box-shadow:0 6px 18px rgba(0,0,0,.35);cursor:pointer}
+  .burger-btn span{font-size:18px;color:var(--accent)}
+  .burger-menu{position:absolute;right:0;top:50px;min-width:220px;display:grid;padding:6px;border-radius:12px;border:1px solid var(--line);background:var(--surface);box-shadow:0 12px 30px rgba(0,0,0,.45)}
+  .burger-menu button{text-align:left;padding:12px 12px;border:0;border-radius:8px;background:none;color:var(--ink);font:600 15px var(--f);cursor:pointer}
+  .burger-menu button[aria-checked="true"]{background:var(--accent-soft);color:var(--accent)}
+}

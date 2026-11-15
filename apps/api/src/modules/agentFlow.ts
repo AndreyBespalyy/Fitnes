@@ -7,12 +7,14 @@
 import { ago, cut, fmtDate, lastContact, plural, type Facts } from './agent.ts';
 
 /** full — полный текст события (разговор, итог задачи, сообщение): открывается по нажатию на пункт ленты */
-export type FlowEvent = { at: string; kind: 'lead' | 'call' | 'stage' | 'task' | 'message' | 'buy' | 'visit' | 'class' | 'meeting'; title: string; detail?: string; full?: string; bad?: boolean };
+export type FlowEvent = { at: string; kind: 'lead' | 'call' | 'stage' | 'task' | 'message' | 'buy' | 'visit' | 'class' | 'meeting'; title: string; detail?: string; full?: string; bad?: boolean; who?: string[] };
 /** act — куда ведёт шаг: карточка клиента (переписка, оплата, продление, сделка), задачи */
 export type FlowAct = 'chat' | 'person' | 'deal' | 'task' | 'tasks';
 export type FlowStep = { title: string; detail?: string; urgent?: boolean; act?: FlowAct; branches?: { when: string; then: string }[] };
 export type FlowStage = { title: string; status: 'done' | 'active' | 'pending' | 'skipped'; who: string | null; when: string | null; result: string | null; late: boolean };
-export type Flow = { head: string; history: FlowEvent[]; now: string; steps: FlowStep[]; stages?: FlowStage[]; personId?: string | null };
+/** Кто работал с клиентом: сотрудник и что делал (звонки, задачи, ответы в переписке, занятия, сделка, обсуждения) */
+export type FlowPerson = { name: string; did: string[]; last: string | null };
+export type Flow = { head: string; history: FlowEvent[]; now: string; steps: FlowStep[]; stages?: FlowStage[]; personId?: string | null; people?: FlowPerson[] };
 
 /** Полный текст разговора: суть, потребность, возражения, договорённости, расшифровка */
 function callFull(c: Facts['calls'][number]): string {
@@ -30,25 +32,47 @@ function historyOf(f: Facts): FlowEvent[] {
     bad: l.firstResponseMin == null || l.firstResponseMin > 15 });
   for (const c of f.calls) ev.push({ at: c.at, kind: 'call', title: `${c.direction[0].toUpperCase()}${c.direction.slice(1)} звонок${c.manager ? ` · ${c.manager}` : ''}`,
     detail: cut([c.outcome ? `итог: ${c.outcome}` : '', c.essence ?? '', c.agreements ? `договорились: ${c.agreements}` : ''].filter(Boolean).join('; '), 160) || undefined,
-    full: callFull(c) || undefined, bad: c.outcome === 'отказ' });
-  for (const h of f.opportunity?.stageHistory ?? []) ev.push({ at: h.at, kind: 'stage', title: `Этап: ${h.from ? `${h.from} → ` : ''}${h.to}`, detail: [h.actor, h.comment ? cut(h.comment, 100) : ''].filter(Boolean).join(' — ') || undefined });
+    full: callFull(c) || undefined, bad: c.outcome === 'отказ', who: c.manager ? [c.manager] : undefined });
+  for (const h of f.opportunity?.stageHistory ?? []) ev.push({ at: h.at, kind: 'stage', title: `Этап: ${h.from ? `${h.from} → ` : ''}${h.to}`, detail: [h.actor, h.comment ? cut(h.comment, 100) : ''].filter(Boolean).join(' — ') || undefined, who: h.actor ? [h.actor] : undefined });
   for (const t of f.tasks.filter((x) => x.doneAt)) {
     // «Поговорили» — показываем и сам разговор: звонок в пределах 3 часов до отметки задачи
     const call = f.calls.find((c) => Math.abs(+new Date(c.at) - +new Date(t.doneAt!)) <= 3 * 3_600_000);
     const full = [`Задача: «${t.title}»`, t.assignee ? `Исполнитель: ${t.assignee}` : '', t.result ? `Итог: ${t.result}` : 'Итог не записан',
       call ? `\nРазговор ${fmtDate(call.at, tz)}:\n${callFull(call)}` : ''].filter(Boolean).join('\n');
-    ev.push({ at: t.doneAt!, kind: 'task', title: `Сделано: «${cut(t.title, 70)}»`, detail: [t.assignee, t.result ? cut(t.result, 120) : ''].filter(Boolean).join(' — ') || undefined, full });
+    ev.push({ at: t.doneAt!, kind: 'task', title: `Сделано: «${cut(t.title, 70)}»`, detail: [t.assignee, t.result ? cut(t.result, 120) : ''].filter(Boolean).join(' — ') || undefined, full, who: t.assignee ? [t.assignee] : undefined });
   }
   for (const m of f.meetings) ev.push({ at: m.at, kind: 'meeting', title: `Встреча — ${m.status}`, bad: m.status === 'не пришёл' });
   for (const m of f.memberships) ev.push({ at: m.startsOn, kind: 'buy', title: `Абонемент «${m.product}»`, detail: `${m.status}${m.endsOn ? `, до ${fmtDate(m.endsOn, tz, false)}` : ''}` });
   for (const c of f.classes.filter((x) => x.status === 'пришёл' || x.status === 'не пришёл').slice(0, 4))
-    ev.push({ at: c.at, kind: 'class', title: `Занятие «${c.name}» — ${c.status}`, detail: [c.trainer ? `тренер ${c.trainer}` : '', c.room ?? ''].filter(Boolean).join(', ') || undefined, bad: c.status === 'не пришёл' });
+    ev.push({ at: c.at, kind: 'class', title: `Занятие «${c.name}» — ${c.status}`, detail: [c.trainer ? `тренер ${c.trainer}` : '', c.room ?? ''].filter(Boolean).join(', ') || undefined, bad: c.status === 'не пришёл', who: c.trainer ? [c.trainer] : undefined });
   if (!f.classes.length) for (const v of f.visits.recent.slice(0, 2)) ev.push({ at: v.at, kind: 'visit', title: 'Пришёл в клуб', detail: v.club });
   const lastIn = [...f.clientMessages].reverse().find((m) => m.from === 'клиент');
   if (lastIn) ev.push({ at: lastIn.at, kind: 'message', title: 'Клиент написал', detail: `«${cut(lastIn.text, 110)}»`, full: lastIn.text });
   const lastOut = [...f.clientMessages].reverse().find((m) => m.from !== 'клиент' && m.from !== 'автосообщение');
-  if (lastOut) ev.push({ at: lastOut.at, kind: 'message', title: `Ответ клиенту · ${lastOut.from}`, detail: `«${cut(lastOut.text, 110)}»`, full: lastOut.text });
-  return ev.filter((e) => e.at).sort((a, b) => +new Date(a.at) - +new Date(b.at)).slice(-8);
+  if (lastOut) ev.push({ at: lastOut.at, kind: 'message', title: `Ответ клиенту · ${lastOut.from}`, detail: `«${cut(lastOut.text, 110)}»`, full: lastOut.text, who: [lastOut.from] });
+  return ev.filter((e) => e.at).sort((a, b) => +new Date(a.at) - +new Date(b.at)).slice(f.target.type === 'person' ? -20 : -8);
+}
+
+/** Все сотрудники, которые работали с клиентом, и что каждый делал — по убыванию участия */
+function peopleOf(f: Facts): FlowPerson[] {
+  const m = new Map<string, { n: Record<string, number>; last: string | null; owner: boolean }>();
+  const add = (name: string | null | undefined, what: string, at?: string | null) => {
+    if (!name || name === 'клиент' || name === 'автосообщение' || name === 'клуб') return;
+    const x = m.get(name) ?? { n: {}, last: null, owner: false };
+    x.n[what] = (x.n[what] ?? 0) + 1;
+    if (at && (!x.last || +new Date(at) > +new Date(x.last))) x.last = at;
+    m.set(name, x);
+  };
+  for (const c of f.calls) add(c.manager, 'звонки', c.at);
+  for (const t of f.tasks) add(t.assignee, 'задачи', t.doneAt ?? t.dueAt);
+  for (const x of f.clientMessages) add(x.from, 'ответы в переписке', x.at);
+  for (const c of f.classes) add(c.trainer, 'занятия как тренер', c.at);
+  for (const h of f.opportunity?.stageHistory ?? []) add(h.actor, 'этапы сделки', h.at);
+  for (const t of f.team) add(t.author, 'обсуждения в команде', t.at);
+  if (f.opportunity?.owner) { add(f.opportunity.owner, 'сделка', null); m.get(f.opportunity.owner)!.owner = true; }
+  return [...m.entries()].map(([name, x]) => ({ name, last: x.last, total: Object.values(x.n).reduce((a, b) => a + b, 0),
+    did: [...(x.owner ? ['ответственный по сделке'] : []), ...Object.entries(x.n).filter(([k]) => k !== 'сделка').map(([k, v]) => `${k}: ${v}`)] }))
+    .sort((a, b) => b.total - a.total).slice(0, 12).map(({ total: _t, ...r }) => r);
 }
 
 /** Алгоритм: от самого срочного, у каждого шага — развилки «если … → …» */
@@ -98,7 +122,7 @@ export function situationFlow(f: Facts): Flow {
     lc ? `последний контакт ${ago(lc.at, now)}` : 'контактов ещё не было',
     f.opportunity?.owner ? `ответственный ${f.opportunity.owner}` : '',
   ].filter(Boolean).join(', ');
-  return { head, history: historyOf(f), now: where, steps: stepsOf(f), personId: f.person?.id ?? null };
+  return { head, history: historyOf(f), now: where, steps: stepsOf(f), personId: f.person?.id ?? null, people: peopleOf(f) };
 }
 
 /** Схема для бизнес-процесса: шаги процесса со статусами, затем алгоритм — текущий шаг и что делать по клиенту */
