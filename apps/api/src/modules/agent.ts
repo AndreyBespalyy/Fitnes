@@ -10,6 +10,7 @@ import { can, requirePerm } from '../auth.ts';
 import { withCtx, type Ctx, type Db } from '../db.ts';
 import { badRequest, notFound } from '../errors.ts';
 import { PERMISSIONS as P } from '../roles.ts';
+import { situationFlow } from './agentFlow.ts';
 import { ygptComplete, type YandexConfig } from '../lib/yandex.ts';
 
 export const BRIEF_MAX = 6000;
@@ -17,7 +18,7 @@ const onlyMine = (ctx: Ctx) => !can(ctx, P.crmViewAll);
 const rub = (kop: number | string | null | undefined) => `${Math.round(Number(kop ?? 0) / 100).toLocaleString('ru-RU')} ₽`;
 /** Телефоны и e-mail в текстах заменяются: в сводку и в YandexGPT они не попадают */
 export const noContacts = (s: string) => s.replace(/\+?\d[\d\s()-]{8,}\d/g, '[телефон]').replace(/[\w.+-]+@[\w-]+\.[\w.-]+/g, '[e-mail]');
-const cut = (s: unknown, n: number) => { const t = noContacts(String(s ?? '')).replace(/\s+/g, ' ').trim(); return t.length > n ? `${t.slice(0, n - 1)}…` : t; };
+export const cut = (s: unknown, n: number) => { const t = noContacts(String(s ?? '')).replace(/\s+/g, ' ').trim(); return t.length > n ? `${t.slice(0, n - 1)}…` : t; };
 
 /* ---------- сбор фактов ---------- */
 export type Facts = {
@@ -163,8 +164,8 @@ export function fmtDate(s: string | Date | null | undefined, tz: string, withTim
   const d = new Date(s);
   return new Intl.DateTimeFormat('ru-RU', { timeZone: tz, day: '2-digit', month: '2-digit', ...(withTime ? { hour: '2-digit', minute: '2-digit' } : {}) }).format(d);
 }
-const plural = (n: number, a: string, b: string, c: string) => { const m = Math.abs(n) % 100; const k = m % 10; return m > 10 && m < 20 ? c : k === 1 ? a : k >= 2 && k <= 4 ? b : c; };
-const ago = (s: string, now: Date) => {
+export const plural = (n: number, a: string, b: string, c: string) => { const m = Math.abs(n) % 100; const k = m % 10; return m > 10 && m < 20 ? c : k === 1 ? a : k >= 2 && k <= 4 ? b : c; };
+export const ago = (s: string, now: Date) => {
   const h = Math.floor((now.getTime() - new Date(s).getTime()) / 3_600_000);
   if (h < 1) return 'меньше часа назад';
   if (h < 48) return `${h} ${plural(h, 'час', 'часа', 'часов')} назад`;
@@ -173,7 +174,7 @@ const ago = (s: string, now: Date) => {
 };
 
 /** Последний контакт с клиентом: звонок, сообщение от сотрудника или выполненная задача */
-function lastContact(f: Facts) {
+export function lastContact(f: Facts) {
   const xs: { at: string; what: string }[] = [];
   if (f.calls[0]) xs.push({ at: f.calls[0].at, what: `${f.calls[0].direction} звонок${f.calls[0].manager ? ` (${f.calls[0].manager})` : ''}` });
   const out = [...f.clientMessages].reverse().find((m) => m.from !== 'клиент' && m.from !== 'автосообщение');
@@ -332,7 +333,7 @@ export async function situationBrief(db: Db, ctx: Ctx, yandex: YandexConfig | nu
   if (!force) {
     const c = (await db.query(`select body, engine, created_at from agent_briefs where object_type = $1 and object_id = $2 and input_hash = $3 and engine = $4
       and created_at > now() - interval '3 hours' order by created_at desc limit 1`, [type, id, hash, engineWanted])).rows[0];
-    if (c) return { text: c.body as string, engine: c.engine as string, createdAt: c.created_at as string, cached: true, sources: sourcesOf(facts) };
+    if (c) return { text: c.body as string, engine: c.engine as string, createdAt: c.created_at as string, cached: true, sources: sourcesOf(facts), flow: situationFlow(facts) };
   }
   let text: string; let engine = engineWanted; let note: string | null = null;
   if (yandex) {
@@ -341,7 +342,7 @@ export async function situationBrief(db: Db, ctx: Ctx, yandex: YandexConfig | nu
   } else text = rulesBrief(facts);
   const row = (await db.query(`insert into agent_briefs(tenant_id, club_id, object_type, object_id, input_hash, body, engine, facts, created_by)
     values ($1,$2,$3,$4,$5,$6,$7,$8,$9) returning created_at`, [ctx.tenantId, clubId, type, id, hash, text, engine, JSON.stringify(sourcesOf(facts)), ctx.userId])).rows[0];
-  return { text, engine, createdAt: row.created_at as string, cached: false, sources: sourcesOf(facts), note };
+  return { text, engine, createdAt: row.created_at as string, cached: false, sources: sourcesOf(facts), note, flow: situationFlow(facts) };
 }
 
 const sourcesOf = (f: Facts) => ({
