@@ -188,6 +188,13 @@ function Shell({ me, onLogout }: { me: Me; onLogout: () => void }) {
   useEffect(() => { if (!me.allClubs && clubs.length && clubId === 'all') setClubId(clubs[0].id); }, [clubs]);
   const logout = async () => { await api('POST', '/api/auth/logout').catch(() => {}); clearDeviceData(); onLogout(); };
   const roleNames = me.roles.map((r) => r.name).join(', ');
+  // Выбор клуба: у тех, кому доступно несколько клубов (собственник, сеть), — вверху окна, рядом с поиском
+  const clubPick = (cls: string) => (
+    <select className={cls} aria-label="Клуб" value={clubId} onChange={(e) => setClubId(e.target.value)}>
+      {me.allClubs && <option value="all">Все клубы</option>}
+      {clubs.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+    </select>
+  );
   const tabs: [Tab, string, boolean][] = [
     ['dash', 'Рабочий стол', true],
     ['problems', 'Проблемные моменты', can(me, 'dash.view') || can(me, 'finance.view')],
@@ -259,14 +266,10 @@ function Shell({ me, onLogout }: { me: Me; onLogout: () => void }) {
       <div className="shell">
       <SideNav items={visible.map(([k, t]) => [k, t])} groupOf={ownerOnly(me) ? { tariffs: 'setup', load: 'money' } : undefined} tab={tab} setTab={(t) => setTab(t as Tab)} open={more}
         brand={<div className="brand"><i />Клубная ОС</div>}
-        club={clubs.length > 0 ? (
-          <select className="club-pick" aria-label="Клуб" value={clubId} onChange={(e) => setClubId(e.target.value)}>
-            {me.allClubs && <option value="all">Вся сеть</option>}
-            {clubs.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
-          </select>
-        ) : null} />
+        club={clubs.length === 1 && !me.allClubs ? clubPick('club-pick') : null} />
       <div className="main-col">
       <header className="top">
+        {(clubs.length > 1 || (me.allClubs && clubs.length > 0)) && <label className="top-club"><span>Клуб</span>{clubPick('top-club-pick')}</label>}
         <button className="search-btn" onClick={() => setCmdk(true)}><span aria-hidden="true">⌕</span><span className="search-ph">Клиент, телефон или раздел</span><kbd>{/Mac|iPhone|iPad/.test(navigator.platform) ? '⌘K' : 'Ctrl K'}</kbd></button>
         <div className="sp"><Suspense fallback={null}><LocalKktAgent me={me} clubId={clubId} /></Suspense><TeamButton onOpen={() => setTab('team')} /><NotificationsBell go={go} openPerson={openPerson} />
           <span className="who-me"><span className="ava" aria-hidden="true">{me.full_name.split(' ').map((w) => w[0]).slice(0, 2).join('')}</span><span className="who-txt"><b>{me.full_name}</b><small>{roleNames}</small></span></span>
