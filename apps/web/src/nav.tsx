@@ -9,16 +9,18 @@ const GROUPS: [string, string][] = [
   ['today', 'Сегодня'], ['sales', 'Клиенты и продажи'], ['club', 'Клуб'], ['money', 'Деньги и аналитика'], ['team', 'Команда'], ['setup', 'Настройки'], ['other', 'Прочее'],
 ];
 const GROUP: Record<string, string> = {
-  dash: 'today', tasks: 'today', processes: 'today', weekly: 'today', hot: 'today', calls: 'today', desk: 'today', trainer: 'today',
+  dash: 'today', problems: 'today', tasks: 'today', processes: 'today', weekly: 'today', hot: 'today', calls: 'today', desk: 'today', trainer: 'today',
   sales: 'sales', leads: 'sales', board: 'sales', home: 'sales', chats: 'sales', retention: 'sales', reviews: 'sales', corp: 'sales',
   schedule: 'club', access: 'club', load: 'club', shop: 'club', tariffs: 'club', contracts: 'club',
-  finance: 'money', fiscal: 'money', pnl: 'money', cohorts: 'money',
+  finance: 'money', payouts: 'money', fiscal: 'money', pnl: 'money', cohorts: 'money',
   team: 'today', staff: 'team', stafftime: 'team',
   clubs: 'setup', config: 'setup', pipelines: 'setup', intake: 'setup', messaging: 'setup', site: 'setup', import: 'setup', onboarding: 'setup', usage: 'setup', notes: 'setup',
   help: 'foot', profile: 'foot',
 };
 
 const P: Record<string, string> = {
+  problems: 'M12 3l10 18H2zM12 10v5M12 18h.01',
+  payouts: 'M3 6h18v12H3zM7 12h4M15 10v4',
   dash: 'M3 11l9-7 9 7v9a1 1 0 0 1-1 1h-5v-6h-6v6H4a1 1 0 0 1-1-1z',
   processes: 'M4 6h6v4H4zM14 14h6v4h-6zM7 10v4a2 2 0 0 0 2 2h5M17 6h3M17 10V6',
   weekly: 'M4 20V10M10 20V4M16 20v-7M22 20H2',
@@ -67,8 +69,8 @@ export const NavIcon = ({ k }: { k: string }) => (
   </svg>
 );
 
-export function SideNav({ items, tab, setTab, open, brand, club }: { items: Item[]; tab: string; setTab: (t: string) => void; open: boolean; brand: ReactNode; club: ReactNode }) {
-  const groups = GROUPS.map(([g, title]) => [title, items.filter(([k]) => (GROUP[k] ?? 'other') === g)] as const).filter(([, l]) => l.length);
+export function SideNav({ items, tab, setTab, open, brand, club, groupOf = {} }: { items: Item[]; tab: string; setTab: (t: string) => void; open: boolean; brand: ReactNode; club: ReactNode; groupOf?: Record<string, string> }) {
+  const groups = GROUPS.map(([g, title]) => [title, items.filter(([k]) => (groupOf[k] ?? GROUP[k] ?? 'other') === g)] as const).filter(([, l]) => l.length);
   const foot = items.filter(([k]) => GROUP[k] === 'foot');
   const btn = ([k, t]: Item) => <button key={k} className="nv" aria-pressed={tab === k} onClick={() => setTab(k)}><NavIcon k={k} /><span>{t}</span></button>;
   return (
