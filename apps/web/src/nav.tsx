@@ -89,22 +89,29 @@ export function SideNav({ items, tab, setTab, open, brand, club, groupOf = {} }:
 export function CommandPalette({ items, open, setOpen, setTab, openPerson, canPersons }: { items: Item[]; open: boolean; setOpen: (v: boolean) => void; setTab: (t: string) => void; openPerson: (id: string) => void; canPersons: boolean }) {
   const [q, setQ] = useState('');
   const [persons, setPersons] = useState<Person[]>([]);
+  const [more, setMore] = useState<{ staff: { id: string; fullName: string; roles: string; clubs: string | null }[]; contracts: { id: string; number: string; status: string; personId: string; personName: string }[] }>({ staff: [], contracts: [] });
   const [i, setI] = useState(0);
   const input = useRef<HTMLInputElement>(null);
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => { if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') { e.preventDefault(); setOpen(!open); } };
     window.addEventListener('keydown', onKey); return () => window.removeEventListener('keydown', onKey);
   }, [open]);
-  useEffect(() => { if (open) { setQ(''); setI(0); setPersons([]); setTimeout(() => input.current?.focus(), 0); } }, [open]);
+  useEffect(() => { if (open) { setQ(''); setI(0); setPersons([]); setMore({ staff: [], contracts: [] }); setTimeout(() => input.current?.focus(), 0); } }, [open]);
   useEffect(() => {
-    if (!canPersons || q.trim().length < 2) { setPersons([]); return; }
-    const t = setTimeout(() => api<Person[]>('GET', `/api/persons?q=${encodeURIComponent(q.trim())}`).then((r) => setPersons(r.slice(0, 6))).catch(() => setPersons([])), 220);
+    if (!canPersons || q.trim().length < 2) { setPersons([]); setMore({ staff: [], contracts: [] }); return; }
+    const t = setTimeout(() => {
+      api<Person[]>('GET', `/api/persons?q=${encodeURIComponent(q.trim())}`).then((r) => setPersons(r.slice(0, 6))).catch(() => setPersons([]));
+      // Сотрудники по фамилии и договоры по номеру
+      api<typeof more>('GET', `/api/search/more?q=${encodeURIComponent(q.trim())}`).then(setMore).catch(() => setMore({ staff: [], contracts: [] }));
+    }, 220);
     return () => clearTimeout(t);
   }, [q]);
   const s = q.trim().toLowerCase();
   const sections = useMemo(() => items.filter(([, t]) => !s || t.toLowerCase().includes(s)).slice(0, s ? 8 : 10), [s, items]);
   const rows: { key: string; label: ReactNode; sub: string; run: () => void }[] = [
     ...persons.map((p) => ({ key: `p${p.id}`, label: p.fullName, sub: [p.phone, p.clubName].filter(Boolean).join(' · '), run: () => openPerson(p.id) })),
+    ...more.contracts.map((c) => ({ key: `c${c.id}`, label: `Договор № ${c.number}`, sub: `${c.personName} · ${c.status === 'signed' ? 'подписан' : c.status === 'cancelled' ? 'расторгнут' : 'ждёт подписи'}`, run: () => openPerson(c.personId) })),
+    ...more.staff.map((u) => ({ key: `u${u.id}`, label: u.fullName, sub: ['сотрудник', u.roles, u.clubs].filter(Boolean).join(' · '), run: () => setTab('staff') })),
     ...sections.map(([k, t]) => ({ key: `t${k}`, label: <span className="row" style={{ gap: 8 }}><NavIcon k={k} />{t}</span>, sub: 'раздел', run: () => setTab(k) })),
   ];
   if (!open) return null;
@@ -112,7 +119,7 @@ export function CommandPalette({ items, open, setOpen, setTab, openPerson, canPe
   return (
     <div className="modal-bg cmdk-bg" onClick={() => setOpen(false)}>
       <div className="cmdk" role="dialog" aria-label="Поиск" onClick={(e) => e.stopPropagation()}>
-        <input ref={input} value={q} placeholder={canPersons ? 'Клиент, телефон или раздел' : 'Раздел'} aria-label="Что найти"
+        <input ref={input} value={q} placeholder={canPersons ? 'Клиент, телефон, сотрудник, № договора или раздел' : 'Раздел'} aria-label="Что найти"
           onChange={(e) => { setQ(e.target.value); setI(0); }}
           onKeyDown={(e) => {
             if (e.key === 'Escape') setOpen(false);

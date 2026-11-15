@@ -69,12 +69,14 @@ function ReviewView({ clubId, userId, leader }: { clubId: string; userId: string
   const [period, setPeriod] = useState('week');
   const [r, setR] = useState<Review | null>(null);
   const [err, setErr] = useState('');
+  const [done, setDone] = useState<Set<string>>(new Set());
   const load = () => { setR(null); api<Review>('GET', `/api/reviews?clubId=${clubId}&period=${period}${userId ? `&userId=${userId}` : ''}`).then((x) => { setR(x); setErr(''); }).catch((x) => setErr(errText(x))); };
   useEffect(load, [clubId, userId, period]);
   const assign = async (rec: Rec) => {
     try {
       await api('POST', '/api/recommendations', { clubId, userId: r!.user.id, title: rec.title, details: rec.details, metric: rec.metric, higherBetter: rec.higherBetter, target: rec.target, days: 7, origin: 'ai' });
-      toast('Рекомендация назначена на неделю: сотрудник получил задачу, результат проверится сам'); load();
+      setDone((d) => new Set(d).add(`${r!.user.id}:${rec.metric}`));
+      toast('Рекомендация назначена на неделю: сотрудник получил задачу, результат проверится сам');
     } catch (x) { toast(errText(x)); }
   };
   if (err) return <div className="err">{err}</div>;
@@ -102,7 +104,9 @@ function ReviewView({ clubId, userId, leader }: { clubId: string; userId: string
           {r.recommendations.map((x) => (
             <div key={x.metric} className="row between" style={{ gap: 8, flexWrap: 'wrap', borderTop: '1px solid var(--line)', paddingTop: 8 }}>
               <div style={{ flex: '1 1 300px' }}><b className="small">{x.title}</b><div className="small muted">{x.details}{x.baseline !== null && x.target !== null ? ` Цель: ${fmt(x.target)}, сейчас ${fmt(x.baseline)}.` : ''}</div></div>
-              {leader && <button className="btn sm" onClick={() => assign(x)}>Назначить на неделю</button>}
+              {leader && (done.has(`${r.user.id}:${x.metric}`)
+                ? <button className="btn sm pri" disabled aria-pressed="true" style={{ opacity: 1 }}>Назначено ✓</button>
+                : <button className="btn sm" onClick={() => assign(x)}>Назначить на неделю</button>)}
             </div>))}
         </div>)}
       <div className="card">

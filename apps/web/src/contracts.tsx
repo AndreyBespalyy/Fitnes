@@ -270,9 +270,7 @@ function SmsSign({ id, onClose }: { id: string; onClose: (done: boolean) => void
     try { await api('POST', `/api/contracts/${id}/sms/confirm`, { code, accepted: agree }); toast('Договор подписан кодом из СМС'); onClose(true); } catch (x) { setErr(errText(x)); }
   };
   return (
-    <div className="overlay" style={{ zIndex: 60, background: 'var(--bg)' }}>
-      <div className="sheet tablet">
-        <div className="row between"><span className="lbl">Подписание кодом из СМС</span><button className="btn sm" onClick={() => onClose(false)}>Отмена</button></div>
+    <SignShell title="Подписание кодом из СМС" onClose={() => onClose(false)}>
         {(loadErr || err) && <div className="err">{loadErr || err}</div>}
         {!c ? <p className="muted">Загрузка…</p> : (<>
           <Terms c={c} />
@@ -294,6 +292,25 @@ function SmsSign({ id, onClose }: { id: string; onClose: (done: boolean) => void
             </div>
           </>}
         </>)}
+    </SignShell>
+  );
+}
+
+/** Экран подписания: лист прокручивается, заметная кнопка «Назад», Esc — выйти без подписи */
+function SignShell({ title, onClose, children }: { title: string; onClose: () => void; children: ReactNode }) {
+  useEffect(() => {
+    const k = (e: KeyboardEvent) => { if (e.key === 'Escape') { e.stopPropagation(); onClose(); } };
+    window.addEventListener('keydown', k, true); return () => window.removeEventListener('keydown', k, true);
+  }, [onClose]);
+  return (
+    <div className="overlay sign-ov" role="dialog" aria-modal="true" aria-label={title}>
+      <div className="sheet tablet">
+        <div className="row between sign-head">
+          <button className="sign-back" onClick={onClose} aria-label="Назад, без подписи">← Назад</button>
+          <span className="lbl">{title}</span>
+        </div>
+        {children}
+        <div className="sign-foot"><button className="sign-back" onClick={onClose}>Отменить и вернуться</button></div>
       </div>
     </div>
   );
@@ -326,9 +343,7 @@ function TabletSign({ id, onClose }: { id: string; onClose: (done: boolean) => v
     try { await api('POST', `/api/contracts/${id}/sign-tablet`, { accepted: agree, signaturePng: cv.current!.toDataURL('image/png') }); toast('Договор подписан'); onClose(true); } catch (x) { setErr(errText(x)); }
   };
   return (
-    <div className="overlay" style={{ zIndex: 60, background: 'var(--bg)' }}>
-      <div className="sheet tablet">
-        <div className="row between"><span className="lbl">Подписание договора</span><button className="btn sm" onClick={() => onClose(false)}>Отмена</button></div>
+    <SignShell title="Подписание договора" onClose={() => onClose(false)}>
         {(loadErr || err) && <div className="err">{loadErr || err}</div>}
         {!c ? <p className="muted">Загрузка…</p> : (<>
           <Terms c={c} />
@@ -346,8 +361,7 @@ function TabletSign({ id, onClose }: { id: string; onClose: (done: boolean) => v
             <button className="btn pri" style={{ fontSize: 17, padding: '12px 22px' }} disabled={!agree || !drawn} onClick={submit}>Подписать договор</button>
           </div>
         </>)}
-      </div>
-    </div>
+    </SignShell>
   );
 }
 

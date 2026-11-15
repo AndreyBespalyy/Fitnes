@@ -1,6 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import type pg from 'pg';
-import { requirePerm } from '../auth.ts';
+import { can, requirePerm } from '../auth.ts';
 import { withCtx } from '../db.ts';
 import { PERMISSIONS as P } from '../roles.ts';
 
@@ -26,6 +26,29 @@ export function personRoutes(app: FastifyInstance, pool: pg.Pool) {
                 or ($3 <> '' and p.id in (select person_ids_by_phone($3))))
          order by c.name, p.full_name limit 300`, [clubId || null, digits.length >= 4 ? '' : text, digits.length >= 4 ? digits : '', trainerId])).rows;
       return rows.map((r) => ({ ...r, phone: mask(r.phone) }));
+    });
+  });
+
+  // Общий поиск (⌘K): сотрудники по фамилии и договоры по номеру — в дополнение к клиентам и разделам
+  app.get('/api/search/more', async (req) => {
+    const ctx = requirePerm(req, P.personsView);
+    const q = String((req.query as { q?: string }).q ?? '').trim();
+    if (q.length < 2) return { staff: [], contracts: [] };
+    const like = `%${q.replace(/[\\%_]/g, (m) => `\\${m}`)}%`;
+    return withCtx(pool, ctx, async (db) => {
+      const staff = can(ctx, P.staffView) ? (await db.query(
+        `select u.id, u.full_name as "fullName",
+           string_agg(distinct r.name, ', ') as roles, string_agg(distinct c.name, ', ') as clubs
+         from users u join user_assignments a on a.user_id = u.id join roles r on r.code = a.role_code left join clubs c on c.id = a.club_id
+         where not u.is_bot and u.full_name ilike $1
+           and ($2::boolean or exists (select 1 from user_assignments x where x.user_id = u.id and x.club_id = any($3::uuid[])))
+         group by u.id order by u.full_name limit 6`, [like, ctx.allClubs, ctx.clubIds])).rows : [];
+      const contracts = (await db.query(
+        `select k.id, k.number, k.status, k.person_id as "personId", p.full_name as "personName"
+         from contracts k join persons p on p.id = k.person_id
+         where k.number ilike $1 and ($2::boolean or k.club_id = any($3::uuid[]))
+         order by k.created_at desc limit 6`, [like, ctx.allClubs, ctx.clubIds])).rows;
+      return { staff, contracts };
     });
   });
 }
