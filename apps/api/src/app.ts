@@ -22,6 +22,7 @@ import { acsRoutes } from './modules/acs.ts';
 import { billingRoutes, startBillingWorker } from './modules/billing.ts';
 import { bankRoutes } from './modules/bank.ts';
 import { dashRoutes } from './modules/dash.ts';
+import { problemRoutes } from './modules/problems.ts';
 import { aiRoutes, startAiWorker } from './modules/ai.ts';
 import { aiSalesRoutes, startScoringWorker } from './modules/aiSales.ts';
 import { staffTimeRoutes } from './modules/staffTime.ts';
@@ -134,6 +135,7 @@ export async function buildApp(pool: pg.Pool, opts: { webDist?: string; secureCo
   billingRoutes(app, pool, { fetch: opts.fetch });
   bankRoutes(app, pool);
   dashRoutes(app, pool);
+  problemRoutes(app, pool);
   // ИИ-сервер (свой, внутренний): AI_URL и AI_TOKEN. Без него записи ждут, итог можно написать вручную
   const ai = opts.ai !== undefined ? opts.ai : aiConfigFromEnv(opts.fetch ?? fetch);
   aiRoutes(app, pool, storage, ai);

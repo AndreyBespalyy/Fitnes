@@ -194,10 +194,13 @@ test('9. телефон: нижняя панель, «Ещё» и переход
   noErrors(p); await ctx.close();
 });
 
-test('10. собственник: рабочий стол, прибыль, удержание, загрузка открываются без ошибок', async () => {
+test('10. собственник: только отчёты — проблемные моменты, прибыль, посещаемость, выплаты; операционки в меню нет', async () => {
   const { ctx, p } = await open('a.bespalyy');
   await p.locator('.main-tabs').waitFor();
-  for (const name of ['Прибыль', 'Удержание', 'Загрузка', 'Финансы', 'Использование', 'Приём заявок', 'Рабочий стол']) {
+  for (const name of ['Ресепшн', 'Звонки', 'Задачи', 'Лиды', 'Сделки', 'Переписка', 'Кому звонить', 'Проходы', 'Касса', 'Воронки', 'Приём заявок']) {
+    assert.equal(await p.locator('.main-tabs').getByRole('button', { name, exact: true }).count(), 0, `у собственника в меню не должно быть «${name}»`);
+  }
+  for (const name of ['Проблемные моменты', 'Прибыль', 'Удержание', 'Посещаемость', 'Финансы', 'Выплаты', 'Использование', 'Рабочий стол']) {
     await tab(p, name);
     await p.waitForLoadState('networkidle');
     assert.equal(await p.locator('.main-tabs').getByRole('button', { name, exact: true }).getAttribute('aria-pressed'), 'true', name);

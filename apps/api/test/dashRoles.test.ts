@@ -6,7 +6,7 @@ import { setupTestApp, login } from './helpers.ts';
 let t: Awaited<ReturnType<typeof setupTestApp>>;
 const ck: Record<string, Record<string, string>> = {};
 const USERS: Record<string, { login: string; first: string }> = {
-  owner: { login: 'a.bespalyy', first: 'day' }, gm: { login: 'o.smirnov', first: 'club_today' }, rop: { login: 'o.astafeva', first: 'team' },
+  owner: { login: 'a.bespalyy', first: 'clubs' }, gm: { login: 'o.smirnov', first: 'club_today' }, rop: { login: 'o.astafeva', first: 'team' },
   manager: { login: 'm.volkova', first: 'my_day' }, desk: { login: 'd.lis', first: 'desk_day' }, fin: { login: 'e.orlova', first: 'fin_day' },
   trainer: { login: 'a.kim', first: 'trainer_day' }, admin: { login: 'i.kotova', first: 'system' },
 };
