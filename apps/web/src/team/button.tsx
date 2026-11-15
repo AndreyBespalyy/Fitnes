@@ -20,3 +20,18 @@ export function TeamButton({ onOpen }: { onOpen: () => void }) {
     </div>
   );
 }
+
+/** Кнопка «ИИ-помощник» в шапке CRM у всех ролей: открывает чат с ИИ-агентом системы (15.11.2026) */
+export function AiButton({ onOpen }: { onOpen: (chatId: string) => void }) {
+  const [busy, setBusy] = useState(false);
+  const open = async () => {
+    if (busy) return;
+    setBusy(true);
+    try { const r = await api<{ id: string }>('POST', '/api/agent/chat'); onOpen(r.id); } catch { /* чат откроется в мессенджере вручную */ } finally { setBusy(false); }
+  };
+  return (
+    <button type="button" className="btn sm ai-top" onClick={open} disabled={busy} title="ИИ-помощник: спросите о задачах, клиентах, продажах — или попросите сделать" aria-label="ИИ-помощник">
+      <span aria-hidden="true">✦</span><span className="ai-top-l">ИИ-помощник</span>
+    </button>
+  );
+}

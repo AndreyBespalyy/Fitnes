@@ -5,7 +5,7 @@ import { ReportProblem } from './report.tsx';
 import { CommandPalette, SideNav } from './nav.tsx';
 import { OfflineBar, ProfilePage, registerServiceWorker, StaffSessions } from './mobile.tsx';
 import { NotificationsBell } from './notifications.tsx';
-import { TeamButton } from './team/button.tsx';
+import { AiButton, TeamButton } from './team/button.tsx';
 import { TestNotesWidget } from './testNotes.tsx';
 import { inRoleMenu, ownerOnly, trainerOnly } from './roleMenu.ts';
 
@@ -148,6 +148,7 @@ function Shell({ me, onLogout }: { me: Me; onLogout: () => void }) {
   const [more, setMore] = useState(false);
   const [cmdk, setCmdk] = useState(false);
   const [personId, setPersonId] = useState<string | null>(init.person);
+  const [teamKey, setTeamKey] = useState(0); // «ИИ-помощник» в шапке: заново открыть мессенджер на чате помощника
   const href = (t: string, p: Record<string, string> = {}, person?: string | null) => {
     const q = new URLSearchParams({ tab: t, ...p }); if (person) q.set('person', person); return `/?${q}`;
   };
@@ -278,7 +279,7 @@ function Shell({ me, onLogout }: { me: Me; onLogout: () => void }) {
       <header className="top">
         {(clubs.length > 1 || (me.allClubs && clubs.length > 0)) && <label className="top-club"><span>Клуб</span>{clubPick('top-club-pick')}</label>}
         <button className="search-btn" onClick={() => setCmdk(true)}><span aria-hidden="true">⌕</span><span className="search-ph">Клиент, сотрудник, договор или раздел</span><kbd>{/Mac|iPhone|iPad/.test(navigator.platform) ? '⌘K' : 'Ctrl K'}</kbd></button>
-        <div className="sp"><Suspense fallback={null}><LocalKktAgent me={me} clubId={clubId} /></Suspense><TeamButton onOpen={() => setTab('team')} /><NotificationsBell go={go} openPerson={openPerson} />
+        <div className="sp"><Suspense fallback={null}><LocalKktAgent me={me} clubId={clubId} /></Suspense><AiButton onOpen={(id) => { setTeamKey((k) => k + 1); go({ tab: 'team', p: { chat: id } }); }} /><TeamButton onOpen={() => setTab('team')} /><NotificationsBell go={go} openPerson={openPerson} />
           <span className="who-me"><span className="ava" aria-hidden="true">{me.full_name.split(' ').map((w) => w[0]).slice(0, 2).join('')}</span><span className="who-txt"><b>{me.full_name}</b><small>{roleNames}</small></span></span>
           <button className="btn sm" onClick={logout}>Выйти</button></div>
       </header>
@@ -287,7 +288,7 @@ function Shell({ me, onLogout }: { me: Me; onLogout: () => void }) {
         <Suspense fallback={<p className="muted">Загрузка…</p>}>
         {tab === 'dash' && <DashPage me={me} clubs={clubs} clubId={clubId} openPerson={openPerson} go={go} canGo={(t) => allowed.some((v) => v[0] === t)} pickClub={setClubId} />}
         {tab === 'hot' && <HotPage me={me} clubs={clubs} clubId={clubId} openPerson={openPerson} />}
-        {tab === 'team' && <TeamPage me={me} clubs={clubs} clubId={clubId} />}
+        {tab === 'team' && <TeamPage key={teamKey} me={me} clubs={clubs} clubId={clubId} />}
         {tab === 'sales' && <SalesOpsPage me={me} clubs={clubs} clubId={clubId} openPerson={openPerson} />}
         {tab === 'weekly' && <WeeklyPage clubs={clubs} clubId={clubId} />}
         {tab === 'processes' && <ProcessesPage me={me} clubs={clubs} clubId={clubId} openPerson={openPerson} />}

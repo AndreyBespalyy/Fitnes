@@ -6,3 +6,5 @@ httpx==0.28.1
 faster-whisper==1.1.1
 huggingface_hub>=0.25,<1.0
 requests>=2.32
+# faster-whisper 1.1.1 вызывает av.open(metadata_errors=...), в PyAV 15+ этого параметра нет
+av>=11,<15
