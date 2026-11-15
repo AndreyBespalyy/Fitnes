@@ -1,7 +1,7 @@
 // Шаг 13. Рабочий стол из виджетов: дашборды собственника, управляющего, РОПа и менеджера,
 // план продаж по клубу и менеджерам, нормы KPI, отчёт по продажам, словарь метрик, выгрузки.
 import { PlanDrill } from './insights.tsx';
-import { Fragment, useEffect, useState } from 'react';
+import { Fragment, useEffect, useRef, useState } from 'react';
 import { api, can, type Club, type Go, type Me } from './api.ts';
 import { errText, toast } from './ui.ts';
 import { rub } from './memberships.tsx';
@@ -48,8 +48,9 @@ export function DashPage({ me, clubs, clubId, openPerson, go: goTo, canGo, pickC
   return (
     <>
       <Hello me={me} club={club} />
+      <BurgerMenu items={tabs.filter((t) => t[2]).map(([k, t]) => ({ key: k, label: t }))} value={view} onPick={(k) => setView(k as typeof view)} />
       <div className="row between" style={{ flexWrap: 'wrap', gap: 8 }}>
-        <div className="tabs" role="group" aria-label="Рабочий стол">
+        <div className="tabs dash-tabs" role="group" aria-label="Рабочий стол">
           {tabs.filter((t) => t[2]).map(([k, t]) => <button key={k} aria-pressed={view === k} onClick={() => setView(k)}>{t}</button>)}
         </div>
         {view === 'desk' && (dashView || can(me, 'crm.work')) && <div className="row small" style={{ gap: 6, flexWrap: 'wrap' }}>
@@ -76,16 +77,37 @@ export function DashPage({ me, clubs, clubId, openPerson, go: goTo, canGo, pickC
     </>
   );
 }
-/** Приветствие над рабочим столом: кто, где и какой сегодня день */
+/** Приветствие над рабочим столом: кто и в каком клубе (дату убрали по замечанию №14) */
 function Hello({ me, club }: { me: Me; club: Club | null }) {
   const h = new Date().getHours();
   const hi = h < 5 ? 'Доброй ночи' : h < 12 ? 'Доброе утро' : h < 18 ? 'Добрый день' : 'Добрый вечер';
   const name = me.full_name.split(' ')[0];
-  const day = new Date().toLocaleDateString('ru-RU', { weekday: 'long', day: 'numeric', month: 'long' });
   return (
     <div className="hello">
       <h1>{hi}, {name}</h1>
-      <span className="muted">{day} · {me.roles.map((r) => r.name).join(', ')} · {club ? club.name : 'вся сеть'}</span>
+      <span className="muted">{me.roles.map((r) => r.name).join(', ')} · {club ? club.name : 'вся сеть'}</span>
+    </div>
+  );
+}
+/** На телефоне разделы рабочего стола — кнопкой «☰» в правом верхнем углу, она остаётся на виду при прокрутке (замечание №15) */
+function BurgerMenu({ items, value, onPick }: { items: { key: string; label: string }[]; value: string; onPick: (k: string) => void }) {
+  const [open, setOpen] = useState(false);
+  const [top, setTop] = useState(64);
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const fit = () => setTop(Math.round(document.querySelector('header.top')?.getBoundingClientRect().height ?? 56) + 8);
+    fit(); window.addEventListener('resize', fit);
+    const out = (e: MouseEvent) => { if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false); };
+    const esc = (e: KeyboardEvent) => { if (e.key === 'Escape') setOpen(false); };
+    document.addEventListener('mousedown', out); document.addEventListener('keydown', esc);
+    return () => { window.removeEventListener('resize', fit); document.removeEventListener('mousedown', out); document.removeEventListener('keydown', esc); };
+  }, []);
+  const cur = items.find((x) => x.key === value)?.label ?? 'Разделы';
+  return (
+    <div className="burger" ref={ref} style={{ top }}>
+      <button className="burger-btn" aria-expanded={open} aria-haspopup="menu" onClick={() => setOpen(!open)}><span aria-hidden="true">☰</span> {cur}</button>
+      {open && <div className="burger-menu" role="menu">{items.map((x) => (
+        <button key={x.key} role="menuitemradio" aria-checked={x.key === value} onClick={() => { onPick(x.key); setOpen(false); window.scrollTo({ top: 0, behavior: 'smooth' }); }}>{x.label}</button>))}</div>}
     </div>
   );
 }

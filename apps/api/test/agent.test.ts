@@ -79,7 +79,8 @@ test('сводка по сделке; чужой клуб и неизвестн�
   assert.match(r.json().text, /этап \*\*«/);
   assert.equal((await req('GET', `/api/agent/brief/opportunity/${lead.opportunityId}`, 'i.zuev')).statusCode, 404);
   assert.equal((await req('GET', `/api/agent/brief/task/${taskId}`, 'i.zuev')).statusCode, 404);
-  assert.equal((await req('GET', `/api/agent/brief/person/${lead.personId}`, 'm.volkova')).statusCode, 400);
+  assert.equal((await req('GET', `/api/agent/brief/lead/${lead.personId}`, 'm.volkova')).statusCode, 400);
+  assert.equal((await req('GET', `/api/agent/brief/person/${lead.personId}`, 'i.zuev')).statusCode, 404); // клиент чужого клуба
 });
 
 test('YandexGPT: получает факты без телефонов, ответ обрезается до 6000 знаков', async () => {

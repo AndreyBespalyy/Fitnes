@@ -66,3 +66,28 @@ test('ответ сервера: схема для сделки и для про
   assert.match(pb.flow.steps[0].branches[0].then, /запустит «Пригласить на пробное»/);
   assert.match(pb.flow.now, /^Выполнено 0 из 2, сейчас: «Позвонить клиенту»/);
 });
+
+test('кто работал с клиентом: участники по убыванию участия, события помечены сотрудником', () => {
+  const f = facts();
+  f.classes = [{ at: d(20), name: 'Йога', kind: 'group', trial: false, trainer: 'Полина Ершова', room: null, club: 'Центр', status: 'пришёл', lateCancel: false } as Facts['classes'][number]];
+  const flow = situationFlow(f);
+  assert.equal(flow.people?.[0].name, 'Мария Волкова');
+  assert.ok(flow.people?.[0].did.includes('ответственный по сделке'));
+  assert.ok(flow.people?.some((p) => p.name === 'Полина Ершова' && p.did.includes('занятия как тренер: 1')));
+  assert.deepEqual(flow.history.find((e) => e.kind === 'call')?.who, ['Мария Волкова']);
+});
+
+test('«Коротко о ситуации» из карточки клиента', async () => {
+  const centr = (await req('GET', '/api/clubs', 'o.smirnov')).json();
+  const clubId = (centr.items ?? centr).find((c: { name: string }) => /Центр/.test(c.name)).id;
+  const l = (await req('POST', '/api/leads', 'm.volkova', { clubId, fullName: 'Пётр Карточкин', phone: '+79008880022', sourceCode: 'walk_in' })).json();
+  const r = await req('GET', `/api/agent/brief/person/${l.personId}`, 'm.volkova');
+  assert.equal(r.statusCode, 200, r.body);
+  const b = r.json();
+  assert.match(b.flow.head, /Пётр Карточкин/);
+  assert.equal(b.flow.personId, l.personId);
+  assert.ok(Array.isArray(b.flow.people));
+  assert.ok(b.text.length > 0);
+  // Повторный запрос берётся из кэша
+  assert.equal((await req('GET', `/api/agent/brief/person/${l.personId}`, 'm.volkova')).json().cached, true);
+});
