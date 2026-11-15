@@ -9,7 +9,9 @@ import { maskPhone as mask } from './crm.ts';
 export function personRoutes(app: FastifyInstance, pool: pg.Pool) {
   app.get('/api/persons', async (req) => {
     const ctx = requirePerm(req, P.personsView);
-    const { clubId, q } = req.query as { clubId?: string; q?: string };
+    const { clubId, q, mine } = req.query as { clubId?: string; q?: string; mine?: string };
+    // «Мои клиенты» тренера: только те, кто записан на его занятия за 90 дней или вперёд
+    const trainerId = mine === '1' ? ctx.userId : null;
     const digits = (q ?? '').replace(/\D/g, '');
     const text = (q ?? '').trim();
     return withCtx(pool, ctx, async (db) => {
@@ -18,9 +20,11 @@ export function personRoutes(app: FastifyInstance, pool: pg.Pool) {
            (select value from person_contacts pc where pc.person_id = p.id and pc.is_primary limit 1) as phone
          from persons p join clubs c on c.id = p.home_club_id
          where p.merged_into_id is null and ($1::uuid is null or p.home_club_id = $1)
+           and ($4::uuid is null or p.id in (select b.person_id from class_bookings b join class_sessions s on s.id = b.session_id
+                                             where s.trainer_id = $4 and s.starts_at > now() - interval '90 days'))
            and (($2 = '' and $3 = '') or ($2 <> '' and p.id in (select person_ids_by_name($2)))
                 or ($3 <> '' and p.id in (select person_ids_by_phone($3))))
-         order by c.name, p.full_name limit 300`, [clubId || null, digits.length >= 4 ? '' : text, digits.length >= 4 ? digits : ''])).rows;
+         order by c.name, p.full_name limit 300`, [clubId || null, digits.length >= 4 ? '' : text, digits.length >= 4 ? digits : '', trainerId])).rows;
       return rows.map((r) => ({ ...r, phone: mask(r.phone) }));
     });
   });

@@ -7,6 +7,7 @@ import { OfflineBar, ProfilePage, registerServiceWorker, StaffSessions } from '.
 import { NotificationsBell } from './notifications.tsx';
 import { TeamButton } from './team/button.tsx';
 import { TestNotesWidget } from './testNotes.tsx';
+import { inRoleMenu, ownerOnly, trainerOnly } from './roleMenu.ts';
 
 // Разделы грузятся по мере открытия: первый вход быстрее, особенно на планшете ресепшна
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -53,6 +54,7 @@ const AccessPage = page(() => import('./access.tsx'), 'AccessPage');
 const ChatsPage = page(() => import('./chat.tsx'), 'ChatsPage');
 const MessagingAdmin = page(() => import('./chat.tsx'), 'MessagingAdmin');
 const StaffTimePage = page(() => import('./staff.tsx'), 'StaffTimePage');
+const ProblemsPage = page(() => import('./problems.tsx'), 'ProblemsPage');
 const LoginSecurity = page(() => import('./loginSecurity.tsx'), 'LoginSecurity');
 const UsagePage = page(() => import('./usage.tsx'), 'UsagePage');
 const IntakePage = page(() => import('./intake.tsx'), 'IntakePage');
@@ -130,7 +132,7 @@ function ChangePassword({ me, forced, onDone, onLogout }: { me: Me; forced?: boo
   );
 }
 
-type Tab = 'dash' | 'hot' | 'calls' | 'leads' | 'board' | 'tasks' | 'home' | 'clubs' | 'tariffs' | 'contracts' | 'site' | 'fiscal' | 'finance' | 'import' | 'chats' | 'access' | 'messaging' | 'pipelines' | 'staff' | 'stafftime' | 'config' | 'reviews' | 'onboarding' | 'help' | 'schedule' | 'retention' | 'shop' | 'corp' | 'trainer' | 'desk' | 'load' | 'cohorts' | 'pnl' | 'usage' | 'intake' | 'sales' | 'processes' | 'weekly' | 'team' | 'notes' | 'profile';
+type Tab = 'dash' | 'hot' | 'calls' | 'leads' | 'board' | 'tasks' | 'home' | 'clubs' | 'tariffs' | 'contracts' | 'site' | 'fiscal' | 'finance' | 'import' | 'chats' | 'access' | 'messaging' | 'pipelines' | 'staff' | 'stafftime' | 'config' | 'reviews' | 'onboarding' | 'help' | 'schedule' | 'retention' | 'shop' | 'corp' | 'trainer' | 'desk' | 'load' | 'cohorts' | 'pnl' | 'usage' | 'intake' | 'sales' | 'processes' | 'weekly' | 'team' | 'notes' | 'profile' | 'problems' | 'payouts';
 
 function Shell({ me, onLogout }: { me: Me; onLogout: () => void }) {
   const firstTab: Tab = 'dash';
@@ -186,8 +188,16 @@ function Shell({ me, onLogout }: { me: Me; onLogout: () => void }) {
   useEffect(() => { if (!me.allClubs && clubs.length && clubId === 'all') setClubId(clubs[0].id); }, [clubs]);
   const logout = async () => { await api('POST', '/api/auth/logout').catch(() => {}); clearDeviceData(); onLogout(); };
   const roleNames = me.roles.map((r) => r.name).join(', ');
+  // Выбор клуба: у тех, кому доступно несколько клубов (собственник, сеть), — вверху окна, рядом с поиском
+  const clubPick = (cls: string) => (
+    <select className={cls} aria-label="Клуб" value={clubId} onChange={(e) => setClubId(e.target.value)}>
+      {me.allClubs && <option value="all">Все клубы</option>}
+      {clubs.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+    </select>
+  );
   const tabs: [Tab, string, boolean][] = [
     ['dash', 'Рабочий стол', true],
+    ['problems', 'Проблемные моменты', can(me, 'dash.view') || can(me, 'finance.view')],
     ['team', 'Мессенджер', true],
     ['tasks', 'Задачи', can(me, 'crm.work')],
     ['processes', 'Бизнес-процессы', can(me, 'crm.work')],
@@ -199,7 +209,7 @@ function Shell({ me, onLogout }: { me: Me; onLogout: () => void }) {
     ['leads', 'Лиды', can(me, 'leads.create')],
     ['board', 'Сделки', can(me, 'crm.work')],
     ['chats', 'Переписка', can(me, 'messages.work')],
-    ['home', 'Клиенты', can(me, 'persons.view')],
+    ['home', trainerOnly(me) ? 'Мои клиенты' : 'Клиенты', can(me, 'persons.view')],
     ['access', 'Проходы', can(me, 'acs.work') || can(me, 'acs.manage')],
     ['clubs', 'Клубы', can(me, 'clubs.manage')],
     ['tariffs', 'Тарифы', can(me, 'tariffs.manage') || can(me, 'memberships.sell')],
@@ -209,10 +219,11 @@ function Shell({ me, onLogout }: { me: Me; onLogout: () => void }) {
     ['corp', 'Компании', can(me, 'tariffs.manage') || can(me, 'finance.work') || can(me, 'crm.view_all') || can(me, 'memberships.sell')],
     ['contracts', 'Договоры', can(me, 'contracts.manage')],
     ['site', 'Сайт', can(me, 'site.manage')],
-    ['load', 'Загрузка', can(me, 'dash.view') || can(me, 'schedule.manage')],
+    ['load', 'Посещаемость', can(me, 'dash.view') || can(me, 'schedule.manage')],
     ['cohorts', 'Удержание', can(me, 'dash.view') || can(me, 'finance.view')],
     ['pnl', 'Прибыль', can(me, 'finance.view')],
     ['finance', 'Финансы', can(me, 'finance.view') || can(me, 'shifts.work') || can(me, 'approvals.decide')],
+    ['payouts', 'Выплаты', can(me, 'payroll.manage')],
     ['fiscal', 'Касса', can(me, 'fiscal.manage') || can(me, 'memberships.manage')],
     ['messaging', 'Сообщения', can(me, 'messages.manage')],
     ['import', 'Перенос из 1С', can(me, 'import.manage')],
@@ -229,12 +240,14 @@ function Shell({ me, onLogout }: { me: Me; onLogout: () => void }) {
     ['help', 'Помощь', true],
     ['profile', 'Профиль', true],
   ];
-  const visible = tabs.filter((t) => t[2]);
+  // Право на раздел (t[2]) — можно открыть по ссылке и из отчёта; в меню — только разделы своей роли (roleMenu.ts)
+  const allowed = tabs.filter((t) => t[2]);
+  const visible = allowed.filter((t) => inRoleMenu(me, t[0]));
   const tabLabel = tabs.find((t) => t[0] === tab)?.[1] ?? tab;
   // Статистика использования: какой раздел открыли (без содержимого экрана)
   useEffect(() => { api('POST', '/api/usage/view', { tab, label: tabLabel }).catch(() => null); }, [tab]);
   // Нижняя панель на телефоне: главные разделы роли под большим пальцем, остальное — в «Ещё»
-  const PRIMARY: Tab[] = ['dash', 'desk', 'trainer', 'hot', 'tasks', 'chats', 'home', 'schedule', 'access', 'finance'];
+  const PRIMARY: Tab[] = ['dash', 'desk', 'trainer', 'hot', 'tasks', 'chats', 'home', 'schedule', 'access', 'problems', 'finance', 'pnl'];
   const bottom = PRIMARY.filter((k) => visible.some((v) => v[0] === k)).slice(0, 4);
   // Главные разделы роли подгружаем заранее, в свободную минуту: они откроются мгновенно и будут работать без связи
   useEffect(() => {
@@ -246,21 +259,17 @@ function Shell({ me, onLogout }: { me: Me; onLogout: () => void }) {
     const id = w.requestIdleCallback ? w.requestIdleCallback(run) : window.setTimeout(run, 1500);
     return () => { if (!w.requestIdleCallback) clearTimeout(id); };
   }, [bottom.join()]);
-  const short: Partial<Record<Tab, string>> = { dash: 'Главная', trainer: 'Мой день', desk: 'Ресепшн', hot: 'Звонить', tasks: 'Задачи', schedule: 'Занятия', chats: 'Чаты', home: 'Клиенты', access: 'Проходы', finance: 'Финансы' };
-  const icon: Partial<Record<Tab, string>> = { dash: '◧', trainer: '◷', desk: '⚑', hot: '☎', tasks: '✓', schedule: '▦', chats: '✉', home: '☺', access: '⇥', finance: '₽' };
+  const short: Partial<Record<Tab, string>> = { dash: 'Главная', trainer: 'Мой день', desk: 'Ресепшн', hot: 'Звонить', tasks: 'Задачи', schedule: 'Занятия', chats: 'Чаты', home: 'Клиенты', access: 'Проходы', finance: 'Финансы', problems: 'Проблемы', pnl: 'Прибыль' };
+  const icon: Partial<Record<Tab, string>> = { dash: '◧', trainer: '◷', desk: '⚑', hot: '☎', tasks: '✓', schedule: '▦', chats: '✉', home: '☺', access: '⇥', finance: '₽', problems: '⚠', pnl: '↗' };
   return (
     <>
       <div className="shell">
-      <SideNav items={visible.map(([k, t]) => [k, t])} tab={tab} setTab={(t) => setTab(t as Tab)} open={more}
+      <SideNav items={visible.map(([k, t]) => [k, t])} groupOf={ownerOnly(me) ? { tariffs: 'setup', load: 'money' } : undefined} tab={tab} setTab={(t) => setTab(t as Tab)} open={more}
         brand={<div className="brand"><i />Клубная ОС</div>}
-        club={clubs.length > 0 ? (
-          <select className="club-pick" aria-label="Клуб" value={clubId} onChange={(e) => setClubId(e.target.value)}>
-            {me.allClubs && <option value="all">Вся сеть</option>}
-            {clubs.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
-          </select>
-        ) : null} />
+        club={clubs.length === 1 && !me.allClubs ? clubPick('club-pick') : null} />
       <div className="main-col">
       <header className="top">
+        {(clubs.length > 1 || (me.allClubs && clubs.length > 0)) && <label className="top-club"><span>Клуб</span>{clubPick('top-club-pick')}</label>}
         <button className="search-btn" onClick={() => setCmdk(true)}><span aria-hidden="true">⌕</span><span className="search-ph">Клиент, телефон или раздел</span><kbd>{/Mac|iPhone|iPad/.test(navigator.platform) ? '⌘K' : 'Ctrl K'}</kbd></button>
         <div className="sp"><Suspense fallback={null}><LocalKktAgent me={me} clubId={clubId} /></Suspense><TeamButton onOpen={() => setTab('team')} /><NotificationsBell go={go} openPerson={openPerson} />
           <span className="who-me"><span className="ava" aria-hidden="true">{me.full_name.split(' ').map((w) => w[0]).slice(0, 2).join('')}</span><span className="who-txt"><b>{me.full_name}</b><small>{roleNames}</small></span></span>
@@ -269,7 +278,7 @@ function Shell({ me, onLogout }: { me: Me; onLogout: () => void }) {
       <main className="wrap">
         <OfflineBar />
         <Suspense fallback={<p className="muted">Загрузка…</p>}>
-        {tab === 'dash' && <DashPage me={me} clubs={clubs} clubId={clubId} openPerson={openPerson} go={go} canGo={(t) => visible.some((v) => v[0] === t)} pickClub={setClubId} />}
+        {tab === 'dash' && <DashPage me={me} clubs={clubs} clubId={clubId} openPerson={openPerson} go={go} canGo={(t) => allowed.some((v) => v[0] === t)} pickClub={setClubId} />}
         {tab === 'hot' && <HotPage me={me} clubs={clubs} clubId={clubId} openPerson={openPerson} />}
         {tab === 'team' && <TeamPage me={me} clubs={clubs} clubId={clubId} />}
         {tab === 'sales' && <SalesOpsPage me={me} clubs={clubs} clubId={clubId} openPerson={openPerson} />}
@@ -302,6 +311,8 @@ function Shell({ me, onLogout }: { me: Me; onLogout: () => void }) {
         {tab === 'clubs' && <Clubs me={me} clubs={clubs} reload={reloadClubs} />}
         {tab === 'staff' && <StaffPage me={me} clubs={clubs} />}
         {tab === 'stafftime' && <StaffTimePage me={me} clubs={clubs} clubId={clubId} />}
+        {tab === 'payouts' && <StaffTimePage key="payouts" me={me} clubs={clubs} clubId={clubId} only="payroll" />}
+        {tab === 'problems' && <ProblemsPage me={me} clubs={clubs} clubId={clubId} go={go} canGo={(t: string) => allowed.some((v) => v[0] === t)} openPerson={openPerson} />}
         {tab === 'config' && <ConfigPage me={me} clubs={clubs} clubId={clubId} />}
         {tab === 'schedule' && <SchedulePage me={me} clubs={clubs} clubId={clubId} openPerson={openPerson} />}
         {tab === 'retention' && <RetentionPage me={me} clubs={clubs} clubId={clubId} openPerson={openPerson} />}
@@ -335,6 +346,7 @@ function Home({ me, clubs, clubId, openPerson }: { me: Me; clubs: Club[]; clubId
       const qs = new URLSearchParams();
       if (clubId !== 'all') qs.set('clubId', clubId);
       if (q.trim()) qs.set('q', q.trim());
+      if (trainerOnly(me)) qs.set('mine', '1');
       api<Person[]>('GET', `/api/persons?${qs}`).then(setPersons).catch(() => setPersons([]));
     }, 250);
     return () => clearTimeout(t);
@@ -346,7 +358,7 @@ function Home({ me, clubs, clubId, openPerson }: { me: Me; clubs: Club[]; clubId
         <div><div className="lbl">{club ? MODEL[club.salesModel] : 'Все клубы сети'}</div><h1>{club ? club.name : 'Вся сеть'}</h1></div>
       </div>
       <input type="search" value={q} onChange={(e) => setQ(e.target.value)} placeholder="Поиск по имени или телефону" aria-label="Поиск клиента" style={{ maxWidth: 420 }} />
-      <p className="small" style={{ margin: 0 }}>Видны клиенты {me.allClubs ? 'всей сети' : 'вашего клуба'}. Нажмите на имя, чтобы открыть карточку.</p>
+      <p className="small" style={{ margin: 0 }}>{trainerOnly(me) ? 'Видны клиенты, записанные на ваши занятия за 90 дней и вперёд.' : `Видны клиенты ${me.allClubs ? 'всей сети' : 'вашего клуба'}.`} Нажмите на имя, чтобы открыть карточку.</p>
       <div className="card"><div className="tbl"><table>
         <thead><tr><th>Клиент</th><th>Категория</th><th>Клуб</th><th>Телефон</th></tr></thead>
         <tbody>{persons.map((p) => <tr key={p.id}><td><button className="btn sm" onClick={() => openPerson(p.id)}>{p.fullName}</button></td><td><span className="chip acc">{p.segment}</span></td><td>{p.clubName}</td><td className="num">{p.phone}</td></tr>)}</tbody>

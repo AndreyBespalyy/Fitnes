@@ -83,7 +83,7 @@ export const WIDGETS: W[] = [
   { id: 'my_kpi', title: 'Мои показатели', description: 'Мои звонки, встречи, продажи и задачи за сегодня в сравнении с нормой', perm: P.crmWork },
 ];
 const ROLE_DEFAULTS: Record<string, string[]> = {
-  owner: ['day', 'clubs', 'plan', 'retention', 'risks', 'nps', 'funnel_sources', 'system'],
+  owner: ['clubs', 'day', 'plan', 'risks', 'nps', 'retention'],
   gm: ['club_today', 'day', 'plan', 'risks', 'retention', 'team', 'nps', 'kpi'],
   rop: ['team', 'my_day', 'retention', 'funnel_managers', 'funnel_sources', 'kpi', 'my_plan'],
   manager: ['my_day', 'my_plan', 'my_kpi'],

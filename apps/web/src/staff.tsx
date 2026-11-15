@@ -53,14 +53,17 @@ const addD = (s: string, n: number) => { const x = new Date(`${s}T00:00:00Z`); x
 const WD = ['пн', 'вт', 'ср', 'чт', 'пт', 'сб', 'вс'];
 const thisMonth = () => new Date().toISOString().slice(0, 7);
 
-export function StaffTimePage({ me, clubs, clubId }: { me: Me; clubs: Club[]; clubId: string }) {
+export function StaffTimePage({ me, clubs, clubId, only }: { me: Me; clubs: Club[]; clubId: string; only?: 'payroll' }) {
   const manage = can(me, 'staff.schedule'); const pay = can(me, 'payroll.manage');
   const tabs: [string, string, boolean][] = [['my', 'Моё', true], ['schedule', 'График', manage || can(me, 'staff.view')], ['timesheet', 'Табель', manage || pay], ['load', 'Нагрузка', manage || pay || can(me, 'dash.view')], ['payroll', 'Зарплата', pay]];
-  const [tab, setTab] = useState(() => (tabs.some((t) => t[0] === navParams('stafftime').tab && t[2]) ? navParams('stafftime').tab : manage ? 'schedule' : 'my'));
-  const club = clubs.find((c) => c.id === clubId) ?? (clubs.length === 1 ? clubs[0] : null);
+  const [tab, setTab] = useState(() => only ?? (tabs.some((t) => t[0] === navParams('stafftime').tab && t[2]) ? navParams('stafftime').tab : manage ? 'schedule' : 'my'));
+  const [picked, setPicked] = useState('');
+  const club = clubs.find((c) => c.id === clubId) ?? clubs.find((c) => only && c.id === picked) ?? (clubs.length === 1 || only ? clubs[0] ?? null : null);
   return (
     <div style={{ display: 'grid', gap: 12 }}>
-      <div className="tabs" role="group" aria-label="Персонал">{tabs.filter((t) => t[2]).map(([k, t]) => <button key={k} aria-pressed={tab === k} onClick={() => setTab(k)}>{t}</button>)}</div>
+      {only ? <div><div className="lbl">Выплаты</div><h1>Зарплата сотрудников</h1><p className="small muted" style={{ margin: 0 }}>Расчётная ведомость по клубу за месяц: начислено, удержано, к выплате.</p>
+        {clubs.length > 1 && clubId === 'all' && <div className="tabs" role="group" aria-label="Клуб" style={{ marginTop: 8 }}>{clubs.map((c) => <button key={c.id} aria-pressed={club?.id === c.id} onClick={() => setPicked(c.id)}>{c.name}</button>)}</div>}</div> :
+      <div className="tabs" role="group" aria-label="Персонал">{tabs.filter((t) => t[2]).map(([k, t]) => <button key={k} aria-pressed={tab === k} onClick={() => setTab(k)}>{t}</button>)}</div>}
       {!club ? <div className="card"><p style={{ margin: 0 }}>Выберите клуб вверху страницы.</p></div> : <>
         {tab === 'my' && <><MyPage club={club} /><LoadView club={club} mine /></>}
         {tab === 'load' && <LoadView club={club} />}

@@ -3,8 +3,52 @@ import { useEffect, useState, type ReactNode } from 'react';
 import { api } from './api.ts';
 import { dt, errText, toast } from './ui.ts';
 
-type Brief = { text: string; engine: string; createdAt: string; cached: boolean; note?: string | null;
+type FlowEvent = { at: string; kind: string; title: string; detail?: string; bad?: boolean };
+type FlowStep = { title: string; detail?: string; urgent?: boolean; branches?: { when: string; then: string }[] };
+type FlowStage = { title: string; status: 'done' | 'active' | 'pending' | 'skipped'; who: string | null; when: string | null; result: string | null; late: boolean };
+type Flow = { head: string; history: FlowEvent[]; now: string; steps: FlowStep[]; stages?: FlowStage[] };
+type Brief = { text: string; engine: string; createdAt: string; cached: boolean; note?: string | null; flow?: Flow;
   sources: { tasks: number; calls: number; clientMessages: number; team: number; stages: number; observations: number } };
+
+const EV_ICON: Record<string, string> = { lead: '📥', call: '📞', stage: '➜', task: '✓', message: '💬', buy: '🎫', visit: '🏋', class: '🏋', meeting: '🤝' };
+
+/** «Коротко о ситуации» схемой: как развивалась ситуация → где сейчас → что делать по шагам с развилками «если … →» */
+export function FlowView({ flow }: { flow: Flow }) {
+  return (
+    <div className="flow">
+      {flow.head && <div className="flow-head">{flow.head}</div>}
+      {flow.stages && flow.stages.length > 0 && (<>
+        <div className="flow-sec">Шаги процесса</div>
+        <ol className="flow-stages">{flow.stages.map((x, i) => (
+          <li key={i} className={`fs fs-${x.status}${x.late ? ' fs-late' : ''}`}>
+            <span className="fs-dot" aria-hidden="true">{x.status === 'done' ? '✓' : x.status === 'active' ? i + 1 : x.status === 'skipped' ? '–' : i + 1}</span>
+            <div><b>{x.title}</b>{x.late && <span className="chip bad" style={{ marginLeft: 6 }}>просрочен</span>}
+              <div className="small muted">{[x.who, x.when].filter(Boolean).join(' · ')}</div>
+              {x.result && <div className="small">Итог: {x.result}</div>}</div>
+          </li>))}</ol>
+      </>)}
+      {flow.history.length > 0 && (<>
+        <div className="flow-sec">Как развивалась ситуация</div>
+        <ol className="flow-tl">{flow.history.map((e, i) => (
+          <li key={i} className={e.bad ? 'bad' : ''}>
+            <span className="tl-ic" aria-hidden="true">{EV_ICON[e.kind] ?? '•'}</span>
+            <div><span className="small muted">{dt(e.at)}</span> <b>{e.title}</b>{e.detail && <div className="small">{e.detail}</div>}</div>
+          </li>))}</ol>
+      </>)}
+      <div className="flow-now"><span className="flow-now-l">Сейчас</span>{flow.now}</div>
+      <div className="flow-sec">Что делать — по шагам</div>
+      <ol className="flow-steps">{flow.steps.map((x, i) => (
+        <li key={i} className={x.urgent ? 'urgent' : ''}>
+          <span className="st-n" aria-hidden="true">{i + 1}</span>
+          <div className="st-b"><b>{x.title}</b>{x.urgent && <span className="chip acc" style={{ marginLeft: 6 }}>срочно</span>}
+            {x.detail && <div className="small">{x.detail}</div>}
+            {x.branches && x.branches.length > 0 && <div className="st-br">{x.branches.map((br, j) => (
+              <div key={j} className="br"><span className="br-if">Если {br.when}</span><span className="br-ar" aria-hidden="true">→</span><span>{br.then}</span></div>))}</div>}
+          </div>
+        </li>))}</ol>
+    </div>
+  );
+}
 
 /** **жирный** внутри строки */
 function inline(s: string): ReactNode[] {
@@ -51,13 +95,15 @@ export function SituationDialog({ type, id, onClose }: { type: 'task' | 'opportu
   useEffect(() => { load(); }, [type, id]);
   useEffect(() => { const k = (e: KeyboardEvent) => { if (e.key === 'Escape') { e.stopPropagation(); onClose(); } }; window.addEventListener('keydown', k, true); return () => window.removeEventListener('keydown', k, true); }, []);
   const s = b?.sources;
+  const [view, setView] = useState<'flow' | 'text'>('flow');
   return (
     <div className="modal-bg brief-bg" role="dialog" aria-modal="true" aria-label="Коротко о ситуации" onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
       <div className="card modal" style={{ display: 'grid', gap: 10, maxWidth: 720 }}>
         <div className="row between"><h2 style={{ margin: 0 }}>✦ Коротко о ситуации</h2><button className="btn sm" onClick={onClose} aria-label="Закрыть">×</button></div>
         {err && <div className="err">{err}</div>}
         {!b && !err && <p className="muted">ИИ-помощник собирает задачи, звонки, переписку и обсуждения…</p>}
-        {b && <BriefText text={b.text} />}
+        {b?.flow && <div className="tabs" role="group" aria-label="Вид"><button aria-pressed={view === 'flow'} onClick={() => setView('flow')}>Схемой</button><button aria-pressed={view === 'text'} onClick={() => setView('text')}>Текстом</button></div>}
+        {b && (b.flow && view === 'flow' ? <FlowView flow={b.flow} /> : <BriefText text={b.text} />)}
         {b?.note && <div className="small muted">{b.note}</div>}
         {b && s && (
           <div className="small muted">
@@ -73,7 +119,7 @@ export function SituationDialog({ type, id, onClose }: { type: 'task' | 'opportu
 
 /* ---------- Настройки ИИ-помощника клуба: лестница напоминаний и авто-передача заявок ---------- */
 type AgentSets = { enabled: boolean; taskRopMinutes: number; taskGmMinutes: number; taskOwnerMinutes: number; replyWaitMinutes: number;
-  leadReassignMinutes: number; quietFrom: number; quietTo: number; canEdit: boolean };
+  leadReassignMinutes: number; quietFrom: number; quietTo: number; morningHints: boolean; morningHour: number; canEdit: boolean };
 export function AgentSettingsCard({ clubId }: { clubId: string }) {
   const [f, setF] = useState<AgentSets | null>(null);
   const [err, setErr] = useState('');
@@ -95,6 +141,8 @@ export function AgentSettingsCard({ clubId }: { clubId: string }) {
         {num('leadReassignMinutes', 'Передать заявку другому менеджеру, если не взяли за мин (0 — не передавать)')}
         <div className="grid2">{num('quietFrom', 'Тишина с, ч')}{num('quietTo', 'до, ч')}</div>
       </div>
+      <label className="row" style={{ gap: 8 }}><input type="checkbox" style={{ width: 'auto' }} disabled={ro} checked={f.morningHints} onChange={(e) => setF({ ...f, morningHints: e.target.checked })} />Утром присылать каждому сотруднику «3 подсказки на сегодня»</label>
+      {f.morningHints && <div className="grid2">{num('morningHour', 'Во сколько присылать, ч (5–12, время клуба)')}</div>}
       {!ro && <div><button className="btn pri" onClick={save}>Сохранить</button></div>}
     </div>
   );
