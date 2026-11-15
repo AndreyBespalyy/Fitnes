@@ -128,7 +128,9 @@ function SessionDrawer({ id, onClose, openPerson }: { id: string; onClose: () =>
                 <td><button className="btn sm" onClick={() => openPerson(b.personId)}>{b.name}</button>{b.trial && <span className="chip acc">пробное</span>}</td>
                 <td className="small hide-narrow">{b.membership ?? '—'}{b.visitsLeft != null ? ` · осталось ${b.visitsLeft}` : ''}{b.charged ? ' · списано' : ''}</td>
                 <td>{started && s.status !== 'cancelled' && s.canMark && ['booked', 'attended', 'no_show'].includes(b.status)
-                  ? <select value={att[b.id]} onChange={(e) => setAtt({ ...att, [b.id]: e.target.value })}><option value="attended">пришёл</option><option value="no_show">не пришёл</option></select>
+                  ? <span className="att2" role="group" aria-label={`Отметка: ${b.name ?? 'клиент'}`}>
+                      <button type="button" aria-pressed={att[b.id] === 'attended'} onClick={() => setAtt({ ...att, [b.id]: 'attended' })}>Пришёл</button>
+                      <button type="button" aria-pressed={att[b.id] === 'no_show'} onClick={() => setAtt({ ...att, [b.id]: 'no_show' })}>Нет</button></span>
                   : <span className={`chip ${STATUS[b.status][1]}`}>{STATUS[b.status][0]}{b.lateCancel ? ', поздно' : ''}</span>}</td>
                 <td>{s.status === 'scheduled' && !started && ['booked', 'waitlist'].includes(b.status) && <button className="btn sm" onClick={() => act(() => api('POST', `/api/schedule/bookings/${b.id}/cancel`),
                   (r: { late: boolean; charged: boolean; promoted: string | null }) => [r.charged ? 'Поздняя отмена: занятие списано' : 'Запись отменена', r.promoted ? 'место отдано клиенту из листа ожидания' : ''].filter(Boolean).join(', '))}>Отменить</button>}</td>

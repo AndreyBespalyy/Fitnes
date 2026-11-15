@@ -179,7 +179,14 @@ function Shell({ me, onLogout }: { me: Me; onLogout: () => void }) {
       const p = Object.fromEntries([...q.entries()].filter(([k]) => k !== 'tab' && k !== 'person'));
       go({ tab: t, p }); const person = q.get('person'); if (person) openPerson(person);
     });
-    return () => window.removeEventListener('popstate', onPop);
+    // Переход из любого окна (например, шаг в «Коротко о ситуации»): событие crm-go с адресом вида /?tab=…&person=…
+    const onGo = (e: Event) => {
+      const q = new URL((e as CustomEvent<string>).detail, location.origin).searchParams; const t = q.get('tab') as Tab | null;
+      const p = Object.fromEntries([...q.entries()].filter(([k]) => k !== 'tab' && k !== 'person'));
+      if (t) go({ tab: t, p }); const person = q.get('person'); if (person) openPerson(person);
+    };
+    window.addEventListener('crm-go', onGo);
+    return () => { window.removeEventListener('popstate', onPop); window.removeEventListener('crm-go', onGo); };
   }, []);
   const [ver, setVer] = useState(0);
   const [clubs, setClubs] = useState<Club[]>([]);
@@ -271,7 +278,7 @@ function Shell({ me, onLogout }: { me: Me; onLogout: () => void }) {
       <div className="main-col">
       <header className="top">
         {(clubs.length > 1 || (me.allClubs && clubs.length > 0)) && <label className="top-club"><span>Клуб</span>{clubPick('top-club-pick')}</label>}
-        <button className="search-btn" onClick={() => setCmdk(true)}><span aria-hidden="true">⌕</span><span className="search-ph">Клиент, телефон или раздел</span><kbd>{/Mac|iPhone|iPad/.test(navigator.platform) ? '⌘K' : 'Ctrl K'}</kbd></button>
+        <button className="search-btn" onClick={() => setCmdk(true)}><span aria-hidden="true">⌕</span><span className="search-ph">Клиент, сотрудник, договор или раздел</span><kbd>{/Mac|iPhone|iPad/.test(navigator.platform) ? '⌘K' : 'Ctrl K'}</kbd></button>
         <div className="sp"><Suspense fallback={null}><LocalKktAgent me={me} clubId={clubId} /></Suspense><AiButton onOpen={(id) => { setTeamKey((k) => k + 1); go({ tab: 'team', p: { chat: id } }); }} /><TeamButton onOpen={() => setTab('team')} /><NotificationsBell go={go} openPerson={openPerson} />
           <span className="who-me"><span className="ava" aria-hidden="true">{me.full_name.split(' ').map((w) => w[0]).slice(0, 2).join('')}</span><span className="who-txt"><b>{me.full_name}</b><small>{roleNames}</small></span></span>
           <button className="btn sm" onClick={logout}>Выйти</button></div>

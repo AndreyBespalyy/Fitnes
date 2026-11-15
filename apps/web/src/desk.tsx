@@ -127,7 +127,7 @@ export function DeskPage({ me, clubs, clubId, openPerson }: { me: Me; clubs: Clu
         <div className="row" style={{ gap: 8 }}>
           <input ref={search} className="desk-q" value={q} placeholder="Телефон, карта или имя" aria-label="Поиск клиента" inputMode="search" autoComplete="off"
             onChange={(e) => { if (!metric.current) metric.current = { t0: performance.now(), taps: 1 }; setQ(e.target.value); }} />
-          {clubId === 'all' && clubs.length > 1 && <select value={club} onChange={(e) => setClub(e.target.value)} aria-label="Клуб" style={{ width: 'auto' }}>{clubs.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}</select>}
+          {clubId === 'all' && clubs.length > 1 && <select value={club} onChange={(e) => setClub(e.target.value)} aria-label="Клуб" className="desk-club">{clubs.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}</select>}
         </div>
         {found && !card && (
           <div className="desk-found">

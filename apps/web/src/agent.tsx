@@ -1,19 +1,31 @@
 // ИИ-агент: кнопка «Коротко о ситуации» в задаче и сделке. Окно с текстом до 6000 знаков, главное выделено жирным.
 import { useEffect, useState, type ReactNode } from 'react';
+import { createPortal } from 'react-dom';
 import { api } from './api.ts';
 import { dt, errText, toast } from './ui.ts';
 
-type FlowEvent = { at: string; kind: string; title: string; detail?: string; bad?: boolean };
-type FlowStep = { title: string; detail?: string; urgent?: boolean; branches?: { when: string; then: string }[] };
+type FlowEvent = { at: string; kind: string; title: string; detail?: string; full?: string; bad?: boolean };
+type FlowAct = 'chat' | 'person' | 'deal' | 'task' | 'tasks';
+type FlowStep = { title: string; detail?: string; urgent?: boolean; act?: FlowAct; branches?: { when: string; then: string }[] };
 type FlowStage = { title: string; status: 'done' | 'active' | 'pending' | 'skipped'; who: string | null; when: string | null; result: string | null; late: boolean };
-type Flow = { head: string; history: FlowEvent[]; now: string; steps: FlowStep[]; stages?: FlowStage[] };
+type Flow = { head: string; history: FlowEvent[]; now: string; steps: FlowStep[]; stages?: FlowStage[]; personId?: string | null };
+
+const ACT_LABEL: Record<FlowAct, string> = { chat: 'Открыть переписку', person: 'Открыть карточку клиента', deal: 'Открыть сделку', task: 'Открыть задачу', tasks: 'К задачам' };
+/** Куда ведёт шаг: карточка клиента (там переписка, сделка, оплата и продление) или раздел «Задачи» */
+function actUrl(act: FlowAct, personId: string | null | undefined): string | null {
+  if (act === 'task' || act === 'tasks') return '/?tab=tasks';
+  return personId ? `/?person=${personId}` : null;
+}
+const goTo = (url: string) => window.dispatchEvent(new CustomEvent('crm-go', { detail: url }));
 type Brief = { text: string; engine: string; createdAt: string; cached: boolean; note?: string | null; flow?: Flow;
   sources: { tasks: number; calls: number; clientMessages: number; team: number; stages: number; observations: number } };
 
 const EV_ICON: Record<string, string> = { lead: '📥', call: '📞', stage: '➜', task: '✓', message: '💬', buy: '🎫', visit: '🏋', class: '🏋', meeting: '🤝' };
 
 /** «Коротко о ситуации» схемой: как развивалась ситуация → где сейчас → что делать по шагам с развилками «если … →» */
-export function FlowView({ flow }: { flow: Flow }) {
+export function FlowView({ flow, onGo }: { flow: Flow; onGo?: () => void }) {
+  const [openEv, setOpenEv] = useState<number | null>(null);
+  const run = (act: FlowAct) => { const u = actUrl(act, flow.personId); if (u) { onGo?.(); goTo(u); } };
   return (
     <div className="flow">
       {flow.head && <div className="flow-head">{flow.head}</div>}
@@ -32,7 +44,10 @@ export function FlowView({ flow }: { flow: Flow }) {
         <ol className="flow-tl">{flow.history.map((e, i) => (
           <li key={i} className={e.bad ? 'bad' : ''}>
             <span className="tl-ic" aria-hidden="true">{EV_ICON[e.kind] ?? '•'}</span>
-            <div><span className="small muted">{dt(e.at)}</span> <b>{e.title}</b>{e.detail && <div className="small">{e.detail}</div>}</div>
+            <div><span className="small muted">{dt(e.at)}</span> {e.full
+              ? <button className="link flow-ev" aria-expanded={openEv === i} onClick={() => setOpenEv(openEv === i ? null : i)}><b>{e.title}</b> <span className="small">{openEv === i ? '▴ скрыть' : '▾ текст и итог'}</span></button>
+              : <b>{e.title}</b>}
+              {openEv === i && e.full ? <div className="flow-full">{e.full}</div> : e.detail && <div className="small">{e.detail}</div>}</div>
           </li>))}</ol>
       </>)}
       <div className="flow-now"><span className="flow-now-l">Сейчас</span>{flow.now}</div>
@@ -40,8 +55,11 @@ export function FlowView({ flow }: { flow: Flow }) {
       <ol className="flow-steps">{flow.steps.map((x, i) => (
         <li key={i} className={x.urgent ? 'urgent' : ''}>
           <span className="st-n" aria-hidden="true">{i + 1}</span>
-          <div className="st-b"><b>{x.title}</b>{x.urgent && <span className="chip acc" style={{ marginLeft: 6 }}>срочно</span>}
+          <div className="st-b">{x.act && actUrl(x.act, flow.personId)
+              ? <button className="link flow-act" onClick={() => run(x.act!)} title={ACT_LABEL[x.act]}><b>{x.title}</b> <span aria-hidden="true">→</span></button>
+              : <b>{x.title}</b>}{x.urgent && <span className="chip acc" style={{ marginLeft: 6 }}>срочно</span>}
             {x.detail && <div className="small">{x.detail}</div>}
+            {x.act && actUrl(x.act, flow.personId) && <button className="btn sm flow-go" onClick={() => run(x.act!)}>{ACT_LABEL[x.act]} →</button>}
             {x.branches && x.branches.length > 0 && <div className="st-br">{x.branches.map((br, j) => (
               <div key={j} className="br"><span className="br-if">Если {br.when}</span><span className="br-ar" aria-hidden="true">→</span><span>{br.then}</span></div>))}</div>}
           </div>
@@ -96,14 +114,15 @@ export function SituationDialog({ type, id, onClose }: { type: 'task' | 'opportu
   useEffect(() => { const k = (e: KeyboardEvent) => { if (e.key === 'Escape') { e.stopPropagation(); onClose(); } }; window.addEventListener('keydown', k, true); return () => window.removeEventListener('keydown', k, true); }, []);
   const s = b?.sources;
   const [view, setView] = useState<'flow' | 'text'>('flow');
-  return (
+  // Окно выносим в body: внутри шапки (колокольчик) fixed-позиция обрезалась и клик мимо окна не закрывал его
+  return createPortal(
     <div className="modal-bg brief-bg" role="dialog" aria-modal="true" aria-label="Коротко о ситуации" onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
       <div className="card modal" style={{ display: 'grid', gap: 10, maxWidth: 720 }}>
         <div className="row between"><h2 style={{ margin: 0 }}>✦ Коротко о ситуации</h2><button className="btn sm" onClick={onClose} aria-label="Закрыть">×</button></div>
         {err && <div className="err">{err}</div>}
         {!b && !err && <p className="muted">ИИ-помощник собирает задачи, звонки, переписку и обсуждения…</p>}
         {b?.flow && <div className="tabs" role="group" aria-label="Вид"><button aria-pressed={view === 'flow'} onClick={() => setView('flow')}>Схемой</button><button aria-pressed={view === 'text'} onClick={() => setView('text')}>Текстом</button></div>}
-        {b && (b.flow && view === 'flow' ? <FlowView flow={b.flow} /> : <BriefText text={b.text} />)}
+        {b && (b.flow && view === 'flow' ? <FlowView flow={b.flow} onGo={onClose} /> : <BriefText text={b.text} />)}
         {b?.note && <div className="small muted">{b.note}</div>}
         {b && s && (
           <div className="small muted">
@@ -113,8 +132,7 @@ export function SituationDialog({ type, id, onClose }: { type: 'task' | 'opportu
         <div className="row"><button className="btn sm" disabled={busy} onClick={() => load(true)}>{busy ? 'Обновляю…' : 'Обновить'}</button>
           <button className="btn sm pri" onClick={onClose}>Понятно</button></div>
       </div>
-    </div>
-  );
+    </div>, document.body);
 }
 
 /* ---------- Настройки ИИ-помощника клуба: лестница напоминаний и авто-передача заявок ---------- */
