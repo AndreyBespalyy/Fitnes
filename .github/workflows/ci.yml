@@ -3,6 +3,9 @@ on:
   push:
     branches: [main]
   pull_request:
+# Запись нужна только шагу, который отмечает проверенную версию для сервера (ветка deploy)
+permissions:
+  contents: write
 jobs:
   test:
     runs-on: ubuntu-latest
@@ -31,3 +34,7 @@ jobs:
       - run: npm run db:setup
       - run: npm test
       - run: npm run build
+      # Сервер ставит только версии из ветки deploy (deploy/update.sh): она сдвигается, когда прошли все проверки
+      - name: Отметить проверенную версию для сервера
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        run: git push --force origin HEAD:refs/heads/deploy
