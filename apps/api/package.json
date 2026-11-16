@@ -5,6 +5,8 @@
   "scripts": {
     "dev": "tsx watch --env-file-if-exists=../../.env src/main.ts",
     "start": "tsx --env-file-if-exists=../../.env src/main.ts",
+    "build": "node build.mjs",
+    "start:prod": "node --enable-source-maps dist/main.mjs",
     "db:setup": "tsx --env-file-if-exists=../../.env db/scripts/setup.ts",
     "db:migrate": "tsx --env-file-if-exists=../../.env db/scripts/migrate.ts",
     "db:seed": "tsx --env-file-if-exists=../../.env db/scripts/seed.ts",
@@ -28,6 +30,7 @@
   "devDependencies": {
     "@types/node": "^22.15.0",
     "@types/pg": "^8.15.0",
+    "esbuild": "^0.28.2",
     "tsx": "^4.20.0",
     "typescript": "^5.8.0"
   }

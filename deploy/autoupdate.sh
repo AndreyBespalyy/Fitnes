@@ -26,6 +26,6 @@ if docker compose up -d --build; then
 else
   # Если не собрался ИИ-сервер (профиль ai), CRM всё равно обновляем; полную сборку повторим в следующий раз
   echo "$(date -Is) ОШИБКА сборки, обновляю только CRM"
-  docker compose up -d --build app
+  docker compose up -d --build app worker
 fi
 docker image prune -f >/dev/null
