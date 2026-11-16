@@ -588,3 +588,7 @@ input[type="checkbox"],input[type="radio"]{accent-color:var(--accent)}
   .burger-menu button{text-align:left;padding:12px 12px;border:0;border-radius:8px;background:none;color:var(--ink);font:600 15px var(--f);cursor:pointer}
   .burger-menu button[aria-checked="true"]{background:var(--accent-soft);color:var(--accent)}
 }
+
+/* Плашка «Вышла новая версия»: открытая давно вкладка предлагает обновиться */
+.upd-bar{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(84px + env(safe-area-inset-bottom));z-index:30;display:flex;gap:12px;align-items:center;padding:10px 12px 10px 16px;border-radius:14px;border:1px solid var(--accent);background:var(--surface);color:var(--ink);font-weight:700;box-shadow:0 10px 30px rgba(0,0,0,.45);max-width:calc(100vw - 32px)}
+@media (min-width:761px){.upd-bar{bottom:24px}}
