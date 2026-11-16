@@ -1,6 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import type pg from 'pg';
-import { can, requirePerm } from '../auth.ts';
+import { can, requirePerm, trainerOnly } from '../auth.ts';
 import { withCtx } from '../db.ts';
 import { PERMISSIONS as P } from '../roles.ts';
 
@@ -12,7 +12,8 @@ export function personRoutes(app: FastifyInstance, pool: pg.Pool) {
     const ctx = requirePerm(req, P.personsView);
     const { clubId, q, mine } = req.query as { clubId?: string; q?: string; mine?: string };
     // «Мои клиенты» тренера: только те, кто записан на его занятия за 90 дней или вперёд
-    const trainerId = mine === '1' ? ctx.userId : null;
+    // Тренер без других ролей видит в списке только своих клиентов; поиск по имени или телефону (записать на занятие) остаётся
+    const trainerId = mine === '1' || (trainerOnly(ctx) && !(q ?? '').trim()) ? ctx.userId : null;
     const digits = (q ?? '').replace(/\D/g, '');
     const text = (q ?? '').trim();
     await trackAccess(pool, ctx, 'search', { clubId: clubId || null });

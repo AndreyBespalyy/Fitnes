@@ -251,6 +251,10 @@ export function crmRoutes(app: FastifyInstance, pool: pg.Pool) {
       if (!person) return denyOrNotFound(db, ctx, 'person', id, 'Клиент не найден');
       const contacts = (await db.query('select type, value, is_primary as "isPrimary" from person_contacts where person_id = $1 order by is_primary desc', [id])).rows
         .map((c) => ({ ...c, value: c.type === 'phone' ? maskPhone(c.value) : c.value }));
+      // Тренер не работает с продажами: обращения, сделки, задачи и история воронки ему не отдаются (доступы по ролям, 16.11.2026)
+      if (!can(ctx, P.crmWork) && !can(ctx, P.crmViewAll) && !can(ctx, P.leadsCreate) && !can(ctx, P.membershipsSell)) {
+        return { person, contacts, leads: [], opportunities: [], tasks: [], meetings: [], history: [] };
+      }
       const leads = (await db.query(
         `select l.id, l.created_at as "createdAt", s.name as "sourceName", l.comment, l.is_repeat as "isRepeat", c.name as "clubName",
            l.first_response_due_at as "dueAt", l.first_response_at as "respondedAt"

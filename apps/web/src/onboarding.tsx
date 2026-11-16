@@ -107,18 +107,37 @@ export function OnboardingPage({ me, clubId, go, reloadClubs }: { me: Me; clubId
 const DOCS = import.meta.glob('../../../docs/03_Инструкции/*.md', { query: '?raw', import: 'default', eager: true }) as Record<string, string>;
 const GUIDES = Object.entries(DOCS).map(([path, text]) => ({ id: path.split('/').pop()!.replace(/\.md$/, ''), title: (text.match(/^#\s+(.+)$/m)?.[1] ?? path).replace(/\s*\(шаг[^)]*\)\s*$/i, ''), text }))
   .sort((a, b) => a.title.localeCompare(b.title, 'ru'));
+// Инструкция показывается сотруднику, если у него в меню есть хотя бы один из этих разделов (доступы по ролям, 16.11.2026).
+// Инструкции, которых нет в списке (рабочий стол, мессенджер, телефон, ссылки, сообщить о проблеме и т.п.), видят все.
+const GUIDE_TABS: Record<string, string[]> = {
+  'Автотесты_интерфейса': ['system'], 'Проверка_скорости': ['system'], 'Резервные_копии': ['system'], 'Состояние_системы': ['system'],
+  'Кабинет_оператора_платформы': ['onboarding'], 'Подключение_клуба_демо_и_поддержка': ['onboarding'], 'Подключение_Яндекса': ['system', 'config'],
+  'Бонусная_программа': ['tariffs', 'shop'], 'Промокоды_и_акции': ['tariffs'], 'Приведи_друга': ['tariffs', 'leads'],
+  'Семейные_и_корпоративные_абонементы': ['tariffs', 'corp'], 'Сертификаты_и_депозит': ['shop'], 'Товары_и_услуги': ['shop'],
+  'Быстрый_режим_ресепшна': ['desk'], 'Турникеты_и_шлюз': ['access'], 'Подсказки_допродаж': ['desk', 'hot'],
+  'Подпись_договора_по_СМС': ['desk', 'board', 'contracts'], 'Покупка_онлайн': ['site', 'finance'],
+  'Возврат_клиентов_и_досрочное_продление': ['retention'], 'Риск_ухода_клиентов': ['retention', 'hot'], 'Опросы_после_визита': ['retention', 'reviews'],
+  'Новички_первые_30_дней': ['sales', 'retention'], 'Отдел_продаж': ['sales'], 'ИИ_продажи_горячие_списки': ['hot'], 'Звонки_и_ИИ_итоги': ['calls'],
+  'Обзоры_рекомендации_прогноз_качество': ['reviews'], 'Приём_заявок': ['intake', 'leads'], 'Мессенджеры_Telegram_WhatsApp': ['chats', 'messaging'],
+  'Клиентский_бот_Telegram': ['messaging'], 'Выгрузка_из_1С': ['import'], 'Загрузка_клуба_по_часам': ['load'], 'Удержание_и_ценность_клиента': ['cohorts'],
+  'Отчёт_о_прибыли': ['pnl'], 'Онлайн_оплата_и_сверка_с_банком': ['finance', 'fiscal'], 'Касса_в_клубе_АТОЛ': ['fiscal'], 'Касса_облачная_АТОЛ_Онлайн': ['fiscal'],
+  'Защита_данных_и_152-ФЗ': ['privacy'], 'Защита_входа': ['staff', 'privacy'], 'Меню_по_ролям': ['staff'], 'Правила_если_то': ['config'],
+  'Настройки_клуба_версии_и_ИИ_помощник': ['config'], 'Рабочее_место_тренера': ['trainer'], 'Расписание_и_запись_на_занятия': ['schedule'],
+  'Утренняя_сводка_в_Telegram': ['problems'],
+};
 
 type Ticket = { id: string; number: number; subject: string; kind: string; status: string; clubName: string | null; author: string; authorId: string; escalatedAt: string | null; createdAt: string; updatedAt: string; messages: number; page?: string | null };
 type TicketFull = Ticket & { techLog?: { at: string; kind: string; text: string }[] | null; clientInfo?: string | null; appVersion?: string | null; canAnswer: boolean; messagesList: { id: string; body: string; fromSupport: boolean; createdAt: string; author: string }[] };
 const KIND: Record<string, string> = { question: 'Вопрос', bug: 'Ошибка', idea: 'Предложение', access: 'Доступ' };
 const STATUS: Record<string, [string, string]> = { open: ['ждёт ответа', 'warn'], answered: ['есть ответ', 'ok'], closed: ['закрыто', ''] };
 
-export function HelpPage({ me, clubs, clubId, page }: { me: Me; clubs: Club[]; clubId: string; page: string }) {
+export function HelpPage({ me, clubs, clubId, page, tabs }: { me: Me; clubs: Club[]; clubId: string; page: string; tabs?: string[] }) {
   const [view, setView] = useState<'guides' | 'support'>(() => (navParams('help').view === 'support' ? 'support' : 'guides'));
   const [q, setQ] = useState('');
   const [open, setOpen] = useState<string | null>(null);
-  const found = GUIDES.filter((g) => !q.trim() || g.text.toLowerCase().includes(q.trim().toLowerCase()));
-  const g = GUIDES.find((x) => x.id === open);
+  const mine = GUIDES.filter((x) => !tabs || !GUIDE_TABS[x.id] || GUIDE_TABS[x.id].some((t) => tabs.includes(t)));
+  const found = mine.filter((g) => !q.trim() || g.text.toLowerCase().includes(q.trim().toLowerCase()));
+  const g = mine.find((x) => x.id === open);
   return (
     <>
       <div className="tabs" role="group" aria-label="Помощь">

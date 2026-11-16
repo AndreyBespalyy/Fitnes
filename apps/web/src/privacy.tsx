@@ -275,6 +275,7 @@ export function PersonPrivacy({ me, personId, reload }: { me: Me; personId: stri
     const open = d?.requests.find((r) => r.kind === 'delete' && r.status === 'open');
     await act(() => api('POST', `/api/persons/${personId}/anonymize`, { reason, confirm: confirm.trim(), requestId: open?.id }), 'Данные клиента обезличены');
   };
+  if (!takeConsent && !takeRequest && !protect) return null; // например, тренер: согласия не оформляет
   if (!d) return err ? <div className="err">{err}</div> : null;
   if (d.anonymizedAt) return <div className="card"><h2>Персональные данные</h2><p className="muted" style={{ margin: 0 }}>Данные клиента обезличены {dt(d.anonymizedAt)} по его обращению. Платежи и посещения сохранены без имени.</p></div>;
   const line = (c: ConsentRow | null, kind: 'pd' | 'marketing', name: string) => (

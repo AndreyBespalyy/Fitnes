@@ -60,7 +60,8 @@ export function FiscalPage({ me, clubs, clubId }: { me: Me; clubs: Club[]; clubI
         <p className="muted" style={{ margin: 0, maxWidth: 700 }}>Касса и банк выбираются для каждого клуба отдельно. После каждой оплаты система создаёт чек и отправляет его в кассу клуба.</p>
         {clubId === 'all' && <select aria-label="Клуб" value={club} onChange={(e) => setClub(e.target.value)} style={{ width: 'auto' }}>{clubs.map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}</select>}
       </div>
-      <FiscalForm key={`f${club}`} club={c} manage={can(me, 'fiscal.manage')} />
+      {/* Настройки кассы — только тем, кто может их менять; остальным (ресепшн) — журнал чеков */}
+      {can(me, 'fiscal.manage') && <FiscalForm key={`f${club}`} club={c} manage />}
       {can(me, 'fiscal.manage') && <AcquiringForm key={`a${club}`} club={c} manage />}
       <Receipts key={`r${club}`} me={me} club={c} />
     </>
