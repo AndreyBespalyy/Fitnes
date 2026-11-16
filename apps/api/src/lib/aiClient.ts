@@ -62,7 +62,8 @@ const SUMMARY_PROMPT = `Ты помогаешь менеджеру фитнес-
 Поля JSON: essence — суть разговора (2–4 предложения), need — потребность клиента, objections — массив возражений,
 agreements — о чём договорились, outcome — одно из interested, thinking, refused, bought, other,
 nextStep — {title, kind: call|meeting|message|other, dueAt: дата-время ISO 8601 с часовым поясом или null} либо null.
-Пиши по-русски, только то, что прозвучало в разговоре. Если разговора по сути не было, верни {"essence": ""}.`;
+Пиши по-русски, только то, что прозвучало в разговоре. Тема разговора не важна: итог нужен по любому разговору, даже не о клубе.
+Если связной речи в расшифровке нет (обрывки, шум, автоответчик), верни {"essence": ""}.`;
 
 export async function aiSummarize(cfg: AiConfig, transcript: Transcript, context: Record<string, unknown>) {
   const y = ya(cfg);
