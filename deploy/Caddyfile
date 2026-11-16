@@ -1,4 +1,10 @@
-app.amoglobal.ru, test.amoglobal.ru {
+app.amoglobal.ru {
 	encode gzip
 	reverse_proxy app:3000
+}
+
+# Тестовый стенд: своя копия приложения и своя база (п. 4 списка улучшений)
+test.amoglobal.ru {
+	encode gzip
+	reverse_proxy test-app:3000
 }

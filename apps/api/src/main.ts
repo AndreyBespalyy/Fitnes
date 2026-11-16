@@ -12,14 +12,17 @@ if (!url) {
 // чтобы тяжёлый пересчёт или зависшая касса не тормозили ресепшн, а сайт можно было перезапускать, не прерывая списаний.
 //   APP_ROLE=web    — только сайт и API (плюс «Состояние системы»: оно считает ошибки ответов этого процесса)
 //   APP_ROLE=worker — только фоновые задачи: касса, автосписания, рассылки, ИИ, push, обзоры, напоминания
+//   APP_ROLE=test   — тестовый стенд test.amoglobal.ru: только сайт, без фоновых задач и оповещений
+//                     (его база — копия рабочей, в ней настоящие токены ботов и банков: стенд не должен ими пользоваться)
 //   без APP_ROLE    — всё в одном процессе, как раньше (для запуска на своём компьютере)
-const role = process.env.APP_ROLE === 'web' || process.env.APP_ROLE === 'worker' ? process.env.APP_ROLE : 'all';
-const bg = role !== 'web';
+const ROLES = ['web', 'worker', 'test'] as const;
+const role = (ROLES as readonly string[]).includes(process.env.APP_ROLE ?? '') ? process.env.APP_ROLE as typeof ROLES[number] : 'all';
+const bg = role === 'worker' || role === 'all';
 const pool = createPool(url);
 const webDist = join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'web', 'dist');
 const app = await buildApp(pool, {
   webDist, secureCookie: process.env.COOKIE_SECURE === '1', logger: true,
-  monitorWorker: role !== 'worker',
+  monitorWorker: role === 'web' || role === 'all',
   fiscalWorker: bg, messagingWorker: bg, billingWorker: bg, aiWorker: bg, scoringWorker: bg, pushWorker: bg, insightsWorker: bg, scheduleWorker: bg,
   retentionWorker: bg, surveyWorker: bg, staffBotWorker: bg, salesOpsWorker: bg, teamPushWorker: bg, agentWorker: bg,
 });
@@ -36,5 +39,5 @@ if (role === 'worker') {
 } else {
   const port = Number(process.env.API_PORT || 3000);
   await app.listen({ port, host: process.env.API_HOST || '127.0.0.1' });
-  console.log(`Клубная ОС: API запущен на http://localhost:${port}${role === 'web' ? ' (фоновые задачи — отдельным процессом)' : ''}`);
+  console.log(`Клубная ОС: API запущен на http://localhost:${port}${role === 'web' ? ' (фоновые задачи — отдельным процессом)' : role === 'test' ? ' (тестовый стенд, без фоновых задач)' : ''}`);
 }

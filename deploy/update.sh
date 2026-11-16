@@ -17,24 +17,61 @@ main() {
   exec 9>/run/fitnes-update.lock
   flock -n 9 || return 0
   local STATE=/opt/fitnes-backups DEPLOYED=/opt/fitnes-deployed BAD=/opt/fitnes-bad AIPENDING=/opt/fitnes-ai-pending
+  local TESTREADY=/opt/fitnes-test-ready CADDYSUM=/opt/fitnes-caddy.sha
   mkdir -p "$STATE"
   log() { echo "$(date -Is) $*"; }
   notify() { bash /opt/fitnes/deploy/notify.sh "$1" || true; }
-  app_health() {
-    local id; id=$(docker compose ps -q app 2>/dev/null | head -1)
+  health() {  # $1 — сервис
+    local id; id=$(docker compose ps -q "$1" 2>/dev/null | head -1)
     [ -n "$id" ] || { echo нет; return; }
     docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' "$id" 2>/dev/null || echo нет
   }
-  # Ждём, пока сайт ответит: до $1 секунд
+  # Ждём, пока сервис $1 ответит: до $2 секунд
   wait_healthy() {
     local t=0 st
-    while [ "$t" -lt "$1" ]; do
-      st=$(app_health)
+    while [ "$t" -lt "$2" ]; do
+      st=$(health "$1")
       [ "$st" = healthy ] && return 0
       [ "$st" = unhealthy ] && return 1
       sleep 5; t=$((t + 5))
     done
     return 1
+  }
+
+  # Есть ли в текущей версии тестовый стенд (п. 4)
+  has_test() { (cd /opt/fitnes/deploy && docker compose config --services 2>/dev/null | grep -qx test-app); }
+  # Первый запуск тестового стенда: его база — копия последней резервной копии рабочей (без копии — учебные данные)
+  init_test_stand() {
+    [ -f "$TESTREADY" ] && return 0
+    has_test || return 0
+    docker image inspect fitnes-app:test >/dev/null 2>&1 || return 0
+    local f tmp t=0
+    f=$(ls -1t "$STATE"/fitnes-*.tar 2>/dev/null | head -1 || true)
+    log "тестовый стенд: первый запуск, база — ${f:-учебные данные}"
+    ( cd /opt/fitnes/deploy
+      docker compose stop test-app >/dev/null 2>&1 || true
+      docker compose up -d test-db
+      until docker compose exec -T test-db pg_isready -U postgres >/dev/null 2>&1; do sleep 2; t=$((t + 2)); [ "$t" -lt 120 ] || exit 1; done
+      docker compose run --rm --no-deps -T test-app node db/dist/setup.mjs
+      if [ -n "$f" ]; then
+        tmp=$(mktemp -d); trap 'rm -rf "$tmp"' EXIT
+        tar xf "$f" -C "$tmp" db.dump storage.tgz
+        docker compose exec -T test-db psql -U postgres -qc "select pg_terminate_backend(pid) from pg_stat_activity where datname = 'fitnes' and pid <> pg_backend_pid()" >/dev/null
+        docker compose exec -T test-db pg_restore -U postgres -d fitnes --clean --if-exists --single-transaction < "$tmp/db.dump"
+        docker compose run --rm --no-deps -T test-app sh -c 'mkdir -p /data/storage && cd /data/storage && tar xzf -' < "$tmp/storage.tgz"
+      else
+        docker compose run --rm --no-deps -T test-app sh -c 'node db/dist/migrate.mjs && node db/dist/seed.mjs'
+      fi
+    ) || { log "ОШИБКА: тестовый стенд не подготовлен, повторю через 5 минут"; return 0; }
+    touch "$TESTREADY"
+    log "тестовый стенд подготовлен"
+  }
+  # Caddy читает Caddyfile при запуске: изменился файл — пересоздаём (пара секунд без ответа)
+  caddy_sync() {
+    local h; h=$(sha256sum /opt/fitnes/deploy/Caddyfile | cut -c1-64)
+    [ "$(cat "$CADDYSUM" 2>/dev/null)" = "$h" ] && return 0
+    (cd /opt/fitnes/deploy && docker compose up -d --no-deps --force-recreate caddy >/dev/null) && log "Caddy перезапущен с новым Caddyfile"
+    echo "$h" > "$CADDYSUM"
   }
 
   # Резервная копия раз в сутки (AT12): если последней успешной больше 20 часов
@@ -51,6 +88,9 @@ main() {
   local cur new prev
   cur=$(cat "$DEPLOYED" 2>/dev/null || echo нет)
   new=$(git rev-parse "origin/$branch")
+  # Тестовый стенд, появившийся с прошлым обновлением, и новые адреса Caddy подхватываем и без новой версии
+  if has_test && [ ! -f "$TESTREADY" ]; then init_test_stand; [ -f "$TESTREADY" ] && (cd deploy && docker compose up -d --no-build test-app >/dev/null); fi
+  caddy_sync
   if [ "$cur" = "$new" ]; then
     # CRM обновлена, а ИИ-сервер в прошлый раз не собрался — пробуем ещё раз
     if [ -f "$AIPENDING" ]; then (cd deploy && docker compose up -d --build >/dev/null 2>&1) && rm -f "$AIPENDING" && log "ИИ-сервер собран"; fi
@@ -73,30 +113,41 @@ main() {
   prev=$(git rev-parse HEAD)
   git reset -q --hard "$new"
   cd deploy
-  local up=0
-  if docker compose up -d --build; then up=1; rm -f "$AIPENDING"
-  else
-    # Если не собрался ИИ-сервер (профиль ai), CRM всё равно обновляем; ИИ пересоберём в следующий раз
-    log "ОШИБКА полной сборки, обновляю только CRM"
-    if docker compose up -d --build app worker; then up=1; touch "$AIPENDING"; fi
-  fi
-  if [ "$up" = 1 ] && wait_healthy 180; then
-    echo "$new" > "$DEPLOYED"
-    rm -f "$BAD"
-    log "готово"
-  else
-    log "ОШИБКА: новая версия не запустилась, возвращаю ${prev:0:7}"
+  # Образ, который работает сейчас, — запасной: откат без пересборки
+  if docker image inspect fitnes-app:latest >/dev/null 2>&1; then docker tag fitnes-app:latest fitnes-app:prev; fi
+  rollback() {  # $1 — что случилось
+    log "ОШИБКА: $1, возвращаю ${prev:0:7}"
     echo "$new" > "$BAD"
     cd /opt/fitnes && git reset -q --hard "$prev" && cd deploy
-    docker compose up -d --build app worker || true
-    if wait_healthy 180; then
-      notify "🟠 Новая версия ${new:0:7} не запустилась — вернул прошлую (${prev:0:7}), сайт работает. Эту версию больше не ставлю, жду следующую. Журнал: /var/log/fitnes-update.log"
+    if docker image inspect fitnes-app:prev >/dev/null 2>&1; then docker tag fitnes-app:prev fitnes-app:latest; docker tag fitnes-app:prev fitnes-app:test; fi
+    docker compose up -d --no-build app worker || true
+    if has_test; then docker compose up -d --no-build test-app || true; fi
+    if wait_healthy app 180; then
+      notify "🟠 Новая версия ${new:0:7}: $1. Рабочий сайт на прошлой версии (${prev:0:7}) и работает. Эту версию больше не ставлю, жду следующую. Журнал: /var/log/fitnes-update.log"
       log "прошлая версия работает"
     else
-      notify "🔴 Новая версия ${new:0:7} не запустилась, и прошлая тоже не поднялась. Нужен человек: docker compose logs app"
+      notify "🔴 Новая версия ${new:0:7}: $1. Прошлая версия тоже не поднялась — нужен человек: docker compose logs app"
       log "ОШИБКА: прошлая версия тоже не поднялась"
     fi
+    docker image prune -f >/dev/null
+  }
+  if ! docker compose build app $(has_test && echo test-app); then rollback "не собралась"; return 1; fi
+  # 1) Тестовый стенд: новая версия сначала здесь (миграции проверяются на его базе)
+  if has_test; then
+    init_test_stand
+    docker compose up -d --no-build test-db test-app
+    if ! wait_healthy test-app 180; then rollback "не запустилась на тестовом стенде"; return 1; fi
+    log "тестовый стенд обновлён"
   fi
+  # 2) Рабочий сайт и фоновые задачи
+  docker compose up -d --no-build app worker
+  if ! wait_healthy app 180; then rollback "не запустилась на рабочем сайте"; return 1; fi
+  echo "$new" > "$DEPLOYED"
+  rm -f "$BAD"
+  log "готово"
+  # 3) Остальное, в том числе ИИ-сервер (профиль ai): не собрался — CRM уже обновлена, повторим через 5 минут
+  if docker compose up -d --build >/dev/null 2>&1; then rm -f "$AIPENDING"; else log "ИИ-сервер не собрался, повторю"; touch "$AIPENDING"; fi
+  caddy_sync
   docker image prune -f >/dev/null
 }
 main "$@"
