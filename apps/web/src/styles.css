@@ -598,3 +598,8 @@ input[type="checkbox"],input[type="radio"]{accent-color:var(--accent)}
 .club-pick.club-one{cursor:default}
 .tabs:has(> button:only-child){display:none}
 .ro-view input:disabled,.ro-view select:disabled{border-color:transparent;background:transparent;padding-left:0;padding-right:0;color:var(--ink);opacity:1;-webkit-text-fill-color:var(--ink);appearance:none;box-shadow:none}
+/* «Мой день» тренера: кнопка «Отметить» под каждым занятием; список проведённых за месяц */
+.tr-unm{display:grid;gap:6px;justify-items:start;padding:8px 0;border-top:1px solid var(--line)}
+.tr-unm:first-of-type{border-top:0}
+.tr-done{display:grid;grid-template-columns:auto 1fr;gap:2px 10px;padding:8px 0;border-top:1px solid var(--line)}
+.tr-done .small{grid-column:2}

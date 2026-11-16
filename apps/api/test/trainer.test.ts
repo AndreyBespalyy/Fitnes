@@ -73,6 +73,11 @@ test('стол тренера: занятия, окна, клиенты с ос�
   assert.match(r.reason, /осталось 1 занятие/);
   assert.ok(d2.earnings.totalKop >= 100000, JSON.stringify(d2.earnings));
   assert.equal(d2.done.personal, 1);
+  // список проведённых за месяц: само занятие и кто пришёл
+  const dl = d2.doneList.find((x: { id: string }) => x.id === s0);
+  assert.ok(dl, JSON.stringify(d2.doneList));
+  assert.equal(dl.attended, 1);
+  assert.ok(dl.clients);
   // тренер предложил, клиент согласен — менеджеру задача
   const o = await req('POST', '/api/trainer/offers', 'a.kim', { clubId: centr, personId: p.personId, membershipId: p.membershipId, result: 'agreed', note: 'хочет ещё 10' });
   assert.equal(o.statusCode, 200, o.body);
