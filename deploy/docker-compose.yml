@@ -12,11 +12,15 @@ services:
       test: ["CMD-SHELL", "pg_isready -U postgres"]
       interval: 5s
       retries: 20
+  # Сайт и API. Фоновые задачи (касса, автосписания, рассылки, ИИ, push, обзоры) — отдельный сервис worker ниже,
+  # чтобы тяжёлый пересчёт не тормозил ресепшн, а перезапуск сайта не прерывал списаний (п. 11 списка улучшений)
   app:
     build: ..
+    image: fitnes-app
     restart: unless-stopped
     env_file: .env
     environment:
+      APP_ROLE: web
       ADMIN_DATABASE_URL: postgres://postgres:${POSTGRES_PASSWORD}@db:5432/postgres
       OWNER_DATABASE_URL: postgres://fitnes_owner:${DB_OWNER_PASSWORD}@db:5432/fitnes
       DATABASE_URL: postgres://fitnes_app:${DB_APP_PASSWORD}@db:5432/fitnes
@@ -29,6 +33,28 @@ services:
     depends_on:
       db:
         condition: service_healthy
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      start_period: 180s
+      retries: 6
+  worker:
+    image: fitnes-app
+    pull_policy: never
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      APP_ROLE: worker
+      OWNER_DATABASE_URL: postgres://fitnes_owner:${DB_OWNER_PASSWORD}@db:5432/fitnes
+      DATABASE_URL: postgres://fitnes_app:${DB_APP_PASSWORD}@db:5432/fitnes
+    volumes:
+      - storage:/data/storage
+    # Запуск после сайта: сайт применяет миграции базы
+    depends_on:
+      app:
+        condition: service_healthy
+    stop_grace_period: 30s
   caddy:
     image: caddy:2
     restart: unless-stopped

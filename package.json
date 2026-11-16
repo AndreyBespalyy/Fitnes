@@ -9,7 +9,7 @@
     "db:seed": "npm run db:seed -w apps/api",
     "db:reset": "npm run db:reset -w apps/api",
     "dev": "concurrently -n api,web -c cyan,magenta \"npm run dev -w apps/api\" \"npm run dev -w apps/web\"",
-    "build": "npm run build -w apps/web",
+    "build": "npm run build -w apps/web && npm run build -w apps/api",
     "start": "npm run start -w apps/api",
     "test": "npm test -w apps/api",
     "typecheck": "npm run typecheck -w apps/api && npm run typecheck -w apps/web"
