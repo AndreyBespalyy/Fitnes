@@ -46,3 +46,12 @@
 
 Перезапустить только сайт: `docker compose restart app` (списания и рассылки не прерываются). Журнал фоновых задач: `docker compose logs -f worker`.
 Команды обслуживания в контейнере те же: `docker compose exec app npm run platform -w apps/api -- contract show`.
+
+## Безопасное автообновление (с 16.11.2026)
+
+Таймер запускает `autoupdate.sh`, вся логика — в `update.sh`:
+- ставится только версия из ветки `deploy`: GitHub сдвигает её после зелёных автотестов (`.github/workflows/ci.yml`); пока ветки нет — `main`;
+- перед версией с новыми миграциями — резервная копия; не получилась — обновление откладывается;
+- сайт не ответил за 3 минуты — возвращается прошлая версия, неудачная больше не ставится (`/opt/fitnes-bad`);
+- оповещения — `notify.sh` (строки `ALERT_TELEGRAM_BOT_TOKEN` и `ALERT_TELEGRAM_CHAT_ID` в `.env`), проверка сайта и диска каждые 5 минут — `healthcheck.sh`.
+`UPDATE_BRANCH=main` в `.env` — ставить сразу из main, не дожидаясь проверок.
