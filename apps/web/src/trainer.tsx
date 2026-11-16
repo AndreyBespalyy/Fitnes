@@ -13,7 +13,7 @@ type Desk = {
   days: { day: string; shifts: { from: string; to: string }[]; windows: { from: string; to: string }[]; sessions: Session[] }[];
   unmarked: { id: string; typeName: string; at: string }[]; clients: Client[]; renew: Client[];
   earnings: { month: string; items: { code: string; title: string; basis: string; amountKop: number }[]; totalKop: number } | null;
-  done: { personal: number; group: number }; offers: { n: number; agreed: number; renewed: number };
+  done: { personal: number; group: number }; doneList?: { id: string; typeName: string; kind: string; at: string; clients: string | null; attended: number }[]; offers: { n: number; agreed: number; renewed: number };
 };
 const rub = (k: number) => `${Math.round(k / 100).toLocaleString('ru-RU')} ₽`;
 const WD = ['вс', 'пн', 'вт', 'ср', 'чт', 'пт', 'сб'];
@@ -32,6 +32,7 @@ export function TrainerPage({ me, clubs, clubId, openPerson }: { me: Me; clubs: 
   const [trainers, setTrainers] = useState<{ id: string; name: string }[]>([]);
   const [d, setD] = useState<Desk | null>(null);
   const [mark, setMark] = useState<string | null>(null);
+  const [showDone, setShowDone] = useState(false);
   const [err, setErr] = useState('');
   const manager = can(me, 'schedule.manage');
   const load = () => club && api<Desk>('GET', `/api/trainer/desk?clubId=${club}${date ? `&date=${date}` : ''}${trainerId ? `&trainerId=${trainerId}` : ''}`).then(setD).catch((x) => setErr(errText(x)));
@@ -60,12 +61,22 @@ export function TrainerPage({ me, clubs, clubId, openPerson }: { me: Me; clubs: 
       {d.unmarked.length > 0 && (
         <div className="card" style={{ display: 'grid', gap: 6, borderColor: 'var(--warn, #d97706)' }}>
           <b>Отметьте прошедшие занятия — без отметки они не попадут в зарплату</b>
-          {d.unmarked.map((u) => <div key={u.id} className="row between"><span>{u.at} · {u.typeName}</span><button className="btn sm pri" onClick={() => setMark(u.id)}>Отметить</button></div>)}
+          {/* Кнопка «Отметить» под каждым занятием, одинаково (замечание №21) */}
+          {d.unmarked.map((u) => <div key={u.id} className="tr-unm"><span>{u.at} · {u.typeName}</span><button className="btn sm pri" onClick={() => setMark(u.id)}>Отметить</button></div>)}
         </div>)}
       {mark && <MarkSession id={mark} onDone={() => { setMark(null); load(); }} />}
 
       <div className="kpis">
-        <div className="card kpi-c"><span className="lbl">Проведено в этом месяце</span><b className="num">{d.done.personal + d.done.group}</b><span className="small muted">персональных {d.done.personal}, групповых {d.done.group}</span></div>
+        <div className="card kpi-c click" role="button" tabIndex={0} aria-expanded={showDone} onClick={() => setShowDone(!showDone)}
+          onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setShowDone(!showDone); } }}>
+          <span className="lbl">Проведено в этом месяце</span><b className="num">{d.done.personal + d.done.group}</b><span className="small muted">персональных {d.done.personal}, групповых {d.done.group}</span><span className="go" aria-hidden>{showDone ? '▴' : '›'}</span></div>
+        {showDone && (
+          <div className="card" style={{ display: 'grid', gap: 6, gridColumn: '1 / -1' }}>
+            <div className="row between"><h2 style={{ margin: 0 }}>Проведённые занятия за месяц</h2><button className="btn sm" onClick={() => setShowDone(false)}>Свернуть</button></div>
+            {!d.doneList?.length && <p className="muted" style={{ margin: 0 }}>В этом месяце отмеченных занятий пока нет.</p>}
+            {d.doneList?.map((x) => <div key={x.id} className="tr-done"><b>{x.at}</b><span>{x.typeName}{x.kind === 'personal' && !/ерсонал/.test(x.typeName) ? ' (персональная)' : ''}</span>
+              <span className="small muted">{x.clients ? `пришли: ${x.clients}` : 'никто не отмечен'}{x.attended > 1 ? ` (${x.attended})` : ''}</span></div>)}
+          </div>)}
         <div className="card kpi-c"><span className="lbl">Заработок за месяц</span><b className="num">{d.earnings ? rub(d.earnings.totalKop) : '—'}</b><span className="small muted">{d.earnings ? 'предварительно, до утверждения' : 'схема оплаты не задана'}</span></div>
         <div className="card kpi-c"><span className="lbl">Предложил продлить за 30 дней</span><b className="num">{d.offers.n}</b><span className="small muted">согласились {d.offers.agreed}, купили {d.offers.renewed}</span></div>
       </div>

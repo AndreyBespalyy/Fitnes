@@ -107,11 +107,17 @@ export function trainerRoutes(app: FastifyInstance, pool: pg.Pool) {
       const done = (await db.query(`select count(*) filter (where t.kind = 'personal')::int as personal, count(*) filter (where t.kind = 'group')::int as "group"
         from class_sessions s join class_types t on t.id = s.type_id where s.trainer_id = $1 and s.club_id = $2 and s.status = 'done'
           and to_char(s.starts_at at time zone $4, 'YYYY-MM') = $3`, [trainerId, clubId, month, tz])).rows[0];
+      // Список проведённых за месяц — открывается по нажатию на «Проведено в этом месяце» (замечание №22)
+      const doneList = (await db.query(`select s.id, t.name as "typeName", t.kind, to_char(s.starts_at at time zone $4, 'DD.MM HH24:MI') as at,
+          (select string_agg(p.full_name, ', ' order by p.full_name) from class_bookings b join persons p on p.id = b.person_id where b.session_id = s.id and b.status = 'attended') as clients,
+          (select count(*)::int from class_bookings b where b.session_id = s.id and b.status = 'attended') as attended
+        from class_sessions s join class_types t on t.id = s.type_id where s.trainer_id = $1 and s.club_id = $2 and s.status = 'done'
+          and to_char(s.starts_at at time zone $4, 'YYYY-MM') = $3 order by s.starts_at desc`, [trainerId, clubId, month, tz])).rows;
       const offers = (await db.query(`select count(*)::int as n, count(*) filter (where result = 'agreed')::int as agreed, count(*) filter (where renewed_membership_id is not null)::int as renewed
         from trainer_offers where trainer_id = $1 and club_id = $2 and created_at > now() - interval '30 days'`, [trainerId, clubId])).rows[0];
       const name = (await db.query('select full_name from users where id = $1', [trainerId])).rows[0]?.full_name ?? '';
       return { trainer: { id: trainerId, name }, clubId, today, date, days, unmarked, clients, renew,
-        earnings: line ? { month, items: line.items, totalKop: line.totalKop, estimate: true } : null, done, offers };
+        earnings: line ? { month, items: line.items, totalKop: line.totalKop, estimate: true } : null, done, doneList, offers };
     });
   });
 

@@ -592,3 +592,9 @@ input[type="checkbox"],input[type="radio"]{accent-color:var(--accent)}
 /* Плашка «Вышла новая версия»: открытая давно вкладка предлагает обновиться */
 .upd-bar{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(84px + env(safe-area-inset-bottom));z-index:30;display:flex;gap:12px;align-items:center;padding:10px 12px 10px 16px;border-radius:14px;border:1px solid var(--accent);background:var(--surface);color:var(--ink);font-weight:700;box-shadow:0 10px 30px rgba(0,0,0,.45);max-width:calc(100vw - 32px)}
 @media (min-width:761px){.upd-bar{bottom:24px}}
+
+/* «Мой день» тренера: кнопка «Отметить» под каждым занятием; список проведённых за месяц */
+.tr-unm{display:grid;gap:6px;justify-items:start;padding:8px 0;border-top:1px solid var(--line)}
+.tr-unm:first-of-type{border-top:0}
+.tr-done{display:grid;grid-template-columns:auto 1fr;gap:2px 10px;padding:8px 0;border-top:1px solid var(--line)}
+.tr-done .small{grid-column:2}
