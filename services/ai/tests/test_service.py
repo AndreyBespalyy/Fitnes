@@ -56,7 +56,7 @@ class ServiceTest(unittest.TestCase):
     def test_health_without_token(self):
         r = self.c.get("/health")
         self.assertEqual(r.status_code, 200)
-        self.assertEqual(r.json()["promptVersion"], "summary-v1")
+        self.assertEqual(r.json()["promptVersion"], "summary-v2")
 
     def test_auth_required(self):
         self.assertEqual(self.c.post("/v1/summarize", json={"transcript": {"text": "x"}}).status_code, 401)
