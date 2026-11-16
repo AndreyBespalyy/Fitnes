@@ -64,7 +64,7 @@ healthy() {
 build() {
   if docker compose up -d --build; then return 0; fi
   log "ОШИБКА полной сборки, обновляю только CRM"
-  docker compose up -d --build app && return 2
+  docker compose up -d --build app worker && return 2
   return 1
 }
 
