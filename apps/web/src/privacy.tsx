@@ -315,7 +315,8 @@ export function PersonPrivacy({ me, personId, reload }: { me: Me; personId: stri
 /* ---------- состояние системы ---------- */
 type CheckRow = { scope: string; code: string; status: 'ok' | 'warn' | 'bad'; value: number | null; detail: string; since: string; checkedAt: string; notifiedAt: string | null };
 const CHECK_NAME: Record<string, string> = { db: 'База данных', disk: 'Место на диске', backup: 'Резервная копия', errors: 'Ошибки сервера', memory: 'Память приложения',
-  receipts: 'Чеки в кассу', messages: 'Сообщения клиентам', autopay: 'Автосписания' };
+  receipts: 'Чеки в кассу', messages: 'Сообщения клиентам', autopay: 'Автосписания', offsite: 'Копия вне сервера', restore: 'Проверка восстановления',
+  server_events: 'События сервера' };
 
 export function SystemPage() {
   const [d, setD] = useState<{ checks: CheckRow[]; version: string | null; startedAt: string; operatorAlerts: boolean } | null>(null);
@@ -325,7 +326,7 @@ export function SystemPage() {
   useEffect(() => { load(true); const t = setInterval(() => load(), 60_000); return () => clearInterval(t); }, []);
   const test = async () => {
     try { const r = await api<{ operator: boolean; staff: number }>('POST', '/api/system/test-alert');
-      toast(r.operator || r.staff ? `Проверочное сообщение отправлено${r.operator ? ' в служебный чат' : ''}${r.staff ? ' вам в Telegram' : ''}` : 'Оповещения не настроены: ни служебного чата, ни вашего Telegram'); } catch (x) { setErr(errText(x)); }
+      toast(`Проверочное уведомление отправлено вам в CRM (колокольчик)${r.operator ? ' и в служебный Telegram-чат' : ''}`); } catch (x) { setErr(errText(x)); }
   };
   const ICON = { ok: ['ok', 'в порядке'], warn: ['warn', 'внимание'], bad: ['bad', 'сбой'] } as const;
   const group = (rows: CheckRow[], title: string) => (
@@ -341,8 +342,8 @@ export function SystemPage() {
         <div className="row"><button className="btn sm" disabled={busy} onClick={() => load(true)}>Проверить сейчас</button><button className="btn sm" onClick={test}>Проверить оповещения</button></div>
       </div>
       {err && <div className="err">{err}</div>}
-      <p className="small" style={{ margin: 0, maxWidth: 760 }}>Проверки выполняются раз в минуту. Когда что-то ломается и когда восстанавливается, приходит сообщение в Telegram: о сбоях сервера — в служебный чат
-        {d && !d.operatorAlerts ? ' (пока не настроен: нужен бот и чат, см. инструкцию «Состояние системы»)' : ''}, о сбоях клубов (чеки, автосписания, рассылки) — собственнику и администратору, подключившим Telegram в профиле.</p>
+      <p className="small" style={{ margin: 0, maxWidth: 760 }}>Проверки выполняются раз в минуту. Когда что-то ломается и когда восстанавливается, собственник и администратор получают уведомление в CRM (колокольчик и push в приложении): о сбоях сервера, его обновлениях и откатах, о сбоях клубов (чеки, автосписания, рассылки).
+        {d?.operatorAlerts ? ' Сбои сервера дублируются в служебный Telegram-чат.' : ''}</p>
       {d && <>{group(d.checks.filter((c) => c.scope === 'platform'), 'Сервер')}{group(d.checks.filter((c) => c.scope !== 'platform'), 'Работа клубов')}
         <p className="small">Версия: {d.version ?? 'не указана'} · приложение запущено {dt(d.startedAt)}</p></>}
     </>

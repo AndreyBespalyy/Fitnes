@@ -23,3 +23,8 @@ chmod 600 "$DIR/fitnes-$TS.tar"
 ls -1t "$DIR"/fitnes-*.tar | tail -n +$((KEEP + 1)) | xargs -r rm -f
 date -Is > "$DIR/last-ok"
 echo "$(date -Is) резервная копия готова: $DIR/fitnes-$TS.tar ($(du -h "$DIR/fitnes-$TS.tar" | cut -f1))"
+
+# Копия вне сервера (п. 6 списка улучшений): если в .env заданы OFFSITE_S3_*, копия шифруется паролем
+# OFFSITE_PASSPHRASE (AES-256) и уходит в облачное хранилище S3 (Яндекс Облако, Selectel и т.п.).
+# Пароль храните ещё и вне сервера: без него копию не расшифровать. Подробно: deploy/README.md
+bash ./offsite.sh upload "$DIR/fitnes-$TS.tar" || echo "$(date -Is) копия вне сервера не отправлена (см. выше)"
