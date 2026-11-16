@@ -38,17 +38,19 @@ export const PERMISSIONS = {
   scheduleBook: 'schedule.book',       // запись клиентов на занятия, отметка посещения своих занятий
   retentionManage: 'retention.manage', // возврат бывших клиентов, досрочное продление, опросы клиентов
   supportAnswer: 'support.answer',     // все обращения сети в поддержку, ответы, передача разработчикам
+  dataProtect: 'data.protect',         // защита базы клиентов: пороги, согласование выгрузок, сигналы; согласия и обращения по 152-ФЗ
+  systemMonitor: 'system.monitor',     // состояние системы: проверки, оповещения о сбоях
 } as const;
 
 const P = PERMISSIONS;
 export const ROLE_SEED = [
   { code: 'owner', name: 'Собственник', network_wide: true, sort: 1, permissions: ['*'] },
   { code: 'admin', name: 'Администратор системы', network_wide: true, sort: 2,
-    permissions: [P.clubsView, P.clubsManage, P.staffView, P.staffManage, P.personsView, P.crmViewAll, P.pipelinesManage, P.sourcesManage, P.membershipsView, P.importManage, P.acsManage, P.supportAnswer] },
+    permissions: [P.clubsView, P.clubsManage, P.staffView, P.staffManage, P.personsView, P.crmViewAll, P.pipelinesManage, P.sourcesManage, P.membershipsView, P.importManage, P.acsManage, P.supportAnswer, P.systemMonitor] },
   // Управляющий: всё, что собственник, но только в своём клубе (решение Андрея 10.11.2026).
   // Сетевые действия (создание клубов, общие источники лидов, сетевые роли) проверяются отдельно по ctx.allClubs.
   { code: 'gm', name: 'Управляющий', network_wide: false, sort: 3,
-    permissions: Object.values(P).filter((p) => p !== P.sourcesManage && p !== P.supportAnswer) },
+    permissions: Object.values(P).filter((p) => p !== P.sourcesManage && p !== P.supportAnswer && p !== P.systemMonitor) },
   { code: 'rop', name: 'Руководитель ОП', network_wide: false, sort: 4, permissions: [P.dashView, P.aiReview, P.clubsView, P.staffView, P.personsView, P.leadsCreate, P.crmWork, P.crmViewAll, P.membershipsSell, P.membershipsView, P.contractsSign, P.messagesWork, P.configManage, P.scheduleBook, P.retentionManage] },
   { code: 'manager', name: 'Менеджер ОП', network_wide: false, sort: 5, permissions: [P.clubsView, P.personsView, P.leadsCreate, P.crmWork, P.membershipsSell, P.membershipsView, P.contractsSign, P.messagesWork, P.scheduleBook] },
   { code: 'desk', name: 'Администратор ресепшн', network_wide: false, sort: 6, permissions: [P.clubsView, P.personsView, P.leadsCreate, P.membershipsSell, P.membershipsView, P.membershipsManage, P.contractsSign, P.shiftsWork, P.messagesWork, P.acsWork, P.scheduleBook] },

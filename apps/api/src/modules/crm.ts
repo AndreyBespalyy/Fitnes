@@ -7,6 +7,8 @@ import { audit, withCtx, type Ctx, type Db } from '../db.ts';
 import { badRequest, HttpError, notFound, unauthorized } from '../errors.ts';
 import { PERMISSIONS as P } from '../roles.ts';
 import { routeByShifts } from './staffTime.ts';
+import { trackAccess } from './privacy.ts';
+import { recordConsent } from './pd.ts';
 
 /** Телефон в формат +7XXXXXXXXXX; null, если это не российский мобильный или городской номер. */
 export function normalizePhone(raw: string | undefined | null): string | null {
@@ -210,7 +212,7 @@ export function crmRoutes(app: FastifyInstance, pool: pg.Pool) {
     if (!token) throw unauthorized('Нужен ключ источника');
     const src = (await pool.query('select * from auth_lead_source($1)', [createHash('sha256').update(token).digest('hex')])).rows[0];
     if (!src) throw unauthorized('Ключ источника не найден или отключён');
-    const b = (req.body ?? {}) as LeadInput & { test?: boolean };
+    const b = (req.body ?? {}) as LeadInput & { test?: boolean; consents?: { pd?: boolean; marketing?: boolean } };
     // AT24: проверочная заявка — данные проверяются, но клиент, сделка, задача и сообщения не создаются, в отчёты ничего не попадает
     if (b.test === true) {
       return withCtx(pool, { tenantId: src.tenant_id, allClubs: true, clubIds: [] }, async (db) => {
@@ -221,8 +223,16 @@ export function crmRoutes(app: FastifyInstance, pool: pg.Pool) {
         return { test: true, ok: true, message: 'Проверочная заявка принята. Клиент и сделка не созданы' };
       });
     }
-    const res = await withCtx(pool, { tenantId: src.tenant_id, allClubs: true, clubIds: [] }, (db) =>
-      createLead(db, { tenantId: src.tenant_id, userId: null, ip: req.ip }, { ...b, sourceId: src.source_id, assignedTo: undefined }));
+    const res = await withCtx(pool, { tenantId: src.tenant_id, allClubs: true, clubIds: [] }, async (db) => {
+      const actor = { tenantId: src.tenant_id, userId: null, ip: req.ip };
+      const r = await createLead(db, actor, { ...b, sourceId: src.source_id, assignedTo: undefined });
+      // Галочки согласий в форме сайта (152-ФЗ и реклама): сохраняются с действующей версией текста
+      if (!r.idempotent && b.consents && typeof b.consents === 'object') {
+        if (b.consents.pd === true) await recordConsent(db, actor, r.personId, { kind: 'pd', granted: true, channel: 'site', note: 'Форма заявки на сайте' });
+        if (typeof b.consents.marketing === 'boolean') await recordConsent(db, actor, r.personId, { kind: 'marketing', granted: b.consents.marketing, channel: 'site', note: 'Форма заявки на сайте' });
+      }
+      return r;
+    });
     reply.code(res.idempotent ? 200 : 201);
     return { leadId: res.leadId, duplicate: res.duplicate };
   });
@@ -231,6 +241,7 @@ export function crmRoutes(app: FastifyInstance, pool: pg.Pool) {
   app.get('/api/persons/:id', async (req) => {
     const ctx = requirePerm(req, P.personsView);
     const { id } = req.params as { id: string };
+    await trackAccess(pool, ctx, 'card', { personId: id });
     return withCtx(pool, ctx, async (db) => {
       const person = (await db.query(
         `select p.id, p.full_name as "fullName", p.birth_date as "birthDate", p.segment, p.home_club_id as "homeClubId", c.name as "homeClubName", p.created_at as "createdAt",

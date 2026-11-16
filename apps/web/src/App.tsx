@@ -64,6 +64,8 @@ const SalesOpsPage = page(() => import('./salesOps.tsx'), 'SalesOpsPage');
 const ProcessesPage = page(() => import('./processes.tsx'), 'ProcessesPage');
 const WeeklyPage = page(() => import('./weekly.tsx'), 'WeeklyPage');
 const TeamPage = page(() => import('./team.tsx'), 'TeamPage');
+const PrivacyPage = page(() => import('./privacy.tsx'), 'PrivacyPage');
+const SystemPage = page(() => import('./privacy.tsx'), 'SystemPage');
 const TestNotesPage = page(() => import('./testNotes.tsx'), 'TestNotesPage');
 
 
@@ -132,7 +134,7 @@ function ChangePassword({ me, forced, onDone, onLogout }: { me: Me; forced?: boo
   );
 }
 
-type Tab = 'dash' | 'hot' | 'calls' | 'leads' | 'board' | 'tasks' | 'home' | 'clubs' | 'tariffs' | 'contracts' | 'site' | 'fiscal' | 'finance' | 'import' | 'chats' | 'access' | 'messaging' | 'pipelines' | 'staff' | 'stafftime' | 'config' | 'reviews' | 'onboarding' | 'help' | 'schedule' | 'retention' | 'shop' | 'corp' | 'trainer' | 'desk' | 'load' | 'cohorts' | 'pnl' | 'usage' | 'intake' | 'sales' | 'processes' | 'weekly' | 'team' | 'notes' | 'profile' | 'problems' | 'payouts';
+type Tab = 'dash' | 'hot' | 'calls' | 'leads' | 'board' | 'tasks' | 'home' | 'clubs' | 'tariffs' | 'contracts' | 'site' | 'fiscal' | 'finance' | 'import' | 'chats' | 'access' | 'messaging' | 'pipelines' | 'staff' | 'stafftime' | 'config' | 'reviews' | 'onboarding' | 'privacy' | 'system' | 'help' | 'schedule' | 'retention' | 'shop' | 'corp' | 'trainer' | 'desk' | 'load' | 'cohorts' | 'pnl' | 'usage' | 'intake' | 'sales' | 'processes' | 'weekly' | 'team' | 'notes' | 'profile' | 'problems' | 'payouts';
 
 function Shell({ me, onLogout }: { me: Me; onLogout: () => void }) {
   const firstTab: Tab = 'dash';
@@ -245,6 +247,8 @@ function Shell({ me, onLogout }: { me: Me; onLogout: () => void }) {
     ['onboarding', 'Подключение клубов', can(me, 'clubs.manage')],
     ['notes', 'Журнал замечаний', can(me, '*')],
     ['usage', 'Использование', me.allClubs && (can(me, '*') || me.roles.some((r) => r.code === 'admin'))],
+    ['privacy', 'Защита данных', can(me, 'data.protect')],
+    ['system', 'Состояние системы', can(me, 'system.monitor')],
     ['help', 'Помощь', true],
     ['profile', 'Профиль', true],
   ];
@@ -325,6 +329,8 @@ function Shell({ me, onLogout }: { me: Me; onLogout: () => void }) {
         {tab === 'schedule' && <SchedulePage me={me} clubs={clubs} clubId={clubId} openPerson={openPerson} />}
         {tab === 'retention' && <RetentionPage me={me} clubs={clubs} clubId={clubId} openPerson={openPerson} />}
         {tab === 'onboarding' && <OnboardingPage me={me} clubId={clubId} go={(t) => setTab(t as Tab)} reloadClubs={reloadClubs} />}
+        {tab === 'privacy' && <PrivacyPage me={me} clubs={clubs} clubId={clubId} openPerson={openPerson} />}
+        {tab === 'system' && <SystemPage />}
         {tab === 'help' && <HelpPage me={me} clubs={clubs} clubId={clubId} page={tab} />}
         {tab === 'reviews' && <ReviewsPage me={me} clubs={clubs} clubId={clubId} openPerson={openPerson} />}
         {tab === 'notes' && <TestNotesPage me={me} />}

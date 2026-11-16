@@ -10,6 +10,7 @@ import { can, requirePerm } from '../auth.ts';
 import { audit, withCtx, type Ctx, type Db } from '../db.ts';
 import { badRequest, notFound } from '../errors.ts';
 import { PERMISSIONS as P } from '../roles.ts';
+import { guardExport } from './privacy.ts';
 import { aiHealth, aiSummarize, aiTranscribe, editRatio, MINOR_EDIT, normalizeSummary, summaryText, type AiConfig, type Summary, type Transcript } from '../lib/aiClient.ts';
 import { saveFile } from './contracts.ts';
 import { maskPhone, normalizePhone } from './crm.ts';
@@ -502,7 +503,6 @@ export function aiRoutes(app: FastifyInstance, pool: pg.Pool, storage: string, a
          from call_summaries s join calls c on c.id = s.call_id join clubs cl on cl.id = c.club_id left join users u on u.id = c.user_id left join persons p on p.id = c.person_id
          where ($1::uuid is null or c.club_id = $1) and ($2::date is null or c.started_at >= $2::date) and ($3::date is null or c.started_at < $3::date + 1)
          order by c.started_at desc limit 5000`, [q.clubId || null, q.from || null, q.to || null])).rows;
-      await audit(db, ctx, 'report.exported', 'report', null, null, { report: 'ai_summaries', ...q });
       return r;
     });
     const ST: Record<string, string> = { draft: 'ждёт менеджера', needs_manual: 'нужен ручной итог', confirmed: 'подтверждено', auto_applied: 'перенесено автоматически', manual: 'написано вручную' };
@@ -517,6 +517,9 @@ export function aiRoutes(app: FastifyInstance, pool: pg.Pool, storage: string, a
         r.confidence === null ? null : Math.round(Number(r.confidence) * 100), r.engine,
       ]),
     };
+    // В резюме имена клиентов и содержание разговоров: сверх лимита клуба — только с согласованием (защита базы)
+    const sign = await guardExport(pool, ctx, { report: 'ai_summaries', title: 'Резюме звонков', clubId: q.clubId || null, params: { ...q }, rows: t.rows.length, format: q.format === 'xlsx' ? 'xlsx' : 'csv' });
+    t.rows.push([], [sign]);
     return sendTable(reply, t, q.format === 'xlsx' ? 'xlsx' : 'csv', 'Резюме звонков');
   });
 }
