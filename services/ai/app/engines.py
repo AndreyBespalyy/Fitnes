@@ -165,7 +165,8 @@ def summarize(llm, transcript: dict, ctx: dict) -> dict:
         timezone=ctx.get("timezone") or "Europe/Moscow", transcript=text[:24000],
     )
     out = llm.complete(SYSTEM, user)
-    if not out.get("sufficient") or not str(out.get("essence", "")).strip():
+    # Тема не важна (решение 16.11.2026): если модель написала суть, итог берём, даже когда она отметила sufficient = false
+    if not str(out.get("essence", "")).strip():
         return {"summary": None, "confidence": None, "engine": llm.engine, "reason": out.get("reason") or "Данных недостаточно"}
     conf = float(out.get("confidence") or 0)
     asr = transcript.get("asrConfidence")
