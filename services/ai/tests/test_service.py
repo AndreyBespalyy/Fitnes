@@ -56,7 +56,7 @@ class ServiceTest(unittest.TestCase):
     def test_health_without_token(self):
         r = self.c.get("/health")
         self.assertEqual(r.status_code, 200)
-        self.assertEqual(r.json()["promptVersion"], "summary-v1")
+        self.assertEqual(r.json()["promptVersion"], "summary-v3")
 
     def test_auth_required(self):
         self.assertEqual(self.c.post("/v1/summarize", json={"transcript": {"text": "x"}}).status_code, 401)
@@ -87,10 +87,14 @@ class ServiceTest(unittest.TestCase):
         self.assertIn("Центр", app.state.llm.seen)
 
     def test_insufficient(self):
-        app.state.llm = FakeLLM({**GOOD, "sufficient": False, "reason": "Разговор не о клубе"})
+        app.state.llm = FakeLLM({**GOOD, "essence": "", "sufficient": False, "reason": "Только шум"})
         r = self.c.post("/v1/summarize", json={"transcript": {"text": " ".join(["слово"] * 20)}}, headers=self.h).json()
         self.assertIsNone(r["summary"])
-        self.assertEqual(r["reason"], "Разговор не о клубе")
+        self.assertEqual(r["reason"], "Только шум")
+        # Тема не о клубе: модель отметила sufficient = false, но суть написала — итог всё равно нужен
+        app.state.llm = FakeLLM({**GOOD, "essence": "Обсуждали объявления о продаже машин", "sufficient": False, "reason": "не о клубе"})
+        r = self.c.post("/v1/summarize", json={"transcript": {"text": " ".join(["слово"] * 20)}}, headers=self.h).json()
+        self.assertEqual(r["summary"]["essence"], "Обсуждали объявления о продаже машин")
         short = self.c.post("/v1/summarize", json={"transcript": {"text": "Алло, перезвоню"}}, headers=self.h).json()
         self.assertIsNone(short["summary"])
 

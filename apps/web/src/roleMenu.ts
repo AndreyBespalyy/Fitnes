@@ -9,17 +9,17 @@ const ALWAYS = ['dash', 'team', 'help', 'profile'];
 export const ROLE_MENU: Record<string, string[]> = {
   // Собственник: только отчёты — финансы, посещаемость, выплаты, проблемные моменты. Без операционки.
   // Тарифы и настройки клуба — отдельным блоком «Настройки» внизу меню.
-  owner: ['problems', 'finance', 'pnl', 'load', 'cohorts', 'payouts', 'weekly', 'reviews', 'staff', 'tariffs', 'config', 'notes', 'usage'],
+  owner: ['problems', 'finance', 'pnl', 'load', 'cohorts', 'payouts', 'weekly', 'reviews', 'staff', 'tariffs', 'config', 'privacy', 'system', 'notes', 'usage'],
   // Управляющий: отчёты собственника по своему клубу + управление клубом. Без сетевых разделов и рабочих экранов сотрудников.
   gm: ['problems', 'finance', 'pnl', 'load', 'cohorts', 'weekly', 'reviews', 'staff', 'sales', 'calls', 'tasks', 'processes', 'schedule', 'home',
-    'retention', 'fiscal', 'tariffs', 'shop', 'contracts', 'site', 'messaging', 'stafftime', 'config', 'corp', 'access'],
+    'retention', 'fiscal', 'tariffs', 'shop', 'contracts', 'site', 'messaging', 'stafftime', 'config', 'corp', 'access', 'privacy'],
   rop: ['tasks', 'processes', 'weekly', 'hot', 'calls', 'sales', 'schedule', 'leads', 'board', 'chats', 'home', 'tariffs', 'shop', 'corp', 'load', 'cohorts',
     'staff', 'retention', 'reviews', 'stafftime'],
   manager: ['tasks', 'processes', 'hot', 'calls', 'sales', 'schedule', 'leads', 'board', 'chats', 'home', 'tariffs', 'shop', 'corp', 'reviews', 'stafftime'],
   desk: ['desk', 'schedule', 'leads', 'chats', 'home', 'access', 'tariffs', 'shop', 'finance', 'fiscal', 'stafftime'],
   fin: ['problems', 'finance', 'pnl', 'cohorts', 'payouts', 'weekly', 'home', 'corp', 'import', 'staff', 'reviews', 'stafftime'],
   trainer: ['trainer', 'schedule', 'home', 'stafftime'],
-  admin: ['clubs', 'onboarding', 'staff', 'stafftime', 'pipelines', 'intake', 'import', 'access', 'usage'],
+  admin: ['clubs', 'onboarding', 'staff', 'stafftime', 'pipelines', 'intake', 'import', 'access', 'usage', 'system'],
 };
 
 /** Показывать ли раздел в меню этой роли (право на раздел проверяется отдельно). */

@@ -14,6 +14,7 @@ import { PersonCards } from './payments.tsx';
 import { CallDialog, PersonCalls } from './calls.tsx';
 import { PersonCallFlags, TakeLeadButton } from './salesOps.tsx';
 import { SituationButton } from './agent.tsx';
+import { PersonPrivacy } from './privacy.tsx';
 
 type Stage = { id: string; name: string; kind: 'open' | 'won' | 'lost'; openCount?: number };
 type Pipeline = { id: string; clubId: string; name: string; purpose: string; isDefaultForLeads: boolean; isActive: boolean; stages: Stage[] };
@@ -279,6 +280,7 @@ export function PersonCard({ me, id, onClose }: { me: Me; id: string; onClose: (
           {can(me, 'memberships.view') && <DepositBlock personId={card.person.id} clubId={card.person.homeClubId} />}
           {can(me, 'memberships.view') && <LoyaltyBlock personId={card.person.id} clubId={card.person.homeClubId} />}
           {can(me, 'persons.view') && <ReferralBlock me={me} personId={card.person.id} clubId={card.person.homeClubId} />}
+          <PersonPrivacy me={me} personId={card.person.id} reload={reload} />
           {(can(me, 'acs.work') || can(me, 'acs.manage')) && <PersonPasses me={me} personId={card.person.id} clubId={card.person.homeClubId ?? ''} />}
 
           {card.opportunities.map((o) => (
