@@ -9,7 +9,7 @@ import type pg from 'pg';
 import { requirePerm } from '../auth.ts';
 import { audit, withCtx } from '../db.ts';
 import { PERMISSIONS as P } from '../roles.ts';
-import { notifyStaffSafe } from '../lib/staffNotify.ts';
+import { notify } from './salesOps.ts';
 
 export type Status = 'ok' | 'warn' | 'bad';
 export type Check = { code: string; title: string; status: Status; value: number | null; detail: string; scope: string };
@@ -147,16 +147,41 @@ export async function processChecks(pool: pg.Pool, checks: Check[], opts: Monito
       [c.scope, c.code, c.status, c.value, c.detail, notify ? new Date() : null, notify]);
     if (notify) notes.push({ scope: c.scope, text: c.status === 'ok' ? `${ICON.ok} Восстановлено: ${c.title} — ${c.detail}` : `${ICON.bad} ${c.title}: ${c.detail}` });
   }
+  // События сервера (обновление, откат, копии): deploy/notify.sh дописывает строки в server-events в папке копий
+  if (opts.backupDir) for (const text of await newServerEvents(pool, opts.backupDir)) notes.push({ scope: 'platform', text });
+  if (!notes.length) return notes;
+  // Оповещения — внутри CRM (решение Андрея 12.11.2026: рабочая связь в CRM, а не в Telegram): колокольчик и push
+  // собственнику и администратору. Сбои сервера — всем сетям, сбои клубов — своей сети.
   const platform = notes.filter((n) => n.scope === 'platform').map((n) => n.text);
-  if (platform.length) await sendOperatorAlert(`${host(env)}\n${platform.join('\n')}`, opts);
-  for (const scope of [...new Set(notes.filter((n) => n.scope !== 'platform').map((n) => n.scope))]) {
-    const text = notes.filter((n) => n.scope === scope).map((n) => n.text).join('\n');
-    const ids = await withCtx(pool, { tenantId: scope, allClubs: true, clubIds: [] }, async (db) => (await db.query(
-      `select distinct a.user_id from user_assignments a join users u on u.id = a.user_id where a.role_code in ('owner', 'admin') and u.status = 'active'`)).rows.map((r) => r.user_id as string));
-    await notifyStaffSafe(pool, scope, ids, `Состояние системы\n${text}\nПодробности — в разделе «Состояние системы»`, opts.fetch ?? fetch);
-    await sendOperatorAlert(`${host(env)} · сеть ${scope.slice(0, 8)}\n${text}`, opts);
+  const tenants = (await pool.query('select tenant_id from monitor_tenant_counts()')).rows.map((r) => r.tenant_id as string);
+  for (const tenantId of tenants) {
+    const own = notes.filter((n) => n.scope === tenantId).map((n) => n.text);
+    const lines = [...platform, ...own];
+    if (!lines.length) continue;
+    await withCtx(pool, { tenantId, allClubs: true, clubIds: [] }, async (db) => {
+      const ids = (await db.query(`select distinct a.user_id from user_assignments a join users u on u.id = a.user_id
+        where a.role_code in ('owner', 'admin') and u.status = 'active'`)).rows.map((r) => r.user_id as string);
+      const bad = lines.some((l) => !l.startsWith(ICON.ok));
+      await notify(db, null, ids, 'system', bad ? 'Сбой в работе системы' : 'Работа системы восстановлена', lines.join('\n'), { tab: 'system' });
+    });
   }
+  // Служебный Telegram-чат — только если его включили строками ALERT_TELEGRAM_* в deploy/.env (по решению Андрея)
+  if (platform.length) await sendOperatorAlert(`${host(env)}\n${platform.join('\n')}`, opts);
   return notes;
+}
+
+/** Новые строки файла server-events (формат: «время<TAB>текст»); сколько прочитано — в monitor_state */
+async function newServerEvents(pool: pg.Pool, dir: string): Promise<string[]> {
+  let lines: string[];
+  try { lines = readFileSync(join(dir, 'server-events'), 'utf8').split('\n').filter(Boolean); } catch { return []; }
+  const done = Number((await pool.query(`select value from monitor_state where scope = 'platform' and check_code = 'server_events'`)).rows[0]?.value ?? -1);
+  // Первый запуск: старые события не рассылаем; файл начали заново — читаем с начала
+  const from = done < 0 ? lines.length : done > lines.length ? 0 : done;
+  const last = lines.at(-1)?.split('\t').pop() ?? '';
+  await pool.query(`insert into monitor_state(scope, check_code, status, value, detail) values ('platform', 'server_events', 'ok', $1, $2)
+    on conflict (scope, check_code) do update set value = excluded.value, detail = excluded.detail, checked_at = now()`,
+    [lines.length, last ? `последнее: ${last}` : 'событий нет']);
+  return lines.slice(from).map((l) => l.split('\t').slice(1).join('\t') || l);
 }
 
 export function startMonitorWorker(pool: pg.Pool, opts: MonitorOpts, everyMs = 60_000) {
@@ -191,7 +216,7 @@ export function monitorRoutes(app: FastifyInstance, pool: pg.Pool, opts: Monitor
     const ctx = requirePerm(req, P.systemMonitor);
     const text = `${ICON.ok} Проверка оповещений: сообщение из раздела «Состояние системы». Если вы его видите, оповещения о сбоях работают`;
     const operator = await sendOperatorAlert(`${host(opts.env ?? process.env)}\n${text}`, opts);
-    const staff = await notifyStaffSafe(pool, ctx.tenantId, [ctx.userId], text, opts.fetch ?? fetch);
+    const staff = await withCtx(pool, ctx, (db) => notify(db, null, [ctx.userId], 'system', 'Проверка оповещений', text, { tab: 'system' }));
     await withCtx(pool, ctx, (db) => audit(db, ctx, 'system.test_alert', 'user', ctx.userId, null, { operator, staff }));
     return { operator, staff };
   });

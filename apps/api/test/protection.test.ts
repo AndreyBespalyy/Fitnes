@@ -251,6 +251,19 @@ test('состояние системы: доступ, проверки, опо�
   writeFileSync(join(backupDir, 'last-ok'), '');
   await processChecks(t.pool, await runChecks(t.pool, opts), opts);
   assert.ok(sent.some((s) => s.includes('Восстановлено: Резервная копия')), 'сообщение о восстановлении');
+  // Оповещения — в CRM: администратору в колокольчик
+  const bell = () => req('GET', '/api/notifications', 'i.kotova').then((r) => r.json().items as { kind: string; title: string; body: string }[]);
+  const items = await bell();
+  assert.ok(items.some((i) => i.kind === 'system' && i.title === 'Сбой в работе системы' && i.body.includes('Резервная копия: ни одной успешной копии')), 'сбой в CRM');
+  assert.ok(items.some((i) => i.kind === 'system' && i.title === 'Работа системы восстановлена'), 'восстановление в CRM');
+  // События сервера (deploy/notify.sh): старые при первом чтении не рассылаются, новые — в CRM
+  writeFileSync(join(backupDir, 'server-events'), '2026-11-16T10:00:00+00:00\tстарое событие\n');
+  await processChecks(t.pool, await runChecks(t.pool, opts), opts);
+  writeFileSync(join(backupDir, 'server-events'), '2026-11-16T10:00:00+00:00\tстарое событие\n2026-11-16T10:05:00+00:00\t🟠 Новая версия abc1234 не запустилась\n');
+  await processChecks(t.pool, await runChecks(t.pool, opts), opts);
+  const items2 = await bell();
+  assert.ok(items2.some((i) => i.body?.includes('Новая версия abc1234 не запустилась')), 'событие сервера в CRM');
+  assert.ok(!items2.some((i) => i.body?.includes('старое событие')), 'старое событие не рассылается');
   const after = (await req('GET', '/api/system/status', 'i.kotova')).json();
   assert.equal(after.checks.find((c: { code: string; scope: string }) => c.code === 'backup' && c.scope === 'platform').status, 'ok');
 });
