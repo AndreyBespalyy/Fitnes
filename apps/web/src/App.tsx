@@ -3,6 +3,7 @@ import { api, ApiError, can, clearDeviceData, setNavIntent, type Go, MODEL, MODE
 import { errText, toast as alertOk } from './ui.ts';
 import { ReportProblem } from './report.tsx';
 import { CommandPalette, SideNav } from './nav.tsx';
+import { UpdateBanner } from './version.tsx';
 import { OfflineBar, ProfilePage, registerServiceWorker, StaffSessions } from './mobile.tsx';
 import { NotificationsBell } from './notifications.tsx';
 import { AiButton, TeamButton } from './team/button.tsx';
@@ -289,6 +290,7 @@ function Shell({ me, onLogout }: { me: Me; onLogout: () => void }) {
       </header>
       <main className="wrap">
         <OfflineBar />
+        <UpdateBanner />
         <Suspense fallback={<p className="muted">Загрузка…</p>}>
         {tab === 'dash' && <DashPage me={me} clubs={clubs} clubId={clubId} openPerson={openPerson} go={go} canGo={(t) => allowed.some((v) => v[0] === t)} pickClub={setClubId} />}
         {tab === 'hot' && <HotPage me={me} clubs={clubs} clubId={clubId} openPerson={openPerson} />}

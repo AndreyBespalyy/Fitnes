@@ -56,13 +56,9 @@ export function DashPage({ me, clubs, clubId, openPerson, go: goTo, canGo, pickC
         </div>
         {view === 'desk' && (dashView || can(me, 'crm.work')) && <div className="row small" style={{ gap: 6, flexWrap: 'wrap' }}>
           <label className="row">Месяц плана <input type="month" value={month} onChange={(e) => e.target.value && setMonth(e.target.value)} style={{ width: 'auto' }} /></label>
-          <label className="row">Период <select value="" onChange={(e) => {
-            const t = todayIso(); const v = e.target.value;
-            if (v === 'today') setRange({ from: t, to: t }); if (v === 'week') setRange({ from: addD(t, -6), to: t });
-            if (v === 'month') setRange({ from: `${t.slice(0, 7)}-01`, to: t }); if (v === '30') setRange({ from: addD(t, -29), to: t });
-          }} style={{ width: 'auto' }}><option value="">{d2(range.from)} — {d2(range.to)}</option><option value="today">Сегодня</option><option value="week">7 дней</option><option value="month">С начала месяца</option><option value="30">30 дней</option></select></label>
-          <input type="date" aria-label="С" value={range.from} onChange={(e) => e.target.value && setRange({ ...range, from: e.target.value })} style={{ width: 'auto' }} />
-          <input type="date" aria-label="По" value={range.to} onChange={(e) => e.target.value && setRange({ ...range, to: e.target.value })} style={{ width: 'auto' }} />
+          {/* Только «с — по», без готовых периодов (замечание №20) */}
+          <label className="row">С <input type="date" value={range.from} max={range.to} onChange={(e) => e.target.value && setRange({ ...range, from: e.target.value })} style={{ width: 'auto' }} /></label>
+          <label className="row">По <input type="date" value={range.to} min={range.from} onChange={(e) => e.target.value && setRange({ ...range, to: e.target.value })} style={{ width: 'auto' }} /></label>
         </div>}
       </div>
       {drill && <PlanDrill clubId={drill.clubId} month={drill.month} category={drill.category} userId={drill.userId} onClose={() => setDrill(null)} openPerson={openPerson} />}
