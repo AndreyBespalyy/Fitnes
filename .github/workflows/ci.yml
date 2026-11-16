@@ -3,6 +3,8 @@ on:
   push:
     branches: [main]
   pull_request:
+permissions:
+  contents: write
 jobs:
   test:
     runs-on: ubuntu-latest
@@ -31,3 +33,7 @@ jobs:
       - run: npm run db:setup
       - run: npm test
       - run: npm run build
+      # Сервер ставит только проверенные версии: после зелёных проверок main попадает в ветку deploy (deploy/autoupdate.sh)
+      - name: Отдать проверенную версию серверу
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        run: git push --force origin HEAD:refs/heads/deploy
