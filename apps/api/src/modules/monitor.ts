@@ -2,7 +2,7 @@
 // ошибки сервера, очереди чеков и сообщений, автосписания. О переходе в «плохо» и о восстановлении сообщаем в Telegram:
 // — сбои платформы (диск, копии, ошибки) — в служебный чат оператора (ALERT_TELEGRAM_BOT_TOKEN и ALERT_TELEGRAM_CHAT_ID в .env);
 // — сбои сети клубов (чеки, автосписания, рассылки) — собственнику и администратору через бота для сотрудников.
-import { statfsSync, statSync, existsSync } from 'node:fs';
+import { statfsSync, statSync, existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { FastifyInstance } from 'fastify';
 import type pg from 'pg';
@@ -13,6 +13,11 @@ import { notifyStaffSafe } from '../lib/staffNotify.ts';
 
 export type Status = 'ok' | 'warn' | 'bad';
 export type Check = { code: string; title: string; status: Status; value: number | null; detail: string; scope: string };
+/** Отметка сервера: текст файла и время изменения; нет файла — null */
+function readMark(file: string): { text: string; at: number } | null {
+  try { return { text: readFileSync(file, 'utf8').trim(), at: statSync(file).mtimeMs }; } catch { return null; }
+}
+
 type MonitorOpts = { storage: string; backupDir?: string; fetch?: typeof fetch; env?: NodeJS.ProcessEnv };
 
 const REPEAT_MS = 6 * 3600_000; // пока проблема не решена — напоминание раз в 6 часов
@@ -65,6 +70,22 @@ export async function runChecks(pool: pg.Pool, opts: MonitorOpts): Promise<Check
     else {
       const h = hoursAgo(statSync(mark).mtimeMs);
       add({ code: 'backup', title: 'Резервная копия', status: h > 30 ? 'bad' : h > 26 ? 'warn' : 'ok', value: h, detail: `последняя успешная ${h} ч назад` });
+    }
+    // Копия вне сервера (п. 6): deploy/backup.sh пишет offsite-state — off / ok / fail: причина
+    const off = readMark(join(opts.backupDir, 'offsite-state'));
+    if (!off || off.text === 'off') add({ code: 'offsite', title: 'Копия вне сервера', status: 'warn', value: null, detail: 'не настроена: нужен аккаунт в облачном хранилище (строки OFFSITE_S3_* в deploy/.env)' });
+    else if (off.text.startsWith('fail')) add({ code: 'offsite', title: 'Копия вне сервера', status: 'bad', value: null, detail: `не отправлена: ${off.text.slice(5).trim() || 'ошибка'}` });
+    else {
+      const h = hoursAgo(off.at);
+      add({ code: 'offsite', title: 'Копия вне сервера', status: h > 30 ? 'bad' : h > 26 ? 'warn' : 'ok', value: h, detail: `последняя отправлена ${h} ч назад` });
+    }
+    // Учебное восстановление раз в месяц (deploy/restore-check.sh): restore-check-state — ok: что проверено / fail: причина
+    const rc = readMark(join(opts.backupDir, 'restore-check-state'));
+    if (!rc) add({ code: 'restore', title: 'Проверка восстановления', status: 'warn', value: null, detail: 'ещё не проводилась (сервер проводит её сам раз в месяц)' });
+    else if (rc.text.startsWith('fail')) add({ code: 'restore', title: 'Проверка восстановления', status: 'bad', value: null, detail: `копия не восстановилась: ${rc.text.slice(5).trim() || 'ошибка'}` });
+    else {
+      const d = Math.floor(hoursAgo(rc.at) / 24);
+      add({ code: 'restore', title: 'Проверка восстановления', status: d > 35 ? 'warn' : 'ok', value: d, detail: `${d} дн. назад: ${rc.text.replace(/^ok:?\s*/, '') || 'копия восстановилась'}` });
     }
   } else {
     add({ code: 'backup', title: 'Резервная копия', status: 'warn', value: null, detail: 'проверка не подключена: на сервере не указана папка копий (BACKUP_DIR)' });

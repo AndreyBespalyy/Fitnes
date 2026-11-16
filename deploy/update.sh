@@ -79,6 +79,11 @@ main() {
     bash deploy/backup.sh || { log "ОШИБКА резервной копии"; notify "🔴 Не удалась ночная резервная копия. Журнал: /var/log/fitnes-update.log"; }
   fi
   ( cd deploy && bash ./healthcheck.sh ) || true
+  # Учебное восстановление копии раз в месяц, ночью (п. 6): restore-check.sh
+  if [ "$(date +%H)" -lt 6 ] && ls "$STATE"/fitnes-*.tar >/dev/null 2>&1 && [ -f deploy/restore-check.sh ] \
+     && { [ ! -f "$STATE/restore-check-state" ] || [ $(( $(date +%s) - $(stat -c %Y "$STATE/restore-check-state") )) -gt 2592000 ]; }; then
+    ( cd deploy && bash ./restore-check.sh ) || true
+  fi
 
   # UPDATE_BRANCH=main в deploy/.env — ставить сразу из main, не дожидаясь проверок
   local branch
