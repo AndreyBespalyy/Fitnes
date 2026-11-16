@@ -200,12 +200,13 @@ function Shell({ me, onLogout }: { me: Me; onLogout: () => void }) {
   const logout = async () => { await api('POST', '/api/auth/logout').catch(() => {}); clearDeviceData(); onLogout(); };
   const roleNames = me.roles.map((r) => r.name).join(', ');
   // Выбор клуба: у тех, кому доступно несколько клубов (собственник, сеть), — вверху окна, рядом с поиском
-  const clubPick = (cls: string) => (
-    <select className={cls} aria-label="Клуб" value={clubId} onChange={(e) => setClubId(e.target.value)}>
+  const clubPick = (cls: string) => (clubs.length === 1 && !me.allClubs
+    // Один клуб и выбрать нечего — просто название, без поля выбора
+    ? <div className={`${cls} club-one`}>{clubs[0].name}</div>
+    : <select className={cls} aria-label="Клуб" value={clubId} onChange={(e) => setClubId(e.target.value)}>
       {me.allClubs && <option value="all">Все клубы</option>}
       {clubs.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
-    </select>
-  );
+    </select>);
   const tabs: [Tab, string, boolean][] = [
     ['dash', 'Рабочий стол', true],
     ['problems', 'Проблемные моменты', can(me, 'dash.view') || can(me, 'finance.view')],
@@ -333,7 +334,7 @@ function Shell({ me, onLogout }: { me: Me; onLogout: () => void }) {
         {tab === 'onboarding' && <OnboardingPage me={me} clubId={clubId} go={(t) => setTab(t as Tab)} reloadClubs={reloadClubs} />}
         {tab === 'privacy' && <PrivacyPage me={me} clubs={clubs} clubId={clubId} openPerson={openPerson} />}
         {tab === 'system' && <SystemPage />}
-        {tab === 'help' && <HelpPage me={me} clubs={clubs} clubId={clubId} page={tab} />}
+        {tab === 'help' && <HelpPage me={me} clubs={clubs} clubId={clubId} page={tab} tabs={visible.map((v) => v[0])} />}
         {tab === 'reviews' && <ReviewsPage me={me} clubs={clubs} clubId={clubId} openPerson={openPerson} />}
         {tab === 'notes' && <TestNotesPage me={me} />}
         {tab === 'profile' && <ProfilePage me={me} passwordForm={<ChangePassword me={me} onDone={() => { alertOk('Пароль изменён'); setTab(firstTab); }} />} />}
@@ -368,6 +369,8 @@ function Home({ me, clubs, clubId, openPerson }: { me: Me; clubs: Club[]; clubId
     return () => clearTimeout(t);
   }, [clubId, q]);
   const club = clubs.find((c) => c.id === clubId);
+  // Колонка «Клуб» нужна, только когда в списке клиенты нескольких клубов
+  const manyClubs = clubId === 'all' && clubs.length > 1;
   return (
     <>
       <div className="row between">
@@ -376,8 +379,8 @@ function Home({ me, clubs, clubId, openPerson }: { me: Me; clubs: Club[]; clubId
       <input type="search" value={q} onChange={(e) => setQ(e.target.value)} placeholder="Поиск по имени или телефону" aria-label="Поиск клиента" style={{ maxWidth: 420 }} />
       <p className="small" style={{ margin: 0 }}>{trainerOnly(me) ? 'Видны клиенты, записанные на ваши занятия за 90 дней и вперёд.' : `Видны клиенты ${me.allClubs ? 'всей сети' : 'вашего клуба'}.`} Нажмите на имя, чтобы открыть карточку.</p>
       <div className="card"><div className="tbl"><table>
-        <thead><tr><th>Клиент</th><th>Категория</th><th>Клуб</th><th>Телефон</th></tr></thead>
-        <tbody>{persons.map((p) => <tr key={p.id}><td><button className="btn sm" onClick={() => openPerson(p.id)}>{p.fullName}</button></td><td><span className="chip acc">{p.segment}</span></td><td>{p.clubName}</td><td className="num">{p.phone}</td></tr>)}</tbody>
+        <thead><tr><th>Клиент</th><th>Категория</th>{manyClubs && <th>Клуб</th>}<th>Телефон</th></tr></thead>
+        <tbody>{persons.map((p) => <tr key={p.id}><td><button className="btn sm" onClick={() => openPerson(p.id)}>{p.fullName}</button></td><td><span className="chip acc">{p.segment}</span></td>{manyClubs && <td>{p.clubName}</td>}<td className="num">{p.phone}</td></tr>)}</tbody>
       </table></div>{persons.length === 0 && <p className="muted">Клиентов нет.</p>}</div>
     </>
   );

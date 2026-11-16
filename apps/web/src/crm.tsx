@@ -241,6 +241,10 @@ export function PersonCard({ me, id, onClose }: { me: Me; id: string; onClose: (
   useEffect(() => { reload(); }, [id]);
   useEffect(() => { const k = (e: KeyboardEvent) => e.key === 'Escape' && onClose(); window.addEventListener('keydown', k); return () => window.removeEventListener('keydown', k); }, []);
   const work = can(me, 'crm.work');
+  // Доступы по ролям (16.11.2026): в карточке только блоки, с которыми роль работает.
+  // Деньги клиента (карты, депозит, баллы, семья) — продажи, ресепшн, финансы; продажные блоки — отдел продаж и ресепшн.
+  const money = can(me, 'memberships.sell') || can(me, 'memberships.manage') || can(me, 'finance.view');
+  const sales = work || can(me, 'crm.view_all') || can(me, 'leads.create') || can(me, 'memberships.sell');
   const act = async (fn: () => Promise<unknown>, ok: string) => {
     setErr('');
     try { await fn(); toast(ok); setMove(null); setReason(''); reload(); } catch (x) { setErr(errText(x)); }
@@ -263,27 +267,28 @@ export function PersonCard({ me, id, onClose }: { me: Me; id: string; onClose: (
               <span className="small">{card.person.homeClubName ?? 'клиент другого клуба сети'} · в базе с {dt(card.person.createdAt)}</span></div>
             {can(me, 'crm.work') && <div style={{ marginTop: 10 }}><SituationButton type="person" id={card.person.id} small={false} /></div>}</div>
           <div className="card kv">{card.contacts.map((c, i) => <span key={i} style={{ display: 'contents' }}><span>{c.type === 'phone' ? 'Телефон' : c.type === 'email' ? 'E-mail' : c.type === 'telegram' ? 'Telegram' : c.type === 'whatsapp' ? 'WhatsApp' : c.type}</span><span className="num">{c.value}{c.type === 'phone' && c.isPrimary && <> <DialButton personId={id} label="" /></>}</span></span>)}</div>
-          {can(me, 'memberships.view') && (
+          {!can(me, 'memberships.manage') && money && card.person.autopayEnabled && <div className="item small">Подписка списывается автоматически с привязанной карты{card.person.autopayChangedAt ? ` (включено ${dt(card.person.autopayChangedAt)})` : ''}</div>}
+          {can(me, 'memberships.manage') && (
             <label className="item row" style={{ gap: 10 }}>
               <input type="checkbox" style={{ width: 20, height: 20 }} checked={card.person.autopayEnabled} disabled={!can(me, 'memberships.manage')}
                 onChange={(e) => act(() => api('POST', `/api/persons/${card.person.id}/autopay`, { enabled: e.target.checked }), e.target.checked ? 'Автосписание включено' : 'Автосписание выключено')} />
               <span><b>Списывать подписку автоматически с привязанной карты</b><br />
                 <span className="small">Отметьте, только если клиент согласен на автосписание{card.person.autopayChangedAt ? ` (изменено ${dt(card.person.autopayChangedAt)})` : ''}. Карта сохранится, когда клиент оплатит подписку по ссылке. Дальше деньги будут списываться в день оплаты.</span></span>
             </label>)}
-          {can(me, 'memberships.view') && <PersonCards me={me} personId={card.person.id} autopayEnabled={card.person.autopayEnabled} />}
+          {money && <PersonCards me={me} personId={card.person.id} autopayEnabled={card.person.autopayEnabled} />}
           {can(me, 'messages.work') && <PersonChats me={me} personId={card.person.id} homeClubId={card.person.homeClubId}
             marketingConsent={card.person.marketingConsent} optOut={card.person.messagingOptOut} reload={reload} />}
-          {can(me, 'persons.view') && <PersonCallFlags personId={card.person.id} />}
-          {can(me, 'persons.view') && <UpsellBlock personId={card.person.id} clubId={card.person.homeClubId} />}
+          {work && <PersonCallFlags personId={card.person.id} />}
+          {sales && <UpsellBlock personId={card.person.id} clubId={card.person.homeClubId} />}
           <MembershipsBlock me={me} personId={card.person.id} homeClubId={card.person.homeClubId} />
-          {can(me, 'memberships.view') && <FamilyBlock me={me} personId={card.person.id} clubId={card.person.homeClubId} />}
-          {can(me, 'memberships.view') && <DepositBlock personId={card.person.id} clubId={card.person.homeClubId} />}
-          {can(me, 'memberships.view') && <LoyaltyBlock personId={card.person.id} clubId={card.person.homeClubId} />}
-          {can(me, 'persons.view') && <ReferralBlock me={me} personId={card.person.id} clubId={card.person.homeClubId} />}
+          {money && <FamilyBlock me={me} personId={card.person.id} clubId={card.person.homeClubId} />}
+          {money && <DepositBlock personId={card.person.id} clubId={card.person.homeClubId} />}
+          {money && <LoyaltyBlock personId={card.person.id} clubId={card.person.homeClubId} />}
+          {sales && <ReferralBlock me={me} personId={card.person.id} clubId={card.person.homeClubId} />}
           <PersonPrivacy me={me} personId={card.person.id} reload={reload} />
           {(can(me, 'acs.work') || can(me, 'acs.manage')) && <PersonPasses me={me} personId={card.person.id} clubId={card.person.homeClubId ?? ''} />}
 
-          {card.opportunities.map((o) => (
+          {sales && card.opportunities.map((o) => (
             <div key={o.id} className="card" style={{ display: 'grid', gap: 8 }}>
               <div className="row between"><h2>{o.pipelineName}</h2>
                 <span className="row" style={{ gap: 6 }}><SituationButton type="opportunity" id={o.id} /><span className={`chip ${o.status === 'won' ? 'ok' : o.status === 'lost' ? 'bad' : 'acc'}`}>{o.status === 'open' ? 'в работе' : o.status === 'won' ? 'успешно' : 'отказ'}</span></span></div>
@@ -314,7 +319,7 @@ export function PersonCard({ me, id, onClose }: { me: Me; id: string; onClose: (
             </div>
           ))}
 
-          {card.meetings.length > 0 && (
+          {sales && card.meetings.length > 0 && (
             <div className="card" style={{ display: 'grid', gap: 6 }}><h2>Встречи</h2>
               {card.meetings.map((m) => (
                 <div key={m.id} className="row between"><span>{dt(m.scheduledAt)} · <span className="chip">{MEETING[m.status]}</span></span>
@@ -325,7 +330,7 @@ export function PersonCard({ me, id, onClose }: { me: Me; id: string; onClose: (
             </div>)}
 
           {work && <PersonCalls personId={card.person.id} />}
-          <div className="card" style={{ display: 'grid', gap: 6 }}><h2>Задачи</h2>
+          {sales && <><div className="card" style={{ display: 'grid', gap: 6 }}><h2>Задачи</h2>
             {card.tasks.length === 0 && <p className="muted" style={{ margin: 0 }}>Задач нет.</p>}
             {card.tasks.map((t) => (
               <div key={t.id} className={`item ${t.overdue ? 'over' : ''}`}>
@@ -340,7 +345,7 @@ export function PersonCard({ me, id, onClose }: { me: Me; id: string; onClose: (
           </div>
           <div className="card" style={{ display: 'grid', gap: 6 }}><h2>История</h2>
             {card.history.map((h, i) => <div key={i} className="small">{dt(h.at)} · {h.fromStage ? `${h.fromStage} → ` : ''}{h.toStage}{h.actorName ? ` · ${h.actorName}` : ''}{h.comment ? ` · ${h.comment}` : ''}</div>)}
-          </div>
+          </div></>}
         </>)}
       </aside>
     </div>

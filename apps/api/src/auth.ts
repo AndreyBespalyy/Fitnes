@@ -59,6 +59,11 @@ export function can(ctx: Ctx, perm: string) {
   return ctx.permissions.has('*') || ctx.permissions.has(perm);
 }
 
+/** Только тренер (без других ролей): видит лишь свои занятия и своих клиентов (доступы по ролям, 16.11.2026). */
+export function trainerOnly(ctx: Ctx) {
+  return ctx.roles.length > 0 && ctx.roles.every((r) => r === 'trainer');
+}
+
 export function requireCtx(req: FastifyRequest): Ctx {
   if (!req.ctx) throw unauthorized();
   if (req.mustChangePassword) throw new HttpError(403, 'Сначала смените временный пароль', 'must_change_password');

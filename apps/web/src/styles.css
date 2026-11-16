@@ -593,6 +593,11 @@ input[type="checkbox"],input[type="radio"]{accent-color:var(--accent)}
 .upd-bar{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(84px + env(safe-area-inset-bottom));z-index:30;display:flex;gap:12px;align-items:center;padding:10px 12px 10px 16px;border-radius:14px;border:1px solid var(--accent);background:var(--surface);color:var(--ink);font-weight:700;box-shadow:0 10px 30px rgba(0,0,0,.45);max-width:calc(100vw - 32px)}
 @media (min-width:761px){.upd-bar{bottom:24px}}
 
+/* Доступы по ролям (16.11.2026): один клуб — название без поля выбора; группа вкладок из одной вкладки не показывается;
+   поля «только для просмотра» показываются как обычный текст */
+.club-pick.club-one{cursor:default}
+.tabs:has(> button:only-child){display:none}
+.ro-view input:disabled,.ro-view select:disabled{border-color:transparent;background:transparent;padding-left:0;padding-right:0;color:var(--ink);opacity:1;-webkit-text-fill-color:var(--ink);appearance:none;box-shadow:none}
 /* «Мой день» тренера: кнопка «Отметить» под каждым занятием; список проведённых за месяц */
 .tr-unm{display:grid;gap:6px;justify-items:start;padding:8px 0;border-top:1px solid var(--line)}
 .tr-unm:first-of-type{border-top:0}
