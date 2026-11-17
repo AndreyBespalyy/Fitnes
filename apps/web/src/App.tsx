@@ -6,6 +6,7 @@ import { CommandPalette, SideNav } from './nav.tsx';
 import { UpdateBanner } from './version.tsx';
 import { OfflineBar, ProfilePage, registerServiceWorker, StaffSessions } from './mobile.tsx';
 import { NotificationsBell } from './notifications.tsx';
+import { IncomingCall, PbxSettings } from './telephony.tsx';
 import { AiButton, TeamButton } from './team/button.tsx';
 import { TestNotesWidget } from './testNotes.tsx';
 import { inRoleMenu, ownerOnly, trainerOnly } from './roleMenu.ts';
@@ -58,6 +59,7 @@ const StaffTimePage = page(() => import('./staff.tsx'), 'StaffTimePage');
 const ProblemsPage = page(() => import('./problems.tsx'), 'ProblemsPage');
 const LoginSecurity = page(() => import('./loginSecurity.tsx'), 'LoginSecurity');
 const UsagePage = page(() => import('./usage.tsx'), 'UsagePage');
+const ActivityPage = page(() => import('./activity.tsx'), 'ActivityPage');
 const IntakePage = page(() => import('./intake.tsx'), 'IntakePage');
 const ConfigPage = page(() => import('./config.tsx'), 'ConfigPage');
 const ReviewsPage = page(() => import('./insights.tsx'), 'ReviewsPage');
@@ -135,7 +137,7 @@ function ChangePassword({ me, forced, onDone, onLogout }: { me: Me; forced?: boo
   );
 }
 
-type Tab = 'dash' | 'hot' | 'calls' | 'leads' | 'board' | 'tasks' | 'home' | 'clubs' | 'tariffs' | 'contracts' | 'site' | 'fiscal' | 'finance' | 'import' | 'chats' | 'access' | 'messaging' | 'pipelines' | 'staff' | 'stafftime' | 'config' | 'reviews' | 'onboarding' | 'privacy' | 'system' | 'help' | 'schedule' | 'retention' | 'shop' | 'corp' | 'trainer' | 'desk' | 'load' | 'cohorts' | 'pnl' | 'usage' | 'intake' | 'sales' | 'processes' | 'weekly' | 'team' | 'notes' | 'profile' | 'problems' | 'payouts';
+type Tab = 'dash' | 'hot' | 'calls' | 'leads' | 'board' | 'tasks' | 'home' | 'clubs' | 'tariffs' | 'contracts' | 'site' | 'fiscal' | 'finance' | 'import' | 'chats' | 'access' | 'messaging' | 'pipelines' | 'staff' | 'stafftime' | 'config' | 'reviews' | 'onboarding' | 'privacy' | 'system' | 'help' | 'schedule' | 'retention' | 'shop' | 'corp' | 'trainer' | 'desk' | 'load' | 'cohorts' | 'pnl' | 'usage' | 'intake' | 'sales' | 'processes' | 'weekly' | 'team' | 'notes' | 'profile' | 'problems' | 'payouts' | 'activity' | 'telephony';
 
 function Shell({ me, onLogout }: { me: Me; onLogout: () => void }) {
   const firstTab: Tab = 'dash';
@@ -246,8 +248,10 @@ function Shell({ me, onLogout }: { me: Me; onLogout: () => void }) {
     ['reviews', 'Обзоры', can(me, 'crm.work') || can(me, 'dash.view') || can(me, 'ai.review')],
     ['stafftime', 'График и зарплата', true],
     ['config', 'Настройки клуба', can(me, 'config.manage')],
+    ['telephony', 'Телефония', can(me, 'plan.manage')],
     ['onboarding', 'Подключение клубов', can(me, 'clubs.manage')],
     ['notes', 'Журнал замечаний', can(me, '*')],
+    ['activity', 'Статистика сотрудников', me.allClubs && can(me, '*')],
     ['usage', 'Использование', me.allClubs && (can(me, '*') || me.roles.some((r) => r.code === 'admin'))],
     ['privacy', 'Защита данных', can(me, 'data.protect')],
     ['system', 'Состояние системы', can(me, 'system.monitor')],
@@ -285,7 +289,7 @@ function Shell({ me, onLogout }: { me: Me; onLogout: () => void }) {
       <header className="top">
         {(clubs.length > 1 || (me.allClubs && clubs.length > 0)) && <label className="top-club"><span>Клуб</span>{clubPick('top-club-pick')}</label>}
         <button className="search-btn" onClick={() => setCmdk(true)}><span aria-hidden="true">⌕</span><span className="search-ph">Клиент, сотрудник, договор или раздел</span><kbd>{/Mac|iPhone|iPad/.test(navigator.platform) ? '⌘K' : 'Ctrl K'}</kbd></button>
-        <div className="sp"><Suspense fallback={null}><LocalKktAgent me={me} clubId={clubId} /></Suspense><AiButton onOpen={(id) => { setTeamKey((k) => k + 1); go({ tab: 'team', p: { chat: id } }); }} /><TeamButton onOpen={() => setTab('team')} /><NotificationsBell go={go} openPerson={openPerson} />
+        <div className="sp"><Suspense fallback={null}><LocalKktAgent me={me} clubId={clubId} /></Suspense><AiButton onOpen={(id) => { setTeamKey((k) => k + 1); go({ tab: 'team', p: { chat: id } }); }} /><TeamButton onOpen={() => setTab('team')} /><NotificationsBell go={go} openPerson={openPerson} /><IncomingCall openPerson={openPerson} />
           <span className="who-me"><span className="ava" aria-hidden="true">{me.full_name.split(' ').map((w) => w[0]).slice(0, 2).join('')}</span><span className="who-txt"><b>{me.full_name}</b><small>{roleNames}</small></span></span>
           <button className="btn sm" onClick={logout}>Выйти</button></div>
       </header>
@@ -314,6 +318,7 @@ function Shell({ me, onLogout }: { me: Me; onLogout: () => void }) {
         {tab === 'import' && <ImportPage clubs={clubs} clubId={clubId} />}
         {tab === 'pnl' && <PnlPage me={me} clubs={clubs} clubId={clubId} />}
         {tab === 'intake' && <IntakePage me={me} clubs={clubs} clubId={clubId} openPerson={openPerson} />}
+        {tab === 'activity' && <ActivityPage />}
         {tab === 'usage' && <UsagePage tabs={tabs.map(([k, l]) => [k, l])} />}
         {tab === 'cohorts' && <CohortsPage me={me} clubs={clubs} clubId={clubId} />}
         {tab === 'load' && <LoadPage me={me} clubs={clubs} clubId={clubId} />}
@@ -329,6 +334,7 @@ function Shell({ me, onLogout }: { me: Me; onLogout: () => void }) {
         {tab === 'payouts' && <StaffTimePage key="payouts" me={me} clubs={clubs} clubId={clubId} only="payroll" />}
         {tab === 'problems' && <ProblemsPage me={me} clubs={clubs} clubId={clubId} go={go} canGo={(t: string) => allowed.some((v) => v[0] === t)} openPerson={openPerson} />}
         {tab === 'config' && <ConfigPage me={me} clubs={clubs} clubId={clubId} />}
+        {tab === 'telephony' && <PbxSettings clubs={clubs} clubId={clubId} />}
         {tab === 'schedule' && <SchedulePage me={me} clubs={clubs} clubId={clubId} openPerson={openPerson} />}
         {tab === 'retention' && <RetentionPage me={me} clubs={clubs} clubId={clubId} openPerson={openPerson} />}
         {tab === 'onboarding' && <OnboardingPage me={me} clubId={clubId} go={(t) => setTab(t as Tab)} reloadClubs={reloadClubs} />}

@@ -13,8 +13,8 @@ const GROUP: Record<string, string> = {
   sales: 'sales', leads: 'sales', board: 'sales', home: 'sales', chats: 'sales', retention: 'sales', reviews: 'sales', corp: 'sales',
   schedule: 'club', access: 'club', load: 'club', shop: 'club', tariffs: 'club', contracts: 'club',
   finance: 'money', payouts: 'money', fiscal: 'money', pnl: 'money', cohorts: 'money',
-  team: 'today', staff: 'team', stafftime: 'team',
-  clubs: 'setup', config: 'setup', pipelines: 'setup', intake: 'setup', messaging: 'setup', site: 'setup', import: 'setup', onboarding: 'setup', usage: 'setup', notes: 'setup', privacy: 'setup', system: 'setup',
+  team: 'today', staff: 'team', stafftime: 'team', activity: 'team',
+  clubs: 'setup', config: 'setup', telephony: 'setup', pipelines: 'setup', intake: 'setup', messaging: 'setup', site: 'setup', import: 'setup', onboarding: 'setup', usage: 'setup', notes: 'setup', privacy: 'setup', system: 'setup',
   help: 'foot', profile: 'foot',
 };
 
@@ -27,6 +27,7 @@ const P: Record<string, string> = {
   tasks: 'M9 11l3 3 8-8M20 12v7a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h9',
   hot: 'M12 3c1 4 5 5 5 10a5 5 0 0 1-10 0c0-3 2-4 2-7 2 1 3 3 3 3',
   calls: 'M5 4h4l2 5-2.5 1.5a11 11 0 0 0 5 5L15 13l5 2v4a2 2 0 0 1-2 2A16 16 0 0 1 3 6a2 2 0 0 1 2-2',
+  telephony: 'M5 4h4l2 5-2.5 1.5a11 11 0 0 0 5 5L15 13l5 2v4a2 2 0 0 1-2 2A16 16 0 0 1 3 6a2 2 0 0 1 2-2',
   desk: 'M14 12v.01M5 21h14M6 21V4a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v17',
   trainer: 'M6 9v6M18 9v6M3 11v2M21 11v2M6 12h12',
   leads: 'M12 5v14M5 12h14',
@@ -62,6 +63,7 @@ const P: Record<string, string> = {
   system: 'M3 12h4l3-8 4 16 3-8h4',
   onboarding: 'M5 15c-1.5 1.5-2 5-2 5s3.5-.5 5-2M9 13l-3-3c2-5 7-8 13-8 0 6-3 11-8 13zM14 7.5a1.5 1.5 0 1 1 0 3 1.5 1.5 0 0 1 0-3',
   usage: 'M3 12h4l3-8 4 16 3-8h4',
+  activity: 'M4 20V14M9 20V9M14 20V12M19 20V5M3 20h18',
   help: 'M12 3a9 9 0 1 1 0 18 9 9 0 0 1 0-18M9.5 9a2.5 2.5 0 1 1 3.5 2.3c-.6.3-1 .9-1 1.7M12 17h.01',
   profile: 'M12 4a4 4 0 1 1 0 8 4 4 0 0 1 0-8M4 21a8 8 0 0 1 16 0',
 };

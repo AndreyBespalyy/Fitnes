@@ -13,7 +13,7 @@ import { guardReveal } from './privacy.ts';
 const MAX_UPLOAD = 15 * 1024 * 1024;
 export const UPLOAD_LIMIT = { bodyLimit: Math.ceil(MAX_UPLOAD * 1.4) + 4096 };
 export type Upload = { fileName?: string; mime?: string; dataBase64?: string };
-type Actor = Pick<Ctx, 'tenantId' | 'userId' | 'ip'>;
+type Actor = Pick<Ctx, 'tenantId' | 'ip'> & { userId: string | null };
 
 const SIGNATURES: [string, number[]][] = [['application/pdf', [0x25, 0x50, 0x44, 0x46]], ['image/png', [0x89, 0x50, 0x4e, 0x47]], ['image/jpeg', [0xff, 0xd8, 0xff]]];
 const sniff = (b: Buffer) => SIGNATURES.find(([, sig]) => sig.every((x, i) => b[i] === x))?.[0] ?? null;

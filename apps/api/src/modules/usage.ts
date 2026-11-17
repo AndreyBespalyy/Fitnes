@@ -18,6 +18,11 @@ export function usageRoutes(app: FastifyInstance, pool: pg.Pool) {
       values ($1, $2, (now() at time zone 'Europe/Moscow')::date, $3, $4, 1)
       on conflict (user_id, day, tab) do update set opens = usage_daily.opens + 1, label = coalesce(excluded.label, usage_daily.label)`,
       [ctx.tenantId, ctx.userId, b.tab, b.label?.slice(0, 60) ?? null]));
+    // Каждое открытие со временем — для «Статистики сотрудников» (хранится 30 дней)
+    await withCtx(pool, ctx, async (db) => {
+      await db.query('insert into usage_events(tenant_id, user_id, tab, label) values ($1, $2, $3, $4)', [ctx.tenantId, ctx.userId, b.tab, b.label?.slice(0, 60) ?? null]);
+      if (Math.random() < 0.01) await db.query(`delete from usage_events where at < now() - interval '30 days'`);
+    });
     return { ok: true };
   });
 

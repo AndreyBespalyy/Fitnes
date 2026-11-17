@@ -24,6 +24,7 @@ import { bankRoutes } from './modules/bank.ts';
 import { dashRoutes } from './modules/dash.ts';
 import { problemRoutes } from './modules/problems.ts';
 import { aiRoutes, startAiWorker } from './modules/ai.ts';
+import { startPbxWorker, telephonyRoutes } from './modules/telephony.ts';
 import { aiSalesRoutes, startScoringWorker } from './modules/aiSales.ts';
 import { staffTimeRoutes } from './modules/staffTime.ts';
 import { configRoutes } from './modules/config.ts';
@@ -49,6 +50,7 @@ import { pnlRoutes } from './modules/pnl.ts';
 import { rulesRoutes } from './modules/rules.ts';
 import { loginSecurityRoutes } from './modules/loginSecurity.ts';
 import { usageRoutes } from './modules/usage.ts';
+import { activityRoutes } from './modules/activity.ts';
 import { leadIntakeRoutes } from './modules/leadIntake.ts';
 import { contractSmsRoutes } from './modules/contractSms.ts';
 import { loyaltyRoutes } from './modules/loyalty.ts';
@@ -65,6 +67,7 @@ import { platformRoutes } from './modules/platform.ts';
 import { salesOpsRoutes, startSalesOpsWorker } from './modules/salesOps.ts';
 import { testNoteRoutes } from './modules/testNotes.ts';
 import { teamRoutes, startTeamPushWorker } from './modules/team.ts';
+import { startTeamAdviceWorker, teamAdviceRoutes } from './modules/teamAdvice.ts';
 import { agentRoutes } from './modules/agent.ts';
 import { agentReminderRoutes, startAgentWorker } from './modules/agentReminders.ts';
 import { agentChatRoutes, handleBotMessage } from './modules/agentChat.ts';
@@ -145,6 +148,7 @@ export async function buildApp(pool: pg.Pool, opts: { webDist?: string; secureCo
   // ИИ-сервер (свой, внутренний): AI_URL и AI_TOKEN. Без него записи ждут, итог можно написать вручную
   const ai = opts.ai !== undefined ? opts.ai : aiConfigFromEnv(opts.fetch ?? fetch);
   aiRoutes(app, pool, storage, ai);
+  telephonyRoutes(app, pool, { fetch: opts.fetch });
   aiSalesRoutes(app, pool);
   mobileRoutes(app, pool, { fetch: opts.fetch });
   staffTimeRoutes(app, pool);
@@ -171,6 +175,7 @@ export async function buildApp(pool: pg.Pool, opts: { webDist?: string; secureCo
   rulesRoutes(app, pool);
   loginSecurityRoutes(app, pool);
   usageRoutes(app, pool);
+  activityRoutes(app, pool);
   leadIntakeRoutes(app, pool, { fetch: opts.fetch });
   contractSmsRoutes(app, pool, storage, { fetch: opts.fetch });
   loyaltyRoutes(app, pool);
@@ -182,6 +187,8 @@ export async function buildApp(pool: pg.Pool, opts: { webDist?: string; secureCo
   teamRoutes(app, pool, storage, (ctx, chatId, text) => handleBotMessage(pool, ctx, chatId, text, yandex));
   agentRoutes(app, pool, yandex);
   agentChatRoutes(app, pool);
+  // Советы по переписке в мессенджере: тему определяет свой ИИ-сервер (или YandexGPT), без них — ключевые слова
+  teamAdviceRoutes(app, pool, { ai, yandex });
   agentMeetingRoutes(app, pool);
   processRoutes(app, pool, yandex);
   weeklyRoutes(app, pool, yandex);
@@ -200,6 +207,7 @@ export async function buildApp(pool: pg.Pool, opts: { webDist?: string; secureCo
   if (opts.scheduleWorker) { const stop = startScheduleWorker(pool, opts.fetch ?? fetch); app.addHook('onClose', async () => stop()); }
   if (opts.staffBotWorker) { const stop = startStaffBotWorker(pool, opts.fetch ?? fetch); app.addHook('onClose', async () => stop()); }
   if (opts.agentWorker) { const stop = startAgentWorker(pool); app.addHook('onClose', async () => stop()); }
+  if (opts.agentWorker) { const stop = startTeamAdviceWorker(pool, { ai, yandex }); app.addHook('onClose', async () => stop()); }
   if (opts.salesOpsWorker) { const stop = startSalesOpsWorker(pool); app.addHook('onClose', async () => stop()); }
   if (opts.surveyWorker) { const stop = startSurveyWorker(pool, opts.fetch ?? fetch); app.addHook('onClose', async () => stop()); }
   if (opts.retentionWorker) { const stop = startRetentionWorker(pool, opts.fetch ?? fetch); app.addHook('onClose', async () => stop()); }
@@ -207,6 +215,8 @@ export async function buildApp(pool: pg.Pool, opts: { webDist?: string; secureCo
   if (opts.pushWorker) { const stop = startPushWorker(pool, opts.fetch ?? fetch); app.addHook('onClose', async () => stop()); }
   if (opts.scoringWorker) { const stop = startScoringWorker(pool); app.addHook('onClose', async () => stop()); }
   if (opts.aiWorker) { const stop = startAiWorker(pool, ai, storage); app.addHook('onClose', async () => stop()); }
+  // Записи разговоров из АТС забираются вместе с работой ИИ (тот же флаг фоновой работы)
+  if (opts.aiWorker) { const stop = startPbxWorker(pool, storage, opts.fetch ?? fetch, !!ai); app.addHook('onClose', async () => stop()); }
   if (opts.insightsWorker) { const stop = startInsightsWorker(pool, ai); app.addHook('onClose', async () => stop()); }
   if (opts.fiscalWorker) { const stop = startFiscalWorker(pool); app.addHook('onClose', async () => stop()); }
 

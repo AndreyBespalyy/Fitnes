@@ -14,7 +14,7 @@ from dataclasses import dataclass
 
 import httpx
 
-from .prompts import CONFIG_SCHEMA, CONFIG_SYSTEM, EVAL_SCHEMA, EVAL_SYSTEM, PROMPT_VERSION, SCHEMA, SYSTEM, USER
+from .prompts import CONFIG_SCHEMA, CONFIG_SYSTEM, EVAL_SCHEMA, EVAL_SYSTEM, PROMPT_VERSION, SCHEMA, SYSTEM, TOPIC_SCHEMA, TOPIC_SYSTEM, USER
 
 
 @dataclass
@@ -208,3 +208,27 @@ def config_suggest(llm, text: str, fields: list[dict]) -> dict:
                 value = c.get("value")
             changes.append({"path": str(c["path"]), "value": value})
     return {"changes": changes, "explanation": str(out.get("explanation") or ""), "unknown": [str(u) for u in out.get("unknown") or []], "engine": llm.engine}
+
+
+TOPICS = set(TOPIC_SCHEMA["properties"]["topic"]["enum"])
+
+
+def chat_topic(llm, messages: list[dict]) -> dict:
+    """Тема переписки сотрудников и суть одной фразой. Берём последние сообщения, не больше 6000 знаков."""
+    lines = [f"{str(m.get('author') or 'Сотрудник')[:60]}: {mask(str(m.get('text') or ''))[:600]}" for m in messages[-40:] if str(m.get("text") or "").strip()]
+    text = "\n".join(lines)[-6000:]
+    if not text:
+        return {"topic": "other", "summary": "", "client": "", "confidence": 0.0, "engine": llm.engine}
+    out = llm.complete(TOPIC_SYSTEM, f"Переписка:\n{text}", TOPIC_SCHEMA, "chat_topic", 300)
+    topic = str(out.get("topic") or "other")
+    try:
+        conf = float(out.get("confidence") or 0)
+    except (TypeError, ValueError):
+        conf = 0.0
+    return {
+        "topic": topic if topic in TOPICS else "other",
+        "summary": mask(str(out.get("summary") or ""))[:200],
+        "client": str(out.get("client") or "")[:120],
+        "confidence": round(max(0.0, min(1.0, conf)), 3),
+        "engine": llm.engine,
+    }
