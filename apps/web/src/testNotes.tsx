@@ -73,11 +73,49 @@ async function shrink(blob: Blob): Promise<string> {
 /** Снимок страницы прямо в браузере — без системного диалога выбора экрана.
  *  Если страница длиннее экрана — снимается вся страница целиком.
  *  Окно журнала, кнопки и всплывающие окна в снимок не попадают. */
+const SKIP = '.tn-panel, .tn-btn, .report-btn, .shot-ed, .tn-ask, .toast';
+
+/** Карточки клиента, окна и списки листаются внутри себя — на время снимка раскрываем их на всю высоту,
+ *  чтобы в скрин попало всё, что ниже края экрана. Возвращает функцию, которая всё вернёт как было. */
+function unfold(): () => void {
+  const H = window.innerHeight, sx = window.scrollX, sy = window.scrollY;
+  const saved: [HTMLElement, string, number][] = [];
+  const keep = (el: HTMLElement) => { if (!saved.some(([e]) => e === el)) saved.push([el, el.style.cssText, el.scrollTop]); };
+  const boxes = [...document.body.querySelectorAll<HTMLElement>('*')].filter((el) => {
+    if (el.closest(SKIP) || el.closest('.side')) return false;
+    const cs = getComputedStyle(el);
+    return /(auto|scroll)/.test(cs.overflowY) && el.scrollHeight > el.clientHeight + 4 && el.clientHeight >= H * 0.35;
+  });
+  for (const el of boxes) {
+    keep(el);
+    el.style.setProperty('overflow', 'visible', 'important');
+    el.style.setProperty('height', 'auto', 'important');
+    el.style.setProperty('max-height', 'none', 'important');
+    // Окно поверх страницы (position: fixed) растягиваем вниз вместе с содержимым
+    for (let a: HTMLElement | null = el; a && a !== document.body; a = a.parentElement) {
+      if (getComputedStyle(a).position !== 'fixed') continue;
+      keep(a);
+      a.style.setProperty('position', 'absolute', 'important');
+      a.style.setProperty('top', '0', 'important');
+      a.style.setProperty('bottom', 'auto', 'important');
+      a.style.setProperty('height', 'auto', 'important');
+      a.style.setProperty('max-height', 'none', 'important');
+      a.style.setProperty('min-height', `${Math.max(document.documentElement.scrollHeight, H)}px`, 'important');
+    }
+  }
+  return () => {
+    for (const [el, css, top] of saved) { el.style.cssText = css; el.scrollTop = top; }
+    window.scrollTo(sx, sy);
+  };
+}
+
 async function captureScreen(): Promise<string | null> {
   const { toCanvas } = await import('html-to-image');
-  const skip = (n: Node) => !(n instanceof Element && n.matches('.tn-panel, .tn-btn, .report-btn, .shot-ed, .tn-ask, .toast'));
+  const skip = (n: Node) => !(n instanceof Element && n.matches(SKIP));
   const de = document.documentElement;
   const W = window.innerWidth, H = window.innerHeight, sx = window.scrollX;
+  const restore = unfold();
+  try {
   const PW = de.scrollWidth, PH = Math.max(de.scrollHeight, H);
   // Браузеры не дают холст больше ~16 Мп (Safari на iPhone) и выше 16 000 px — для длинных страниц снижаем чёткость
   const pr = Math.max(0.3, Math.min(2, window.devicePixelRatio || 1, Math.sqrt(16e6 / (PW * PH)), 16000 / PH));
@@ -94,6 +132,7 @@ async function captureScreen(): Promise<string | null> {
   c.getContext('2d')!.drawImage(full, Math.round(sx * k), 0, c.width, c.height, 0, 0, c.width, c.height);
   const blob = await new Promise<Blob | null>((r) => c.toBlob(r, 'image/png'));
   return blob ? shrink(blob) : null;
+  } finally { restore(); }
 }
 
 /* ---------- Окно журнала на странице ---------- */
