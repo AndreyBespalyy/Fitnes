@@ -6,7 +6,7 @@ import { CommandPalette, SideNav } from './nav.tsx';
 import { UpdateBanner } from './version.tsx';
 import { OfflineBar, ProfilePage, registerServiceWorker, StaffSessions } from './mobile.tsx';
 import { NotificationsBell } from './notifications.tsx';
-import { IncomingCall } from './telephony.tsx';
+import { IncomingCall, PbxSettings } from './telephony.tsx';
 import { AiButton, TeamButton } from './team/button.tsx';
 import { TestNotesWidget } from './testNotes.tsx';
 import { inRoleMenu, ownerOnly, trainerOnly } from './roleMenu.ts';
@@ -137,7 +137,7 @@ function ChangePassword({ me, forced, onDone, onLogout }: { me: Me; forced?: boo
   );
 }
 
-type Tab = 'dash' | 'hot' | 'calls' | 'leads' | 'board' | 'tasks' | 'home' | 'clubs' | 'tariffs' | 'contracts' | 'site' | 'fiscal' | 'finance' | 'import' | 'chats' | 'access' | 'messaging' | 'pipelines' | 'staff' | 'stafftime' | 'config' | 'reviews' | 'onboarding' | 'privacy' | 'system' | 'help' | 'schedule' | 'retention' | 'shop' | 'corp' | 'trainer' | 'desk' | 'load' | 'cohorts' | 'pnl' | 'usage' | 'intake' | 'sales' | 'processes' | 'weekly' | 'team' | 'notes' | 'profile' | 'problems' | 'payouts' | 'activity';
+type Tab = 'dash' | 'hot' | 'calls' | 'leads' | 'board' | 'tasks' | 'home' | 'clubs' | 'tariffs' | 'contracts' | 'site' | 'fiscal' | 'finance' | 'import' | 'chats' | 'access' | 'messaging' | 'pipelines' | 'staff' | 'stafftime' | 'config' | 'reviews' | 'onboarding' | 'privacy' | 'system' | 'help' | 'schedule' | 'retention' | 'shop' | 'corp' | 'trainer' | 'desk' | 'load' | 'cohorts' | 'pnl' | 'usage' | 'intake' | 'sales' | 'processes' | 'weekly' | 'team' | 'notes' | 'profile' | 'problems' | 'payouts' | 'activity' | 'telephony';
 
 function Shell({ me, onLogout }: { me: Me; onLogout: () => void }) {
   const firstTab: Tab = 'dash';
@@ -248,6 +248,7 @@ function Shell({ me, onLogout }: { me: Me; onLogout: () => void }) {
     ['reviews', 'Обзоры', can(me, 'crm.work') || can(me, 'dash.view') || can(me, 'ai.review')],
     ['stafftime', 'График и зарплата', true],
     ['config', 'Настройки клуба', can(me, 'config.manage')],
+    ['telephony', 'Телефония', can(me, 'plan.manage')],
     ['onboarding', 'Подключение клубов', can(me, 'clubs.manage')],
     ['notes', 'Журнал замечаний', can(me, '*')],
     ['activity', 'Статистика сотрудников', me.allClubs && can(me, '*')],
@@ -333,6 +334,7 @@ function Shell({ me, onLogout }: { me: Me; onLogout: () => void }) {
         {tab === 'payouts' && <StaffTimePage key="payouts" me={me} clubs={clubs} clubId={clubId} only="payroll" />}
         {tab === 'problems' && <ProblemsPage me={me} clubs={clubs} clubId={clubId} go={go} canGo={(t: string) => allowed.some((v) => v[0] === t)} openPerson={openPerson} />}
         {tab === 'config' && <ConfigPage me={me} clubs={clubs} clubId={clubId} />}
+        {tab === 'telephony' && <PbxSettings clubs={clubs} clubId={clubId} />}
         {tab === 'schedule' && <SchedulePage me={me} clubs={clubs} clubId={clubId} openPerson={openPerson} />}
         {tab === 'retention' && <RetentionPage me={me} clubs={clubs} clubId={clubId} openPerson={openPerson} />}
         {tab === 'onboarding' && <OnboardingPage me={me} clubId={clubId} go={(t) => setTab(t as Tab)} reloadClubs={reloadClubs} />}

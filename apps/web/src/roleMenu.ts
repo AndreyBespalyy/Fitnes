@@ -9,10 +9,10 @@ const ALWAYS = ['dash', 'team', 'help', 'profile'];
 export const ROLE_MENU: Record<string, string[]> = {
   // Собственник: только отчёты — финансы, посещаемость, выплаты, проблемные моменты. Без операционки.
   // Тарифы и настройки клуба — отдельным блоком «Настройки» внизу меню.
-  owner: ['problems', 'finance', 'pnl', 'load', 'cohorts', 'payouts', 'weekly', 'reviews', 'staff', 'activity', 'tariffs', 'config', 'privacy', 'system', 'notes', 'usage'],
+  owner: ['problems', 'finance', 'pnl', 'load', 'cohorts', 'payouts', 'weekly', 'reviews', 'staff', 'activity', 'tariffs', 'config', 'telephony', 'privacy', 'system', 'notes', 'usage'],
   // Управляющий: отчёты собственника по своему клубу + управление клубом. Без сетевых разделов и рабочих экранов сотрудников.
   gm: ['problems', 'finance', 'pnl', 'load', 'cohorts', 'weekly', 'reviews', 'staff', 'sales', 'calls', 'tasks', 'processes', 'schedule', 'home',
-    'retention', 'fiscal', 'tariffs', 'shop', 'contracts', 'site', 'messaging', 'stafftime', 'config', 'corp', 'access', 'privacy'],
+    'retention', 'fiscal', 'tariffs', 'shop', 'contracts', 'site', 'messaging', 'stafftime', 'config', 'telephony', 'corp', 'access', 'privacy'],
   rop: ['tasks', 'processes', 'weekly', 'hot', 'calls', 'sales', 'schedule', 'leads', 'board', 'chats', 'home', 'tariffs', 'shop', 'corp', 'load', 'cohorts',
     'staff', 'retention', 'reviews', 'stafftime'],
   manager: ['tasks', 'processes', 'hot', 'calls', 'sales', 'schedule', 'leads', 'board', 'chats', 'home', 'tariffs', 'shop', 'corp', 'reviews', 'stafftime'],
