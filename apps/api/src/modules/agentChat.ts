@@ -15,11 +15,12 @@ import { ROLE_NAME } from './agentProcesses.ts';
 import { WEEKLY_RE, weeklyChatAnswer } from './agentWeekly.ts';
 import { HINTS_RE, followUps, hintsChatAnswer, roleOf } from './agentMorning.ts';
 import { NOSHOW_RE, noShowAnswer } from './agentInvite.ts';
+import { TEAM_RE, teamChatAnswer } from './agentSalesTeam.ts';
 import { recordSuggestion } from './agentLearn.ts';
 import { MEETING_RE, MEETING_STATUS_RE, meetingPendingReply, meetingStatus, proposeMeeting } from './agentMeetings.ts';
 import { MGR_PLAN_RE, OWNER_HELP, isLeader, managersPlanAnswer, ownerAnswer, ownerPendingReply } from './agentOwner.ts';
 
-export const BOT_NAME = 'ИИ-помощник';
+export const BOT_NAME = 'Дядя Витя'; // так Андрей назвал ИИ-агента клуба (17.11.2026)
 
 export async function ensureBot(db: Db, tenantId: string) {
   const cur = (await db.query(`select id from users where tenant_id = $1 and is_bot`, [tenantId])).rows[0];
@@ -30,7 +31,7 @@ export async function ensureBot(db: Db, tenantId: string) {
   return (await db.query(`select id from users where tenant_id = $1 and is_bot`, [tenantId])).rows[0].id as string;
 }
 
-const WELCOME = `Здравствуйте! Я ИИ-помощник. Пишите мне простыми словами:
+const WELCOME = `Здравствуйте! Я Дядя Витя — ИИ-помощник клуба. Пишите мне простыми словами:
 • «подсказки на сегодня» или «с чего начать» — 3 самых полезных шага на день (сам присылаю каждое утро);
 • «мои задачи» — что у вас на сегодня;
 • «что просрочено»;
@@ -214,6 +215,12 @@ export async function botReply(db: Db, ctx: Ctx, text: string, yandex: YandexCon
     if (mp) return mp;
     if (MEETING_RE.test(text.trim())) return proposeMeeting(db, ctx, text);
     if (WEEKLY_RE.test(text)) return weeklyChatAnswer(db, ctx, text, yandex);
+    // «Сводка по менеджерам» — та же, что РОП получает утром, с кнопками «Чат с менеджером»
+    if (TEAM_RE.test(text)) {
+      const ids = (await db.query(`select id from clubs where status = 'active' and not is_demo order by name`)).rows.map((r) => r.id as string);
+      const a = await teamChatAnswer(db, ids);
+      if (a) { if (out) out.actions = [...a.actions, ...(out.actions ?? [])]; return a.text; }
+    }
     // «Кто из менеджеров больше всех отстаёт от плана» — список по отставанию и кнопки «Задачи на сегодня»
     if (MGR_PLAN_RE.test(text)) {
       const a = await managersPlanAnswer(db, text);

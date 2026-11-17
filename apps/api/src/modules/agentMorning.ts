@@ -5,6 +5,7 @@
 // РОПу — где команда буксует; администратору — занятия, новички, продления, пропущенные звонки;
 // тренеру — его занятия и новички, неявки вчера; управляющему и собственнику — план продаж, процессы, эскалации.
 // Подсказки выбираются по пользе для клуба (вес), лишние отбрасываются; если данных мало — добавляются общие советы роли.
+import { salesTeamMorning } from './agentSalesTeam.ts';
 import type { Ctx, Db } from '../db.ts';
 import { botSay } from './agentMeetings.ts';
 import { clientsFact, lightOf, monthInfo, planFact, salesFact, targets } from './dash.ts';
@@ -304,6 +305,11 @@ export async function processMorningHints(db: Db, actor: Actor, clubId: string) 
   const staff = await staffOf(db, clubId, ROLE_ORDER);
   const seen = new Set<string>();
   let sent = 0;
+  // Отдел продаж: рейтинг менеджеров за вчера и сводка РОПу (нет РОПа — управляющему)
+  const team = await salesTeamMorning(db, clubId, t.today).catch((e) => { console.error('Рейтинг менеджеров:', (e as Error).message); return null; });
+  const heads: string[] = [];
+  for (const s of staff) if (!heads.includes(s.id) && (await roleOf(db, s.id, clubId)) === 'rop') heads.push(s.id);
+  if (!heads.length) for (const s of staff) if (!heads.includes(s.id) && (await roleOf(db, s.id, clubId)) === 'gm') heads.push(s.id);
   for (const s of staff) {
     if (seen.has(s.id)) continue;
     seen.add(s.id);
@@ -320,6 +326,7 @@ export async function processMorningHints(db: Db, actor: Actor, clubId: string) 
     const acts = await actionsFor(db, hints);
     const msgId = await botSay(db, actor.tenantId, s.id, hintsText(s.name, hints), { kind: 'morning_hints', userId: s.id, day: t.today, sids, acts }, false);
     if (msgId) await db.query(`update agent_suggestions set message_id = $1 where id = any($2)`, [msgId, sids]);
+    if (team && heads.includes(s.id)) await botSay(db, actor.tenantId, s.id, team.text, { kind: 'sales_team', day: t.today, actions: team.actions }, false);
     sent++;
   }
   return sent;

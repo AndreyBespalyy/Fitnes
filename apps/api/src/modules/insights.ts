@@ -10,6 +10,7 @@ import { audit, withCtx, type Ctx, type Db } from '../db.ts';
 import { badRequest, forbidden, notFound } from '../errors.ts';
 import { PERMISSIONS as P } from '../roles.ts';
 import { aiEvaluateCall, type AiConfig } from '../lib/aiClient.ts';
+import { scriptCheckCalls } from './agentScripts.ts';
 import { CAT_NAME, CATS, KPI, clientsFact, funnel, kpi, lightOf, monthInfo, normFor, norms, planFact, salesFact, targets } from './dash.ts';
 import { standardAt, type ChecklistItem } from './config.ts';
 import { timesheet } from './staffTime.ts';
@@ -269,7 +270,7 @@ export async function processInsights(pool: pg.Pool, ai: AiConfig | null) {
         await checkPlanAlert(db, tenantId, c.id, c.today);
         await evaluateDueRecommendations(db, c.id, c.today);
       }
-      if (ai) await aiEvaluateCalls(db, tenantId, ai);
+      if (ai) { await aiEvaluateCalls(db, tenantId, ai); await scriptCheckCalls(db, tenantId, ai); }
     });
   }
 }
