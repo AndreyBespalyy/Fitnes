@@ -12,7 +12,7 @@ import { PERMISSIONS as P } from '../roles.ts';
 import { readTable, TableError } from '../lib/tables.ts';
 import { clubToday, daysBetween } from './memberships.ts';
 import {
-  detectReport, FIELDS, findHeaderRow, headerSignature, isFooter, mapColumns, methodOf, normEmail, normName, normalizePhone,
+  detectReport, FIELDS, findHeaderRow, headerSignature, isFooter, isSaleDocRow, linkNumber, mapColumns, productFromPresentation, methodOf, normEmail, normName, normalizePhone,
   parseDate, parseInt10, parseMoney, REPORT_NAMES, REPORT_TYPES, type Mapping, type ReportType,
 } from './importMap.ts';
 
@@ -155,20 +155,30 @@ async function analyze(db: Db, batch: { id: string; club_id: string }) {
     const g = getter(f);
     for (const r of byFile.get(f.id) ?? []) {
       if (isFooter(r.cells)) { const s = parseMoney(g(r, 'amount')); if (s !== null) footers.memberships = (footers.memberships ?? 0) + s; mark(r, 'skipped', 'Строка итогов отчёта'); continue; }
-      const productName = g(r, 'product_name');
-      const starts = parseDate(g(r, 'starts_on'))?.date;
+      const rawProduct = g(r, 'product_name');
+      // Отчёт по членствам 1С:Фитнес клуб КОРП перемежает членства строками документов продажи и строкой-подзаголовком
+      if (isSaleDocRow(rawProduct)) { mark(r, 'skipped', 'Строка продажи, не членство'); continue; }
+      if (!rawProduct && !g(r, 'client_ext') && !g(r, 'client_name') && !g(r, 'starts_on')) { mark(r, 'skipped', 'Пустая строка или подзаголовок'); continue; }
+      const productName = productFromPresentation(rawProduct);
+      const rawStarts = parseDate(g(r, 'starts_on'))?.date;
       const rawEnds = g(r, 'ends_on'); const ends = rawEnds ? parseDate(rawEnds)?.date ?? null : null;
-      const contractNumber = g(r, 'contract_number') || null;
-      const key = g(r, 'ext_id') || contractNumber || `h:${sha(JSON.stringify(r.cells)).slice(0, 24)}`;
+      const contractNumber = g(r, 'contract_number') ? linkNumber(g(r, 'contract_number')) : null;
+      const key = (g(r, 'ext_id') ? linkNumber(g(r, 'ext_id')) : '') || contractNumber || `h:${sha(JSON.stringify(r.cells)).slice(0, 24)}`;
       const prev = mSeen.get(key);
       if (prev) {
+        const same = (k: string) => getter(f)(prev, k) === g(r, k);
         if (prev.checksum === r.checksum) mark(r, 'skipped', 'Повтор строки', `Повтор строки ${prev.row_no}`);
+        // 1С повторяет строку членства для каждого телефона клиента
+        else if (same('product_name') && (same('client_ext') || same('client_name'))) mark(r, 'skipped', 'Повтор строки', `Повтор строки ${prev.row_no} (другой телефон клиента)`);
         else mark(r, 'excluded', 'Код абонемента повторяется', `Абонемент «${key}» уже есть в строке ${prev.row_no}`);
         continue;
       }
       mSeen.set(key, r);
       if (earlierMembership(key)) { mark(r, 'skipped', 'Уже перенесено раньше'); continue; }
       if (!productName) { mark(r, 'excluded', 'Нет названия абонемента'); continue; }
+      const saleDate = g(r, 'contract_date') ? parseDate(g(r, 'contract_date'))?.date : undefined;
+      // Членство продано, но не активировано: берём дату продажи, человек увидит замечание
+      const starts = rawStarts ?? (!g(r, 'starts_on') && saleDate && (!ends || saleDate <= ends) ? saleDate : undefined);
       if (!starts) { mark(r, 'excluded', 'Нет даты начала', g(r, 'starts_on') ? `Дата начала не распознана: «${g(r, 'starts_on')}»` : 'Нет даты начала'); continue; }
       if (rawEnds && !ends) { mark(r, 'excluded', 'Дата окончания не распознана', `Дата окончания не распознана: «${rawEnds}»`); continue; }
       if (ends && ends < starts) { mark(r, 'excluded', 'Окончание раньше начала'); continue; }
@@ -179,6 +189,7 @@ async function analyze(db: Db, batch: { id: string; club_id: string }) {
       const st = g(r, 'status').toLowerCase();
       const warns: string[] = [];
       if (!rawAmount) warns.push('нет стоимости, записана 0 ₽');
+      if (!rawStarts) warns.push('нет даты активации, взята дата продажи');
       if (/заморож/.test(st)) warns.push('в 1С абонемент заморожен: оформите заморозку в системе');
       const contractDateRaw = g(r, 'contract_date');
       const m: PMembership = { row: r, key, client: cl.ref, productName, starts, ends, amount,
@@ -192,7 +203,8 @@ async function analyze(db: Db, batch: { id: string; club_id: string }) {
       else mark(r, 'ok');
     }
   }
-  const findMembership = (client: ClientRef | null, memExt: string, contract: string, date: string): string | null => {
+  const findMembership = (client: ClientRef | null, rawMemExt: string, rawContract: string, date: string): string | null => {
+    const memExt = rawMemExt ? linkNumber(rawMemExt) : ''; const contract = rawContract ? linkNumber(rawContract) : '';
     if (memExt && mByKey.has(memExt)) return memExt;
     if (contract && mByContract.has(contract)) return mByContract.get(contract)!.key;
     if (contract && mByKey.has(contract)) return contract;
@@ -212,6 +224,8 @@ async function analyze(db: Db, batch: { id: string; club_id: string }) {
     for (const r of byFile.get(f.id) ?? []) {
       if (isFooter(r.cells)) { const s = parseMoney(g(r, 'amount')); if (s !== null) footers.payments = (footers.payments ?? 0) + s; mark(r, 'skipped', 'Строка итогов отчёта'); continue; }
       const d = parseDate(g(r, 'date'));
+      // В отчёте КОРП документ оплаты разнесён по членствам; строка без суммы — членство, на которое из этой оплаты ничего не пришлось
+      if (!g(r, 'amount')) { mark(r, 'skipped', 'Нулевая сумма'); continue; }
       const signed = parseMoney(g(r, 'amount'));
       if (!d) { mark(r, 'excluded', 'Нет даты платежа', g(r, 'date') ? `Дата не распознана: «${g(r, 'date')}»` : 'Нет даты платежа'); continue; }
       if (signed === null) { mark(r, 'excluded', 'Сумма не распознана', `Сумма не распознана: «${g(r, 'amount')}»`); continue; }
@@ -223,7 +237,9 @@ async function analyze(db: Db, batch: { id: string; club_id: string }) {
       const entry = { month, dir, amount, loaded: false };
       moneyAll.push(entry);
       const ext = g(r, 'ext_id');
-      const base = ext ? `${ext}|${d.date}|${dir}` : `h:${sha([d.date, d.time, g(r, 'client_ext'), g(r, 'client_name'), signed, g(r, 'method'), op].join('|')).slice(0, 24)}`;
+      // Одна оплата может быть разнесена на несколько членств: каждая часть — отдельный платёж
+      const part = linkNumber(g(r, 'membership_ext') || g(r, 'contract_number') || '');
+      const base = ext ? `${ext}|${d.date}|${dir}${part ? `|${part}` : ''}` : `h:${sha([d.date, d.time, g(r, 'client_ext'), g(r, 'client_name'), signed, g(r, 'method'), op].join('|')).slice(0, 24)}`;
       const key = ext ? base : occKey(base);
       const prev = paySeen.get(key);
       if (prev) {
@@ -277,6 +293,7 @@ async function analyze(db: Db, batch: { id: string; club_id: string }) {
   /* ---- остатки и долги ---- */
   const debts: PDebt[] = [];
   let debtSource = 0; let advanceSource = 0; let advanceCount = 0;
+  const debtSeen = new Map<string, Row>();
   for (const f of filesOf('balances')) {
     const g = getter(f);
     for (const r of byFile.get(f.id) ?? []) {
@@ -289,12 +306,16 @@ async function analyze(db: Db, batch: { id: string; club_id: string }) {
       const advKop = Math.max(0, adv) + (debt < 0 ? -debt : 0);
       debtSource += debtKop; advanceSource += advKop; if (advKop) advanceCount++;
       if (!debtKop && !advKop) { mark(r, 'skipped', 'Нулевой остаток'); continue; }
-      const cl = findClient(g(r, 'client_ext'), g(r, 'client_name'), g(r, 'client_phone'));
-      if ('error' in cl) { mark(r, 'excluded', cl.group, cl.error); continue; }
       const dueRaw = g(r, 'due_on');
       const dueOn = (dueRaw ? parseDate(dueRaw)?.date : null) ?? today;
+      const key = `${srcClient(g, r)}|${linkNumber(g(r, 'membership_ext') || g(r, 'contract_number') || '')}|${debtKop}|${dueOn}`;
+      // 1С повторяет долг документа продажи в каждой строке номенклатуры этого документа
+      const prevDebt = debtSeen.get(key);
+      if (prevDebt) { debtSource -= debtKop; advanceSource -= advKop; if (advKop) advanceCount--; mark(r, 'skipped', 'Повтор строки', `Тот же долг документа уже в строке ${prevDebt.row_no}`); continue; }
+      debtSeen.set(key, r);
+      const cl = findClient(g(r, 'client_ext'), g(r, 'client_name'), g(r, 'client_phone'));
+      if ('error' in cl) { mark(r, 'excluded', cl.group, cl.error); continue; }
       const membershipKey = findMembership(cl.ref, g(r, 'membership_ext'), g(r, 'contract_number'), dueOn);
-      const key = `${srcClient(g, r)}|${g(r, 'membership_ext') || g(r, 'contract_number') || ''}|${debtKop}|${dueOn}`;
       if (earlier.has(`debt:${key}`)) { mark(r, 'skipped', 'Уже перенесено раньше'); continue; }
       if (debtKop) debts.push({ row: r, key, client: cl.ref, membershipKey, amount: debtKop, dueOn });
       if (advKop) mark(r, 'warning', 'Аванс клиента', `аванс ${rub(advKop)}: лицевого счёта в системе пока нет, сумма показана в отчёте сверки`);

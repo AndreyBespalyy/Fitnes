@@ -4,7 +4,7 @@ import pg from 'pg';
 import { setupTestApp, login, PASSWORD } from './helpers.ts';
 import { samples, xlsx, csv1251 } from '../db/scripts/importSamples.ts';
 import { readTable } from '../src/lib/tables.ts';
-import { detectReport, findHeaderRow, parseMoney, parseDate } from '../src/modules/importMap.ts';
+import { detectReport, findHeaderRow, isSaleDocRow, linkNumber, parseMoney, parseDate, productFromPresentation } from '../src/modules/importMap.ts';
 
 let t: Awaited<ReturnType<typeof setupTestApp>>;
 let owner: Record<string, string>;
@@ -79,6 +79,26 @@ test('чтение таблиц и разбор значений', () => {
   assert.equal(korp.mapping.contract_date?.col, 6);
   assert.equal(korp.mapping.starts_on?.col, 7);
   assert.equal(korp.mapping.ends_on?.col, 8);
+  // Отчёты КОРП 4.0 с полями через точку
+  const kv = detectReport(['Клиент', '', 'Посещение', 'Клиент.Код', 'Посещение.Дата прихода', 'Посещение.Дата ухода', 'Посещение.Основание посещения', 'Номер', 'Посещение.Помещение'], 'Посещения.xlsx');
+  assert.equal(kv.type, 'visits');
+  assert.equal(kv.mapping.visited_at?.col, 4);
+  assert.equal(kv.mapping.left_at?.col, 5);
+  assert.equal(kv.mapping.membership_ext?.col, 7);
+  assert.equal(kv.mapping.zone?.col, 8);
+  const kp = detectReport(['Клиент', 'Документ движения', 'Клиент.Код', 'Документ движения.Вид операции', 'Документ движения.Дата', 'Документ движения.Номер', 'Тип денежных средств', 'Членство пакет услуг', 'Сумма'], 'Оплаты.xlsx');
+  assert.equal(kp.type, 'payments');
+  assert.equal(kp.mapping.ext_id?.col, 5);
+  assert.equal(kp.mapping.date?.col, 4);
+  assert.equal(kp.mapping.method?.col, 6);
+  assert.equal(kp.mapping.operation?.col, 3);
+  assert.equal(linkNumber('00000006729'), '6729');
+  assert.equal(linkNumber('Членство "Sandow Platinum 2022" 6729 от 30.10.2022 00:00'), '6729');
+  assert.equal(linkNumber('Д-15'), 'Д-15');
+  assert.equal(productFromPresentation('Членство "Членство "Бронзовое". 3этап" 5339 от 01.12.2017 00:00'), 'Членство "Бронзовое". 3этап');
+  assert.equal(productFromPresentation('Пакет услуг "Sandow Silver (II)" 9172 от 05.09.2023 21:44'), 'Sandow Silver (II)');
+  assert.ok(isSaleDocRow('Продажа 5339 от 15.07.2023 11:00'));
+  assert.ok(!isSaleDocRow('Членство "Gold" 1 от 01.01.2024 00:00'));
   assert.ok(xlsx([['a']]).length > 0 && csv1251([['б']]).length > 0);
 });
 
