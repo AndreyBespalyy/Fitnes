@@ -32,11 +32,13 @@ export function DialButton({ personId, label = 'Позвонить', className =
   const dial = async () => {
     setBusy(true);
     try {
-      const r = await api<{ phone: string }>('POST', `/api/persons/${personId}/dial`);
+      const r = await api<{ phone: string; mode: 'pbx' | 'device'; ext?: string; pbxError?: string }>('POST', `/api/persons/${personId}/dial`);
+      if (r.mode === 'pbx') { toast(`АТС звонит вам на внутренний номер ${r.ext}. Возьмите трубку, и АТС соединит с клиентом. Разговор записывается.`); return; }
+      if (r.pbxError) toast(`АТС не ответила (${r.pbxError}), звоним с телефона`);
       window.location.href = `tel:${r.phone}`;
     } catch (x) { toast(errText(x)); } finally { setBusy(false); }
   };
-  return <button className={className} onClick={dial} disabled={busy} title="Номер откроется в телефоне. Звонок записывается в журнал">📞 {label}</button>;
+  return <button className={className} onClick={dial} disabled={busy} title="Звонок через АТС клуба, а без неё — с телефона. Звонок записывается в журнал">📞 {label}</button>;
 }
 
 /* ---------- профиль: пароль, уведомления, устройства, установка ---------- */
