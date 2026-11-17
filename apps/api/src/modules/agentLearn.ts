@@ -16,7 +16,7 @@ import { badRequest, forbidden, notFound } from '../errors.ts';
 import { PERMISSIONS as P } from '../roles.ts';
 import { isLeader } from './agentOwner.ts';
 
-export type Targets = { taskIds?: string[]; personIds?: string[]; leadIds?: string[]; conversationIds?: string[]; opportunityIds?: string[]; sessionIds?: string[] };
+export type Targets = { taskIds?: string[]; personIds?: string[]; leadIds?: string[]; conversationIds?: string[]; opportunityIds?: string[]; sessionIds?: string[]; userIds?: string[] };
 export type Source = 'morning' | 'card' | 'chat' | 'advice';
 export type Reason = 'done_already' | 'not_relevant' | 'wrong_data' | 'unclear' | 'not_mine' | 'other';
 

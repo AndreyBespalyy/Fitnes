@@ -68,7 +68,7 @@ async function conversationFor(db: Db, ctx: Ctx, personId: string): Promise<{ id
 }
 
 /** Имя для обращения: в CRM пишут «Имя Фамилия»; если первым словом стоит фамилия на -ов/-ев/-ин/-ова… — берём второе */
-const firstName = (full: string) => { const w = full.trim().split(/\s+/); return w.length >= 2 && /(ов|ев|ёв|ин|ын|ова|ева|ина|ына|ский|цкий|ская|цкая)$/i.test(w[0]) ? w[1] : w[0]; };
+export const firstName = (full: string) => { const w = full.trim().split(/\s+/); return w.length >= 2 && /(ов|ев|ёв|ин|ын|ова|ева|ина|ына|ский|цкий|ская|цкая)$/i.test(w[0]) ? w[1] : w[0]; };
 
 export function agentInviteRoutes(app: FastifyInstance, pool: pg.Pool) {
   // Черновик: текст приглашения и кому получится отправить

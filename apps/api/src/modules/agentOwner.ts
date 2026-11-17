@@ -43,8 +43,27 @@ export type Period = { from: string; to: string; label: string; month?: string }
 export type Club = { id: string; name: string; timezone: string };
 export type Who = { type: 'employee' | 'client'; id: string; label: string; role?: string };
 export type Pending = { kind: 'topic' | 'who' | 'meeting' | 'meeting_club'; data?: unknown; text: string; options?: Who[] };
-/** buttons — готовые задачи по советам: кнопка «Поставить задачу» под ответом */
-type Section = { title: string; lines: string[]; tips: string[]; buttons?: { label: string; task: TaskDraft }[] };
+/** Кнопка под ответом: готовая задача самому свободному менеджеру, вопрос помощнику, переход в раздел или чат с сотрудником */
+export type Btn = { label: string; task?: TaskDraft; ask?: string; url?: string; chat?: { userId: string; text: string } };
+/** buttons — вместо «откройте… поставьте… напишите…» в советах: готовое действие одной кнопкой (принцип Андрея, 17.11.2026) */
+type Section = { title: string; lines: string[]; tips: string[]; buttons?: Btn[] };
+
+/** Готовая задача по совету в каждом клубе (до трёх), где есть менеджеры */
+async function drafts(db: Db, clubs: Club[], title: (c: Club) => string | null, what: string): Promise<Btn[]> {
+  const out: Btn[] = [];
+  for (const c of clubs.slice(0, 3)) {
+    const t = title(c); if (!t) continue;
+    const d = await draftTask(db, c, t);
+    if (d) out.push(draftButton(d, what, clubs.length > 1));
+  }
+  return out;
+}
+const lastName = (n: string) => n.split(' ').slice(-1)[0];
+/** РОП клуба (если нет — управляющий): ему адресуем «разберите переписку» */
+async function headOf(db: Db, clubIds: string[]) {
+  return (await db.query(`select u.id, u.full_name from user_assignments a join users u on u.id = a.user_id and u.status = 'active' and not u.is_bot
+    where a.club_id = any($1) and a.role_code in ('rop', 'gm') and (a.active_to is null or a.active_to >= current_date) order by a.role_code = 'rop' desc limit 1`, [clubIds])).rows[0] as { id: string; full_name: string } | undefined;
+}
 
 const rub = (kop: number) => `${Math.round(kop / 100).toLocaleString('ru-RU').replace(/[ ,]/g, ' ')} ₽`;
 const pctOf = (a: number, b: number) => (b > 0 ? Math.round((a * 100) / b) : 0);
@@ -206,13 +225,16 @@ async function salesSection(db: Db, clubs: Club[], per: Period, today: string): 
     const len = daysBetween(per.from, per.to) + 1;
     const cur = await sum(per.from, per.to); const prev = await sum(addDays(per.from, -len), addDays(per.from, -1));
     lines.push(`Продажи: **${rub(cur)}** (${change(cur, prev)}: было ${rub(prev)}).`);
-    if (prev && cur < prev * 0.8) tips.push('Продажи заметно ниже прошлого такого же периода: проверьте, сколько было заявок и встреч — проблема в потоке клиентов или в дожиме.');
+    if (prev && cur < prev * 0.8) {
+      tips.push('Продажи заметно ниже прошлого такого же периода. Посмотрите воронку: сколько было заявок и встреч — проблема в потоке клиентов или в конверсии.');
+      return { title: 'Продажи', lines, tips, buttons: [{ label: 'Воронка и источники', url: '/?tab=sales&view=funnel' }, { label: 'Кто отстаёт из менеджеров', ask: 'кто из менеджеров отстаёт от плана' }] };
+    }
   }
   return { title: 'Продажи', lines, tips };
 }
 
 async function forecastSection(db: Db, clubs: Club[], today: string): Promise<Section> {
-  const lines: string[] = []; const tips: string[] = [];
+  const lines: string[] = []; const tips: string[] = []; const buttons: Btn[] = [];
   const month = today.slice(0, 7);
   const mi = monthInfo(month, today);
   const groups = clubs.length > 1 ? [...clubs.map((c) => [c]), clubs] : [clubs];
@@ -244,10 +266,14 @@ async function forecastSection(db: Db, clubs: Club[], today: string): Promise<Se
   const ch = (await db.query(`select count(*)::int as n, coalesce(sum(score), 0)::float as e from client_scores where club_id = any($1) and kind = 'churn' and segment in ('hot', 'warm')`, [ids])).rows[0];
   if (ch.n) {
     lines.push(`• Отток: в зоне риска ${ch.n} клиентов, по оценке ИИ не продлят ≈ ${Math.round(ch.e)} из них.`);
-    tips.push(`Клиенты в зоне риска оттока (${ch.n}): позвоните им до окончания абонемента и предложите продление — это дешевле, чем искать новых.`);
+    tips.push(`Клиенты в зоне риска оттока (${ch.n}): позвонить до окончания абонемента и предложить продление — это дешевле, чем искать новых. Задача менеджеру уже подготовлена — кнопка ниже.`);
+    const byClub = (await db.query(`select club_id, count(*)::int as n from client_scores where club_id = any($1) and kind = 'churn' and segment in ('hot', 'warm') group by club_id`, [ids])).rows;
+    buttons.push(...await drafts(db, clubs, (c) => { const n = byClub.find((r) => r.club_id === c.id)?.n; return n ? `Обзвонить клиентов в зоне риска оттока (${n}): спросить, как тренировки, и предложить раннее продление. Список — «Возврат клиентов». Итог по каждому — в карточку.` : null; }, 'обзвон риска оттока'));
+    buttons.push({ label: 'Клиенты в зоне риска', url: '/?tab=retention' });
   }
   lines.push(`Прогноз по фактическому темпу за ${mi.passed} дн. ${mi.passed < 7 ? 'Прошло меньше недели — точность низкая.' : mi.passed < 15 ? 'Точность средняя.' : 'Точность высокая.'} Это оценка, не гарантия.`);
-  return { title: 'Прогноз', lines, tips };
+  if (tips.some((t) => t.includes('план под угрозой'))) buttons.unshift({ label: 'Что с продажами', ask: 'что с продажами' });
+  return { title: 'Прогноз', lines, tips, buttons };
 }
 
 async function attendanceSection(db: Db, clubs: Club[], per: Period, today: string): Promise<Section> {
@@ -256,6 +282,7 @@ async function attendanceSection(db: Db, clubs: Club[], per: Period, today: stri
   const len = daysBetween(per.from, per.to) + 1;
   const range = `v.club_id = any($1) and v.visited_at >= ($2::date)::timestamp at time zone c.timezone and v.visited_at < ($3::date + 1)::timestamp at time zone c.timezone`;
   const q = async (from: string, to: string) => (await db.query(`select count(*)::int as n, count(distinct v.person_id)::int as u from visits v join clubs c on c.id = v.club_id where ${range}`, [ids, from, to])).rows[0];
+  const buttons: Btn[] = [];
   const cur = await q(per.from, per.to); const prev = await q(addDays(per.from, -len), addDays(per.from, -1));
   lines.push(`Посещений: **${cur.n}** (${change(cur.n, prev.n)}), разных клиентов: ${cur.u}, в среднем ${Math.round((cur.n / len) * 10) / 10} в день.`);
   if (cur.n) {
@@ -274,10 +301,12 @@ async function attendanceSection(db: Db, clubs: Club[], per: Period, today: stri
     group by p.id, p.full_name having max(v.visited_at) is null or max(v.visited_at) < now() - interval '14 days' order by max(v.visited_at) nulls first limit 200`, [ids, today])).rows;
   if (lapsed.length) {
     lines.push(`Перестали ходить (абонемент действует, но не были 14+ дней): **${lapsed.length}**${lapsed.length ? `, например: ${lapsed.slice(0, 4).map((r) => `${r.full_name} (${r.days == null ? 'ни разу' : `${r.days} дн.`})`).join(', ')}` : ''}.`);
-    tips.push(`${lapsed.length} клиентов с действующим абонементом перестали ходить — они первые кандидаты на отказ от продления. Раздел «Возврат клиентов» соберёт их в список для звонков.`);
+    tips.push(`${lapsed.length} клиентов с действующим абонементом перестали ходить — первые кандидаты на отказ от продления. Задача менеджеру на обзвон подготовлена — кнопка ниже.`);
+    buttons.push(...await drafts(db, clubs, () => `Позвонить клиентам, которые перестали ходить (${lapsed.length}): узнать, что случилось, и пригласить на тренировку с тренером. Список — «Возврат клиентов».`, 'обзвон пропавших'));
+    buttons.push({ label: 'Список пропавших', url: '/?tab=retention' });
   }
-  if (prev.n && cur.n < prev.n * 0.85) tips.push('Посещаемость упала больше чем на 15 %: проверьте расписание (не отменялись ли занятия) и напомните клиентам о групповых через рассылку.');
-  return { title: 'Посещаемость', lines, tips };
+  if (prev.n && cur.n < prev.n * 0.85) { tips.push('Посещаемость упала больше чем на 15 %. Проверьте расписание: не отменялись ли занятия.'); buttons.push({ label: 'Расписание', url: '/?tab=schedule' }); }
+  return { title: 'Посещаемость', lines, tips, buttons };
 }
 
 async function trainerRows(db: Db, clubIds: string[], from: string, to: string, trainerId?: string) {
@@ -300,20 +329,26 @@ function trainerLine(r: Awaited<ReturnType<typeof trainerRows>>[number]) {
 }
 async function trainersSection(db: Db, clubs: Club[], per: Period): Promise<Section> {
   const rows = await trainerRows(db, clubs.map((c) => c.id), per.from, per.to);
-  const lines: string[] = []; const tips: string[] = [];
+  const lines: string[] = []; const tips: string[] = []; const buttons: Btn[] = [];
   if (!rows.length) return { title: 'Тренеры', lines: ['Занятий с тренерами за этот период нет.'], tips };
   for (const r of rows) {
     const l = trainerLine(r);
     lines.push(l.text);
-    if (l.fill < 40 && r.n >= 3) tips.push(`${r.name}: заполняемость ${l.fill} %. Перенесите слабые занятия на пиковые часы или предложите их клиентам, которые ходят в это время.`);
-    if (l.nsr >= 20 && r.att + r.ns >= 5) tips.push(`${r.name}: ${l.nsr} % записавшихся не приходят. Включите напоминание за 2 часа и правило списания за неявку в настройках расписания.`);
+    if (l.fill < 40 && r.n >= 3) {
+      tips.push(`${r.name}: заполняемость ${l.fill} %. Обсудите с тренером перенос слабых занятий на пиковые часы — кнопка «Чат» ниже.`);
+      buttons.push({ label: `Чат: ${lastName(r.name)}`, chat: { userId: r.id, text: `Заполняемость ваших занятий за период — ${l.fill} %. Давайте посмотрим, какие перенести на пиковые часы и кого из клиентов пригласить.` } });
+    }
+    if (l.nsr >= 20 && r.att + r.ns >= 5) {
+      tips.push(`${r.name}: ${l.nsr} % записавшихся не приходят. Помогают напоминание за 2 часа и правило списания за неявку (настройки расписания); тренеру — писать не пришедшим.`);
+      if (!buttons.some((b) => b.chat?.userId === r.id)) buttons.push({ label: `Чат: ${lastName(r.name)}`, chat: { userId: r.id, text: `На ваши занятия не приходит ${l.nsr} % записавшихся. Давайте после каждого занятия писать не пришедшим — в помощнике есть кнопка «Написать клиентам» с готовым приглашением.` } });
+    }
   }
-  return { title: 'Тренеры', lines, tips };
+  return { title: 'Тренеры', lines, tips, buttons: buttons.slice(0, 4) };
 }
 
 async function employeeSection(db: Db, clubs: Club[], per: Period, who: Who): Promise<Section> {
   const ids = clubs.map((c) => c.id);
-  const lines: string[] = []; const tips: string[] = [];
+  const lines: string[] = []; const tips: string[] = []; const buttons: Btn[] = [];
   lines.push(`Должность: ${who.role ?? '—'}.`);
   const roles = (await db.query(`select role_code from user_assignments where user_id = $1 and (active_to is null or active_to >= current_date)`, [who.id])).rows.map((r) => r.role_code as string);
   if (roles.some((r) => ['manager', 'rop'].includes(r))) {
@@ -321,8 +356,14 @@ async function employeeSection(db: Db, clubs: Club[], per: Period, who: Who): Pr
     const sold = (await salesFact(db, ids, per.from, per.to)).filter((x) => x.userId === who.id && !x.recurring).reduce((a, x) => a + x.kop, 0);
     lines.push(`Продал на **${rub(sold)}**, продаж: ${k.sales ?? 0}. Звонков: ${k.calls ?? 0}, сообщений клиентам: ${k.messages ?? 0}, встреч назначено/пришли: ${k.meetings_set ?? 0}/${k.meetings_done ?? 0}, отказов: ${k.refusals ?? 0}.`);
     if (k.first_response != null) lines.push(`Отвечает на новую заявку в среднем за ${k.first_response} мин.`);
-    if ((k.first_response ?? 0) > 15) tips.push(`${who.label} отвечает на заявки дольше 15 минут — за это время клиент уходит к конкурентам. Агент уже передаёт такие заявки другому, но стоит поговорить.`);
-    if ((k.meetings_set ?? 0) > 0 && (k.meetings_done ?? 0) / (k.meetings_set ?? 1) < 0.5) tips.push(`${who.label}: на встречи приходит меньше половины. Подтверждение встречи накануне и в день визита обычно поднимает явку.`);
+    if ((k.first_response ?? 0) > 15) {
+      tips.push(`${who.label} отвечает на заявки дольше 15 минут — за это время клиент уходит к конкурентам. Агент уже передаёт такие заявки другому, но стоит поговорить.`);
+      buttons.push({ label: `Чат: ${lastName(who.label)}`, chat: { userId: who.id, text: `Ответ на новую заявку у вас в среднем ${k.first_response} мин, норма — 5. Что мешает брать заявки сразу? Включены ли уведомления о заявках на телефоне?` } });
+    }
+    if ((k.meetings_set ?? 0) > 0 && (k.meetings_done ?? 0) / (k.meetings_set ?? 1) < 0.5) {
+      tips.push(`${who.label}: на встречи приходит меньше половины. Подтверждение встречи накануне и в день визита по скрипту обычно поднимает явку.`);
+      if (!buttons.length) buttons.push({ label: `Чат: ${lastName(who.label)}`, chat: { userId: who.id, text: `На назначенные встречи приходит меньше половины клиентов (${k.meetings_done ?? 0} из ${k.meetings_set}). Давайте подтверждать каждую встречу накануне и в день визита — скрипт «Подтверждение встречи» есть у задачи кнопкой «Показать скрипт звонка».` } });
+    }
   }
   if (roles.includes('trainer')) {
     const tr = await trainerRows(db, ids, per.from, per.to, who.id);
@@ -336,8 +377,12 @@ async function employeeSection(db: Db, clubs: Club[], per: Period, who: Who): Pr
   lines.push(`Задачи: выполнено ${t.done}, открыто ${t.open}, **просрочено ${t.over}**${t.oldest ? ` (самая старая — с ${fmtDate(t.oldest, clubs[0].timezone)})` : ''}.`);
   const deals = (await db.query(`select count(*)::int as n from opportunities where owner_id = $1 and status = 'open' and club_id = any($2)`, [who.id, ids])).rows[0].n;
   if (deals) lines.push(`Открытых сделок: ${deals}.`);
-  if (t.over >= 3) tips.push(`У сотрудника ${who.label} ${t.over} просроченных задач. Напишите «напомни ${who.label.split(' ')[0]}» — отправлю карточку, или «передай задачи ${who.label.split(' ')[0]} …» — передам другому.`);
-  return { title: `Сотрудник: ${who.label}`, lines, tips };
+  if (t.over >= 3) {
+    tips.push(`У сотрудника ${who.label} ${t.over} просроченных задач. Можно напомнить ему карточкой или передать задачи свободному коллеге — кнопки ниже.`);
+    const fn = who.label.split(' ')[0];
+    buttons.push({ label: `Напомнить: ${fn}`, ask: `напомни ${fn}` }, { label: `Передать задачи: ${fn}`, ask: `передай задачи ${fn}` }, { label: `Задачи: ${lastName(who.label)}`, url: `/?tab=tasks&scope=all&user=${who.id}&day=today` });
+  }
+  return { title: `Сотрудник: ${who.label}`, lines, tips, buttons };
 }
 
 async function staffSection(db: Db, clubs: Club[], per: Period): Promise<Section> {
@@ -348,16 +393,23 @@ async function staffSection(db: Db, clubs: Club[], per: Period): Promise<Section
   if (!staff.length) return { title: 'Отдел продаж', lines: ['Менеджеров по продажам нет.'], tips };
   const k = await kpi(db, ids, per.from, per.to, staff.map((s) => s.id));
   const sf = await salesFact(db, ids, per.from, per.to);
-  const rows = staff.map((s) => ({ name: s.full_name as string, v: k.find((x) => x.userId === s.id)!.values, kop: sf.filter((x) => x.userId === s.id && !x.recurring).reduce((a, x) => a + x.kop, 0) }))
+  const rows = staff.map((s) => ({ id: s.id as string, name: s.full_name as string, v: k.find((x) => x.userId === s.id)!.values, kop: sf.filter((x) => x.userId === s.id && !x.recurring).reduce((a, x) => a + x.kop, 0) }))
     .sort((a, b) => b.kop - a.kop);
   for (const r of rows) lines.push(`• **${r.name}**: ${rub(r.kop)}, продаж ${r.v.sales ?? 0}, звонков ${r.v.calls ?? 0}, просрочено задач ${r.v.tasks_overdue ?? 0}${r.v.first_response != null ? `, ответ на заявку ${r.v.first_response} мин` : ''}`);
-  if (rows.length > 1 && rows[0].kop > 0 && rows.at(-1)!.kop < rows[0].kop * 0.3) tips.push(`Большой разрыв: ${rows[0].name} продаёт в разы больше, чем ${rows.at(-1)!.name}. Разберите звонки лидера на планёрке — это самый быстрый способ подтянуть остальных.`);
+  if (rows.length > 1 && rows[0].kop > 0 && rows.at(-1)!.kop < rows[0].kop * 0.3) {
+    tips.push(`Большой разрыв: ${rows[0].name} продаёт в разы больше, чем ${rows.at(-1)!.name}. Разберите звонки лидера на планёрке — это самый быстрый способ подтянуть остальных.`);
+    return { title: 'Отдел продаж', lines, tips, buttons: [
+      { label: `Звонки: ${lastName(rows[0].name)}`, url: '/?tab=calls' },
+      { label: `Чат: ${lastName(rows.at(-1)!.name)}`, chat: { userId: rows.at(-1)!.id, text: `Продажи за период: ${rub(rows.at(-1)!.kop)} — в разы меньше, чем у ${rows[0].name}. Давайте вместе послушаем пару звонков лидера и разберём, что можно взять себе.` } },
+      { label: 'Рейтинг менеджеров', url: '/?tab=sales&view=rating' },
+    ] };
+  }
   return { title: 'Отдел продаж', lines, tips };
 }
 
 async function problemsSection(db: Db, clubs: Club[], today: string): Promise<Section> {
   const ids = clubs.map((c) => c.id);
-  const lines: string[] = []; const tips: string[] = [];
+  const lines: string[] = []; const tips: string[] = []; const buttons: Btn[] = [];
   const over = (await db.query(`select u.full_name, count(*)::int as n from tasks t join users u on u.id = t.assignee_id
     where t.club_id = any($1) and t.done_at is null and t.due_at < now() and t.due_at > now() - interval '7 days' group by u.full_name order by n desc limit 8`, [ids])).rows;
   const leads = (await db.query(`select count(*)::int as n from leads where club_id = any($1) and taken_at is null and first_response_at is null and created_at > now() - interval '1 day'`, [ids])).rows[0].n;
@@ -371,18 +423,38 @@ async function problemsSection(db: Db, clubs: Club[], today: string): Promise<Se
   lines.push(over.length ? `• Просроченные задачи (за неделю):\n${over.map((o) => `   – ${o.full_name}: ${o.n}`).join('\n')}` : '• Просроченных задач нет');
   const stuckN = stuck.reduce((a, x) => a + x.n, 0);
   const lateProc = (await db.query(`select count(*)::int as n from processes where club_id = any($1) and status = 'active' and due_at < now()`, [ids])).rows[0].n;
-  if (lateProc) { lines.push(`• Бизнес-процессы вышли за срок: **${lateProc}** (напишите «процессы» — покажу, где застряли)`); tips.push('Процессы, вышедшие за срок, обычно стоят на одном человеке: откройте «Бизнес-процессы» и передайте застрявший шаг другому.'); }
+  if (lateProc) { lines.push(`• Бизнес-процессы вышли за срок: **${lateProc}**`); tips.push('Процессы, вышедшие за срок, обычно стоят на одном человеке: откройте «Бизнес-процессы» и передайте застрявший шаг другому.'); }
   if (stuckN) lines.push(`• Сделки без движения больше 7 дней: **${stuckN}** (${stuck.map((s) => `${s.stage} — ${s.n}`).join(', ')})`);
   const mi = monthInfo(today.slice(0, 7), today);
   const lt = { ...mi, ...(await lightOf(db, ids)) };
   const tg = await targets(db, ids, mi.from.slice(0, 7)); const sf = await salesFact(db, ids, mi.from, today); const cf = await clientsFact(db, ids, mi.from, today);
   const pf = planFact(lt, tg, sf, cf, {});
   if (pf.total.light === 'red') lines.push(`• План продаж отстаёт: ${pf.total.percent} % при прошедших ${Math.round((mi.passed / mi.days) * 100)} % месяца 🔴`);
-  if (leads) tips.push('Заявки без ответа — потерянные деньги: каждая минута снижает шанс продажи. Проверьте, кто на смене, и включите авто-передачу заявки через 10 минут (уже работает, если не выключена в настройках агента).');
-  if (wait) tips.push(`${wait} клиентов ждут ответа в переписке. Попросите РОПа разобрать раздел «Переписка» до конца дня.`);
-  if (over[0]?.n >= 3) tips.push(`Больше всего просрочек у сотрудника ${over[0].full_name} (${over[0].n}). Можно написать мне «напомни ${over[0].full_name.split(' ')[0]}» или «передай задачи ${over[0].full_name.split(' ')[0]} …».`);
-  if (stuckN) tips.push(`Сделки без движения неделю почти не закрываются сами. Поставьте менеджерам задачу: по каждой — звонок и решение «двигаем или закрываем с причиной».`);
-  return { title: 'Что горит сейчас', lines, tips };
+  if (leads) {
+    tips.push('Заявки без ответа — потерянные деньги: каждая минута снижает шанс продажи. Задача самому свободному менеджеру подготовлена — кнопка ниже.');
+    const lc = (await db.query(`select club_id, count(*)::int as n from leads where club_id = any($1) and taken_at is null and first_response_at is null and created_at > now() - interval '1 day' group by club_id`, [ids])).rows;
+    buttons.push(...await drafts(db, clubs, (c) => { const n = lc.find((r) => r.club_id === c.id)?.n; return n ? `Ответить на заявки без ответа (${n}) в течение часа: позвонить по скрипту «Звонок по заявке» и записать на пробную тренировку.` : null; }, 'заявки без ответа'));
+    buttons.push({ label: 'Заявки без ответа', url: '/?tab=leads&filter=noresponse' });
+  }
+  if (wait) {
+    const h = await headOf(db, ids);
+    tips.push(`${wait} клиентов ждут ответа в переписке${h ? ` — попросите ${h.full_name} разобрать их до конца дня` : ''}.`);
+    if (h) buttons.push({ label: `Чат: ${lastName(h.full_name)}`, chat: { userId: h.id, text: `${wait} клиентов ждут ответа в переписке. Разберите, пожалуйста, до конца дня и напишите, если что-то нужно от меня.` } });
+    buttons.push({ label: 'Переписка без ответа', url: '/?tab=chats' });
+  }
+  if (over[0]?.n >= 3) {
+    const fn = over[0].full_name.split(' ')[0];
+    tips.push(`Больше всего просрочек у сотрудника ${over[0].full_name} (${over[0].n}). Напомнить или передать задачи — кнопки ниже.`);
+    buttons.push({ label: `Напомнить: ${fn}`, ask: `напомни ${fn}` }, { label: `Передать задачи: ${fn}`, ask: `передай задачи ${fn}` });
+  }
+  if (stuckN) {
+    tips.push('Сделки без движения неделю почти не закрываются сами. Задача менеджеру — по каждой звонок и решение — подготовлена, кнопка ниже.');
+    const sc = (await db.query(`select o.club_id, count(*)::int as n from opportunities o where o.club_id = any($1) and o.status = 'open'
+      and coalesce((select max(h.at) from opportunity_stage_history h where h.opportunity_id = o.id), o.created_at) < now() - interval '7 days' group by o.club_id`, [ids])).rows;
+    buttons.push(...await drafts(db, clubs, (c) => { const n = sc.find((r) => r.club_id === c.id)?.n; return n ? `Сделки без движения больше 7 дней (${n}): по каждой — звонок и решение «двигаем дальше или закрываем с причиной».` : null; }, 'сделки без движения'));
+  }
+  if (lateProc) buttons.push({ label: 'Где застряли процессы', ask: 'процессы' });
+  return { title: 'Что горит сейчас', lines, tips, buttons: buttons.slice(0, 6) };
 }
 
 async function clientSection(db: Db, ctx: Ctx, yandex: YandexConfig | null, who: Who, clubs: Club[]): Promise<Section> {
@@ -565,7 +637,7 @@ export async function ownerAnswer(db: Db, ctx: Ctx, text: string, yandex: Yandex
 
   const tipsRule = [...new Set(sections.flatMap((s) => s.tips))].slice(0, 5);
   const buttons = sections.flatMap((s) => s.buttons ?? []);
-  if (out && buttons.length) out.actions = [...buttons, ...(out.actions ?? [])];
+  if (out && buttons.length) out.actions = [...buttons.slice(0, 8), ...(out.actions ?? [])];
   const body = sections.filter((s) => !onlyAdvice || s.tips.length).map((s) => `**${s.title}**\n${s.lines.join('\n')}`);
   let advice = tipsRule.map((x) => `• ${x}`).join('\n');
   if (yandex && (want.has('advice') || tipsRule.length)) {

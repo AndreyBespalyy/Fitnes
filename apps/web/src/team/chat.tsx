@@ -16,7 +16,8 @@ type Msg = { id: string; userId: string | null; author: string | null; body: str
   meta?: { kind?: string; meetingId?: string; status?: 'confirmed' | 'declined'; sids?: string[]; sid?: string; rated?: Record<string, number>; acts?: Act[][]; actions?: Act[] } | null };
 /** Кнопка под сообщением помощника: ask — отправить помощнику фразу, url — открыть раздел CRM */
 type Act = { label: string; ask?: string; url?: string; task?: Draft; done?: { taskId: string; name: string };
-  dial?: { personId: string }; call?: { persons: { id: string; name: string }[] }; write?: { kind: 'noshow' | 'newbie' | 'idle'; personIds: string[] } };
+  dial?: { personId: string }; call?: { persons: { id: string; name: string }[] }; write?: { kind: 'noshow' | 'newbie' | 'idle'; personIds: string[] };
+  /** открыть личный чат с сотрудником, в поле ввода — готовое первое сообщение */ chat?: { userId: string; text: string } };
 /** Готовая задача по совету помощника: руководитель проверяет и ставит */
 type Draft = { clubId: string; clubName: string; assigneeId: string; assigneeName: string; why: string; title: string; dueAt: string; candidates: { id: string; name: string; open: number; overdue: number }[] };
 type Person = { id: string; fullName: string; login: string; roles: string[]; clubs: string[]; app: string | null };
@@ -131,7 +132,7 @@ export function TeamChat({ meId, initialChat, onUnread, emptyHint, header }: { m
           <button className="tm-icon-btn pri" onClick={() => setCreating(true)} aria-label="Новый чат" title="Новый чат"><Ico d={I.plus} /></button>
         </div>
         <button className="tm-ai" onClick={() => void openAi()} title="Спросите о задачах, перенесите срок, узнайте суть ситуации по клиенту">
-          <span className="tm-ai-ico" aria-hidden="true">✦</span><span><b>ИИ-помощник</b><small>«мои задачи», «перенеси Анну на завтра»</small></span></button>
+          <span className="tm-ai-ico" aria-hidden="true">✦</span><span><b>Дядя Витя</b><small>«мои задачи», «перенеси Анну на завтра»</small></span></button>
         <label className="tm-search"><Ico d={I.search} s={16} /><input type="search" value={q} onChange={(e) => setQ(e.target.value)} placeholder="Найти чат" aria-label="Найти чат" /></label>
         {listErr && <div className="tm-err">{listErr}</div>}
         {list === null && !listErr && <p className="tm-muted tm-pad">Загрузка…</p>}
@@ -160,7 +161,8 @@ export function TeamChat({ meId, initialChat, onUnread, emptyHint, header }: { m
       </aside>
       <section className="tm-conv">
         {active ? <Conversation key={active} id={active} meId={meId} item={activeItem} onBack={() => open(null)} onChanged={loadList} onLeft={() => { open(null); loadList(); }}
-          initialText={draft?.chat === active ? draft.text : undefined} onAssistant={(text) => void openAi(text)} />
+          initialText={draft?.chat === active ? draft.text : undefined} onAssistant={(text) => void openAi(text)}
+          onOpenChat={(id, text) => { setDraft({ chat: id, text }); void loadList(); open(id); }} />
           : <div className="tm-empty">{emptyHint ?? <><Ico d={I.group} s={40} /><p>Выберите чат слева или начните новый</p></>}</div>}
       </section>
       {creating && <NewChat onClose={() => setCreating(false)} onOpen={(id) => { setCreating(false); loadList(); open(id); }} />}
@@ -169,8 +171,8 @@ export function TeamChat({ meId, initialChat, onUnread, emptyHint, header }: { m
 }
 
 /* ======================================================================= */
-function Conversation({ id, meId, item, onBack, onChanged, onLeft, initialText, onAssistant }: { id: string; meId: string; item?: ChatItem; onBack: () => void; onChanged: () => void; onLeft: () => void;
-  initialText?: string; onAssistant: (text: string) => void }) {
+function Conversation({ id, meId, item, onBack, onChanged, onLeft, initialText, onAssistant, onOpenChat }: { id: string; meId: string; item?: ChatItem; onBack: () => void; onChanged: () => void; onLeft: () => void;
+  initialText?: string; onAssistant: (text: string) => void; onOpenChat?: (id: string, text: string) => void }) {
   const [info, setInfo] = useState<ChatInfo | null>(null);
   const [msgs, setMsgs] = useState<Msg[]>([]);
   const [reads, setReads] = useState<{ userId: string; lastReadAt: string }[]>([]);
@@ -259,7 +261,11 @@ function Conversation({ id, meId, item, onBack, onChanged, onLeft, initialText, 
     } finally { setBusy(false); }
   };
   // Кнопка под сообщением помощника: фраза уходит помощнику как ваше сообщение, ссылка открывает раздел CRM
-  const act = (a: Act) => { if (a.ask) void send(undefined, undefined, a.ask); else if (a.url) goUrl(a.url); };
+  const act = (a: Act) => {
+    if (a.ask) void send(undefined, undefined, a.ask);
+    else if (a.chat) api<{ id: string }>('POST', '/api/team/direct', { userId: a.chat.userId }).then((r) => onOpenChat?.(r.id, a.chat!.text)).catch((x) => setSendErr(err(x)));
+    else if (a.url) goUrl(a.url);
+  };
   const onKey = (e: KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === 'Enter' && !e.shiftKey && !coarse() && !e.nativeEvent.isComposing) { e.preventDefault(); void send(); }
     if (e.key === 'Escape') { setReply(null); setEdit(null); }
@@ -549,8 +555,8 @@ function ActButtons({ acts, onAct, msgId, onDone }: { acts: Act[]; onAct: (a: Ac
         ? (a.done
           ? <button key={i} type="button" className="done" onClick={() => goUrl('/?tab=tasks&scope=all')}>✓ Поставлено: {a.done.name.split(' ').slice(0, 2).join(' ')} →</button>
           : <button key={i} type="button" className="task" onClick={() => setOpen(i)}>✚ {a.label}</button>)
-        : <button key={i} type="button" className={a.ask ? 'ask' : a.dial || a.call || a.write ? 'act' : 'go'} onClick={() => press(a)}>
-          {a.ask ? '✦ ' : a.dial || a.call ? '📞 ' : a.write ? '✉ ' : ''}{a.label}{a.url ? ' →' : ''}</button>)}
+        : <button key={i} type="button" className={a.ask ? 'ask' : a.dial || a.call || a.write || a.chat ? 'act' : 'go'} onClick={() => press(a)}>
+          {a.ask ? '✦ ' : a.dial || a.call ? '📞 ' : a.write ? '✉ ' : a.chat ? '💬 ' : ''}{a.label}{a.url ? ' →' : ''}</button>)}
       {open !== null && acts[open]?.task && msgId && <DraftSheet draft={acts[open].task!} msgId={msgId} idx={open} onClose={() => setOpen(null)}
         onDone={(d) => { setOpen(null); onDone?.(open, d); }} />}
     </div>
@@ -651,7 +657,7 @@ function goUrl(url: string) {
 /* ---------- Советы ИИ-помощника по переписке (видит только сам сотрудник) ---------- */
 type Advice = { topic: string | null; topicName: string | null; summary: string | null; engine: string | null; analyzedAt: string | null; pending: boolean;
   items: { id: string; body: string; status: 'new' | 'started'; actionType: 'process' | 'task' | 'assistant'; actionLabel: string; result: { kind: string; id?: string; tab?: string; label: string; prompt?: string } | null }[] };
-const isBotChat = (info: ChatInfo | null, meId: string) => !!info && info.kind === 'direct' && info.members.some((m) => m.id !== meId && m.fullName === 'ИИ-помощник');
+const isBotChat = (info: ChatInfo | null, meId: string) => !!info && info.kind === 'direct' && info.members.some((m) => m.id !== meId && m.fullName === 'Дядя Витя');
 /** Перейти в раздел CRM; из отдельного приложения-мессенджера — открыть CRM в новой вкладке */
 function goTab(tab: string) {
   if (location.pathname.startsWith('/team')) window.open(`/?tab=${encodeURIComponent(tab)}`, '_blank');

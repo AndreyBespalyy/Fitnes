@@ -4,15 +4,16 @@ import { useEffect, useState } from 'react';
 import { api, can, type Club, type Me, navParams } from './api.ts';
 import { dt, errText, toast } from './ui.ts';
 import { AgentSettingsCard } from './agent.tsx';
+import { ManagerRatings, canSeeRating } from './rating.tsx';
 
 const d2 = (s: string) => s.split('-').reverse().slice(0, 2).join('.');
 const rubles = (kop: number) => `${Math.round(kop / 100).toLocaleString('ru-RU')} ₽`;
 
-type View = 'leads' | 'lists' | 'renewals' | 'newbies' | 'funnel' | 'base' | 'settings';
+type View = 'leads' | 'lists' | 'renewals' | 'newbies' | 'rating' | 'funnel' | 'base' | 'settings';
 
 export function SalesOpsPage({ me, clubs, clubId, openPerson }: { me: Me; clubs: Club[]; clubId: string; openPerson: (id: string) => void }) {
   const views: [View, string, boolean][] = [
-    ['leads', 'Заявки', true], ['lists', 'Списки обзвона', true], ['renewals', 'Окно продлений', true], ['newbies', 'Новички', true],
+    ['leads', 'Заявки', true], ['lists', 'Списки обзвона', true], ['renewals', 'Окно продлений', true], ['newbies', 'Новички', true], ['rating', 'Рейтинг менеджеров', canSeeRating(me)],
     ['funnel', 'Воронка и источники', can(me, 'dash.view')], ['base', 'Стоп-лист и дубли', can(me, 'crm.view_all')], ['settings', 'Настройки', can(me, 'plan.manage') || can(me, 'tariffs.manage')],
   ];
   const [view, setView] = useState<View>(() => (views.some((v) => v[0] === navParams('sales').view && v[2]) ? navParams('sales').view as View : 'leads'));
@@ -26,6 +27,7 @@ export function SalesOpsPage({ me, clubs, clubId, openPerson }: { me: Me; clubs:
       {view === 'lists' && <CallLists clubId={club} openPerson={openPerson} />}
       {view === 'renewals' && <Renewals clubId={club} openPerson={openPerson} />}
       {view === 'newbies' && <Newbies clubId={club} openPerson={openPerson} />}
+      {view === 'rating' && <ManagerRatings clubId={club} mine={!me.roles.some((r) => ['rop', 'gm', 'owner'].includes(r.code))} />}
       {view === 'funnel' && <Funnel clubId={club} />}
       {view === 'base' && <BaseCleanup clubId={club} openPerson={openPerson} />}
       {view === 'settings' && <><Settings clubId={club} /><AgentSettingsCard clubId={club} /></>}

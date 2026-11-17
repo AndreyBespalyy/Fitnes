@@ -110,3 +110,22 @@ test('руководитель: «кто из менеджеров отстаё�
   assert.equal(a.label, 'Задачи на сегодня: Волкова');
   assert.equal(a.url, `/?tab=tasks&scope=all&user=${vol}&day=today`);
 });
+
+test('советы — кнопками: варианты «напишите номер», «что горит» с готовыми задачами и чатом', async () => {
+  const { choiceButtons } = await import('../src/modules/agentChat.ts');
+  assert.deepEqual(choiceButtons('Уточните, кого вы имеете в виду:\n1 — Мария Волкова (менеджер)\n2 — Мария Котова (администратор)\n\nНапишите номер.'),
+    [{ label: 'Мария Волкова (менеджер)', ask: '1' }, { label: 'Мария Котова (администратор)', ask: '2' }]);
+  assert.deepEqual(choiceButtons('1 — без вопроса'), []);
+
+  const c = (await sql(`select id from clubs where name like '%Центр%'`))[0];
+  await req('POST', '/api/leads', 'm.volkova', { clubId: c.id, fullName: 'Безответный Лид', phone: '+79006660031', sourceCode: 'walk_in' });
+  await sql(`update leads set taken_at = null, first_response_at = null where person_id = (select id from persons where full_name = 'Безответный Лид')`);
+  const m = await ask('что горит', 'o.smirnov');
+  const acts = m.meta!.actions! as { label: string; task?: { title: string }; url?: string; ask?: string }[];
+  const t = acts.find((a) => a.task && /заявки без ответа$/.test(a.label));
+  assert.ok(t, JSON.stringify(acts.map((a) => a.label)));
+  assert.match(t.task!.title, /^Ответить на заявки без ответа \(\d+\) в течение часа/);
+  assert.ok(acts.some((a) => a.url === '/?tab=leads&filter=noresponse'));
+  assert.match(m.body, /Задача самому свободному менеджеру подготовлена — кнопка ниже/);
+  assert.doesNotMatch(m.body, /Проверьте, кто на смене/);
+});

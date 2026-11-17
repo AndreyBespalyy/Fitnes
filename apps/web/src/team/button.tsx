@@ -30,8 +30,8 @@ export function AiButton({ onOpen }: { onOpen: (chatId: string) => void }) {
     try { const r = await api<{ id: string }>('POST', '/api/agent/chat'); onOpen(r.id); } catch { /* чат откроется в мессенджере вручную */ } finally { setBusy(false); }
   };
   return (
-    <button type="button" className="btn sm ai-top" onClick={open} disabled={busy} title="ИИ-помощник: спросите о задачах, клиентах, продажах — или попросите сделать" aria-label="ИИ-помощник">
-      <span aria-hidden="true">✦</span><span className="ai-top-l">ИИ-помощник</span>
+    <button type="button" className="btn sm ai-top" onClick={open} disabled={busy} title="Дядя Витя, ИИ-помощник клуба: спросите о задачах, клиентах, продажах — или попросите сделать" aria-label="Дядя Витя, ИИ-помощник">
+      <span aria-hidden="true">✦</span><span className="ai-top-l">Дядя Витя</span>
     </button>
   );
 }

@@ -13,7 +13,7 @@ import { PersonPasses } from './access.tsx';
 import { PersonCards } from './payments.tsx';
 import { CallDialog, PersonCalls } from './calls.tsx';
 import { PersonCallFlags, TakeLeadButton } from './salesOps.tsx';
-import { SituationButton } from './agent.tsx';
+import { ScriptButton, SituationButton } from './agent.tsx';
 import { PersonPrivacy } from './privacy.tsx';
 
 type Stage = { id: string; name: string; kind: 'open' | 'won' | 'lost'; openCount?: number };
@@ -191,6 +191,7 @@ export function TasksPage({ me, clubId, openPerson }: { me: Me; clubId: string; 
                   {t.personId && (t.kind === 'call' || t.kind === 'first_response') && !t.doneAt && <DialButton personId={t.personId} />}
                   {t.callId && <button className="btn sm pri" onClick={() => setCall(t.callId)}>Итог разговора</button>}
                   <SituationButton type="task" id={t.id} />
+                  {t.personId && ['call', 'first_response', 'meeting'].includes(t.kind) && !t.doneAt && <ScriptButton type="task" id={t.id} />}
                   <button className={`btn sm ${t.callId ? '' : 'pri'}`} onClick={() => setDoing(t)}>Выполнить</button>
                 </div>
               </div>
@@ -272,7 +273,7 @@ export function PersonCard({ me, id, onClose }: { me: Me; id: string; onClose: (
           <div><h1>{card.person.fullName}</h1>
             <div className="row" style={{ marginTop: 4 }}><span className="chip acc">{card.person.segment}</span>
               <span className="small">{card.person.homeClubName ?? 'клиент другого клуба сети'} · в базе с {dt(card.person.createdAt)}</span></div>
-            {can(me, 'crm.work') && <div style={{ marginTop: 10 }}><SituationButton type="person" id={card.person.id} small={false} /></div>}</div>
+            {can(me, 'crm.work') && <div style={{ marginTop: 10 }}><div className="row" style={{ gap: 8, flexWrap: 'wrap' }}><SituationButton type="person" id={card.person.id} small={false} /><ScriptButton type="person" id={card.person.id} small={false} /></div></div>}</div>
           <div className="card kv">{card.contacts.map((c, i) => <span key={i} style={{ display: 'contents' }}><span>{c.type === 'phone' ? 'Телефон' : c.type === 'email' ? 'E-mail' : c.type === 'telegram' ? 'Telegram' : c.type === 'whatsapp' ? 'WhatsApp' : c.type}</span><span className="num">{c.value}{c.type === 'phone' && c.isPrimary && <> <DialButton personId={id} label="" /></>}</span></span>)}</div>
           {!can(me, 'memberships.manage') && money && card.person.autopayEnabled && <div className="item small">Подписка списывается автоматически с привязанной карты{card.person.autopayChangedAt ? ` (включено ${dt(card.person.autopayChangedAt)})` : ''}</div>}
           {can(me, 'memberships.manage') && (
@@ -298,7 +299,7 @@ export function PersonCard({ me, id, onClose }: { me: Me; id: string; onClose: (
           {sales && card.opportunities.map((o) => (
             <div key={o.id} className="card" style={{ display: 'grid', gap: 8 }}>
               <div className="row between"><h2>{o.pipelineName}</h2>
-                <span className="row" style={{ gap: 6 }}><SituationButton type="opportunity" id={o.id} /><span className={`chip ${o.status === 'won' ? 'ok' : o.status === 'lost' ? 'bad' : 'acc'}`}>{o.status === 'open' ? 'в работе' : o.status === 'won' ? 'успешно' : 'отказ'}</span></span></div>
+                <span className="row" style={{ gap: 6 }}><SituationButton type="opportunity" id={o.id} />{o.status === 'open' && <ScriptButton type="opportunity" id={o.id} label="Скрипт" />}<span className={`chip ${o.status === 'won' ? 'ok' : o.status === 'lost' ? 'bad' : 'acc'}`}>{o.status === 'open' ? 'в работе' : o.status === 'won' ? 'успешно' : 'отказ'}</span></span></div>
               <div className="small">{o.clubName} · ответственный: {o.ownerName ?? 'не назначен'}{o.lostReason ? ` · причина отказа: ${o.lostReason}` : ''}</div>
               <div className="stagebar">{o.stages.map((s) => (
                 <button key={s.id} className={s.kind} aria-current={s.id === o.stageId} disabled={!work || o.status !== 'open' || s.id === o.stageId}
@@ -342,7 +343,7 @@ export function PersonCard({ me, id, onClose }: { me: Me; id: string; onClose: (
             {card.tasks.map((t) => (
               <div key={t.id} className={`item ${t.overdue ? 'over' : ''}`}>
                 <div className="row between"><span><b>{t.title}</b> <span className="chip">{KIND[t.kind] ?? t.kind}</span></span>
-                  <span className="row" style={{ gap: 6 }}><span className="small">{t.doneAt ? `выполнено ${dt(t.doneAt)}` : `до ${dt(t.dueAt)}`}</span>{!t.doneAt && <SituationButton type="task" id={t.id} label="Коротко" />}</span></div>
+                  <span className="row" style={{ gap: 6 }}><span className="small">{t.doneAt ? `выполнено ${dt(t.doneAt)}` : `до ${dt(t.dueAt)}`}</span>{!t.doneAt && <SituationButton type="task" id={t.id} label="Коротко" />}{!t.doneAt && ['call', 'first_response', 'meeting'].includes(t.kind) && <ScriptButton type="task" id={t.id} label="Скрипт" />}</span></div>
                 {t.result && <div className="small">Результат: {t.result}</div>}
               </div>))}
           </div>

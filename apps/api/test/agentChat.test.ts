@@ -42,12 +42,12 @@ test('чат с помощником: создаётся один раз, пом
   assert.equal((await req('POST', '/api/agent/chat', 'm.volkova')).json().id, chat);
   const msgs = (await req('GET', `/api/team/chats/${chat}/messages`, 'm.volkova')).json().messages;
   assert.equal(msgs.length, 1);
-  assert.equal(msgs[0].author, 'ИИ-помощник');
+  assert.equal(msgs[0].author, 'Дядя Витя');
   assert.match(msgs[0].body, /мои задачи/);
   const chats = (await req('GET', '/api/team/chats', 'm.volkova')).json();
-  assert.ok(chats.some((c: { id: string; title: string }) => c.id === chat && c.title === 'ИИ-помощник'));
+  assert.ok(chats.some((c: { id: string; title: string }) => c.id === chat && c.title === 'Дядя Витя'));
   const staff = (await req('GET', '/api/staff', 'a.bespalyy')).json();
-  assert.ok(!JSON.stringify(staff).includes('ИИ-помощник'));
+  assert.ok(!JSON.stringify(staff).includes('Дядя Витя'));
   // Под помощником войти нельзя
   const bot = (await sql(`select login from users where is_bot`))[0].login;
   assert.equal((await login(t.app, bot, 'anything')).res.statusCode >= 400, true);

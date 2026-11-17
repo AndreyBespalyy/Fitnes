@@ -1,4 +1,5 @@
 // Шаг 16. Мобильное рабочее место: установка на телефон, push-уведомления, мои устройства, работа без связи, звонок в один клик.
+import { ManagerRatings } from './rating.tsx';
 import { useEffect, useRef, useState } from 'react';
 import { api, can, clearFailed, onNet, netState, flushQueue, type Me, type NetState } from './api.ts';
 import { dt, errText, toast } from './ui.ts';
@@ -166,6 +167,7 @@ export function ProfilePage({ me, passwordForm }: { me: Me; passwordForm: React.
   return (
     <div style={{ display: 'grid', gap: 14 }}>
       <div className="card"><h2 style={{ margin: 0 }}>{me.full_name}</h2><div className="small muted">Логин {me.login} · {me.roles.map((r) => r.name).join(', ')}</div></div>
+      {me.roles.some((r) => r.code === 'manager') && <ManagerRatings mine />}
       <TelegramBlock me={me} />
       {me.allClubs && can(me, 'clubs.manage') && <StaffBotBlock />}
       <InstallBlock />
