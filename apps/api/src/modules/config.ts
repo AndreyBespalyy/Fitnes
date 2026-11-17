@@ -24,7 +24,8 @@ export const SECTIONS: { id: string; title: string; perm: string }[] = [
   { id: 'kpi', title: 'Нормы KPI и светофор плана', perm: P.planManage },
   { id: 'messaging', title: 'Сообщения клиентам', perm: P.messagesManage },
   { id: 'ai', title: 'Звонки и ИИ', perm: P.planManage },
-  { id: 'sales', title: 'Стандарт продаж: чек-лист разговора', perm: P.planManage },
+  // Скрипты по видам звонков (для Дяди Вити и «Показать скрипт») — в «Отдел продаж → Скрипты звонков»; здесь общая оценка для «Обзоров»
+  { id: 'sales', title: 'Общий чек-лист разговора (оценка в «Обзорах»; скрипты — в «Отдел продаж → Скрипты звонков»)', perm: P.planManage },
   { id: 'rules', title: 'Правила «если — то»', perm: P.retentionManage },
 ];
 

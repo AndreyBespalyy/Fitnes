@@ -40,6 +40,7 @@ export const PERMISSIONS = {
   supportAnswer: 'support.answer',     // все обращения сети в поддержку, ответы, передача разработчикам
   dataProtect: 'data.protect',         // защита базы клиентов: пороги, согласование выгрузок, сигналы; согласия и обращения по 152-ФЗ
   systemMonitor: 'system.monitor',     // состояние системы: проверки, оповещения о сбоях
+  salesManage: 'sales.manage',         // правила отдела продаж в своём клубе: план менеджеров, нормы KPI, сроки и сигналы, скрипты звонков (РОП)
 } as const;
 
 const P = PERMISSIONS;
@@ -51,7 +52,9 @@ export const ROLE_SEED = [
   // Сетевые действия (создание клубов, общие источники лидов, сетевые роли) проверяются отдельно по ctx.allClubs.
   { code: 'gm', name: 'Управляющий', network_wide: false, sort: 3,
     permissions: Object.values(P).filter((p) => p !== P.sourcesManage && p !== P.supportAnswer && p !== P.systemMonitor) },
-  { code: 'rop', name: 'Руководитель ОП', network_wide: false, sort: 4, permissions: [P.dashView, P.aiReview, P.clubsView, P.staffView, P.personsView, P.leadsCreate, P.crmWork, P.crmViewAll, P.membershipsSell, P.membershipsView, P.contractsSign, P.messagesWork, P.configManage, P.scheduleBook, P.retentionManage] },
+  // РОП: правила своего отдела (план менеджеров, нормы KPI, сроки и сигналы, скрипты) — sales.manage; общий план клуба и
+  // настройки клуба — у управляющего (проверка CRM 17.11.2026, п. 5). Черновиков настроек клуба у РОПа нет.
+  { code: 'rop', name: 'Руководитель ОП', network_wide: false, sort: 4, permissions: [P.dashView, P.aiReview, P.clubsView, P.staffView, P.personsView, P.leadsCreate, P.crmWork, P.crmViewAll, P.membershipsSell, P.membershipsView, P.contractsSign, P.messagesWork, P.salesManage, P.scheduleBook, P.retentionManage] },
   { code: 'manager', name: 'Менеджер ОП', network_wide: false, sort: 5, permissions: [P.clubsView, P.personsView, P.leadsCreate, P.crmWork, P.membershipsSell, P.membershipsView, P.contractsSign, P.messagesWork, P.scheduleBook] },
   { code: 'desk', name: 'Администратор ресепшн', network_wide: false, sort: 6, permissions: [P.clubsView, P.personsView, P.leadsCreate, P.membershipsSell, P.membershipsView, P.membershipsManage, P.contractsSign, P.shiftsWork, P.messagesWork, P.acsWork, P.scheduleBook] },
   { code: 'fin', name: 'Финансист', network_wide: false, sort: 7, permissions: [P.dashView, P.clubsView, P.personsView, P.membershipsView, P.financeWork, P.financeView, P.importManage, P.payrollManage, P.staffView] },

@@ -1,6 +1,7 @@
 // Шаг 18, часть 2. Настройки клуба с версиями: правка → черновик → проверка (и на истории) → утверждение → публикация → откат.
 // ИИ-помощник понимает просьбу словами и готовит черновик; рабочие настройки меняются только после утверждения человеком.
 import { useEffect, useState } from 'react';
+import { useClubPick } from './clubPick.tsx';
 import { api, type Club, type Me } from './api.ts';
 import { errText, toast } from './ui.ts';
 import { RulesDiff, RulesEditor, RulesJournal, type Rule } from './rulesEditor.tsx';
@@ -28,7 +29,7 @@ function show(f: Field | undefined, v: unknown): string {
 }
 
 export function ConfigPage({ me, clubs, clubId }: { me: Me; clubs: Club[]; clubId: string }) {
-  const club = clubs.find((c) => c.id === clubId) ?? (clubs.length === 1 ? clubs[0] : null);
+  const [club, clubChips] = useClubPick(clubs, clubId);
   const [cfg, setCfg] = useState<Cfg | null>(null);
   const [err, setErr] = useState('');
   const [open, setOpen] = useState<string | null>(null);
@@ -41,7 +42,7 @@ export function ConfigPage({ me, clubs, clubId }: { me: Me; clubs: Club[]; clubI
   const load = () => { if (club) api<Cfg>('GET', `/api/config?clubId=${club.id}`).then((r) => { setCfg(r); setErr(''); }).catch((x) => setErr(errText(x))); };
   useEffect(() => { setCfg(null); setOpen(null); setEdits({}); load(); }, [club?.id]);
   void me;
-  if (!club) return <div className="card"><p style={{ margin: 0 }}>Выберите клуб вверху страницы.</p></div>;
+  if (!club) return <div className="card"><p style={{ margin: 0 }}>Клубов пока нет.</p></div>;
   if (!cfg) return err ? <div className="err">{err}</div> : null;
   const changes = Object.entries(edits).map(([path, value]) => ({ path, value }));
   const assistant = async () => {
@@ -61,6 +62,7 @@ export function ConfigPage({ me, clubs, clubId }: { me: Me; clubs: Club[]; clubI
 
   return (
     <div style={{ display: 'grid', gap: 12 }}>
+      {clubChips}
       <div className="card" style={{ display: 'grid', gap: 8 }}>
         <div className="row between" style={{ flexWrap: 'wrap', gap: 8 }}>
           <div><b>Настройки {club.name}</b><div className="small muted">Рабочая версия: {published ? `№ ${published.number} от ${dt(published.publishedAt)}, ${published.publishedBy ?? ''}` : 'исходные настройки клуба'}. Любое изменение — через черновик, проверку и утверждение.</div></div>

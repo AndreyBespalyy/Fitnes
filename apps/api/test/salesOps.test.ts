@@ -254,8 +254,8 @@ test('воронка «где теряем»: шаги накопительны�
   assert.equal(await noteCount(), n1, 'второй раз не отправляем');
 });
 
-test('настройки: управляющий меняет нормы; РОП не может; сигнал РОПу позже напоминания', async () => {
-  assert.equal((await req('PUT', '/api/sales-ops/settings', 'o.astafeva', { clubId: centr, remindMinutes: 3 })).statusCode, 403);
+test('настройки: нормы меняют управляющий и РОП, менеджер нет; сигнал РОПу позже напоминания', async () => {
+  assert.equal((await req('PUT', '/api/sales-ops/settings', 'm.volkova', { clubId: centr, remindMinutes: 3 })).statusCode, 403);
   assert.equal((await req('PUT', '/api/sales-ops/settings', 'o.smirnov', { clubId: centr, remindMinutes: 20, escalateMinutes: 10 })).statusCode, 400);
   const ok = await req('PUT', '/api/sales-ops/settings', 'o.smirnov', { clubId: centr, remindMinutes: 3, escalateMinutes: 10, newbieMinVisits: 6 });
   assert.equal(ok.statusCode, 200, ok.body);

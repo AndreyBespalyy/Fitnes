@@ -63,7 +63,10 @@ const KIND: Record<string, string> = { bug: 'Ошибка', ux: 'Неудобн�
 export function activityRoutes(app: FastifyInstance, pool: pg.Pool) {
   app.get('/api/activity', async (req) => {
     const ctx = requireCtx(req);
-    if (!can(ctx, '*') || !ctx.allClubs) throw forbidden('Статистику сотрудников видит собственник');
+    // Собственник — вся сеть; управляющий — сотрудники своего клуба (проверка CRM 17.11.2026, п. 6)
+    const gm = !ctx.allClubs && ctx.roles.includes('gm');
+    if (!(can(ctx, '*') && ctx.allClubs) && !gm) throw forbidden('Статистику сотрудников видят собственник и управляющий');
+    const onlyClubs = gm ? ctx.clubIds : null;
     const hours = [24, 72, 168].includes(Number((req.query as { hours?: string }).hours)) ? Number((req.query as { hours?: string }).hours) : 24;
     return withCtx(pool, ctx, async (db) => {
       const since = (await db.query(`select now() - make_interval(hours => $1) as since, now() as till`, [hours])).rows[0];
@@ -71,7 +74,10 @@ export function activityRoutes(app: FastifyInstance, pool: pg.Pool) {
       const staff = (await db.query(`select distinct on (u.id) u.id, u.full_name as "fullName", r.code as role, r.name as "roleName", r.sort,
           (select string_agg(distinct c.name, ', ') from user_assignments a2 join clubs c on c.id = a2.club_id where a2.user_id = u.id) as clubs
         from users u join user_assignments a on a.user_id = u.id join roles r on r.code = a.role_code
-        where u.status = 'active' order by u.id, r.sort`)).rows;
+        where u.status = 'active' and not u.is_bot
+          and ($1::uuid[] is null or (exists (select 1 from user_assignments a3 where a3.user_id = u.id and a3.club_id = any($1))
+            and not exists (select 1 from user_assignments a4 where a4.user_id = u.id and a4.club_id is null)))
+        order by u.id, r.sort`, [onlyClubs])).rows;
       const roles = (await db.query(`select code, name from roles order by sort`)).rows as { code: string; name: string }[];
       const ids = staff.map((s) => s.id);
       const q = async (sql: string) => (await db.query(sql, [ids, since.since])).rows;

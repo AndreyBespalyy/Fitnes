@@ -137,7 +137,7 @@ test('автосообщение неприоритетным: появляет�
 
 test('пороги светофора задаёт клуб', async () => {
   assert.equal((await req('PUT', '/api/kpi-norms', 'o.smirnov', { clubId: c1, light: { green: 80, yellow: 90 } })).statusCode, 400);
-  assert.equal((await req('PUT', '/api/kpi-norms', 'o.astafeva', { clubId: c1, light: { green: 95, yellow: 70 } })).statusCode, 403);
+  assert.equal((await req('PUT', '/api/kpi-norms', 'o.astafeva', { clubId: c1, light: { green: 95, yellow: 70 } })).statusCode, 200); // РОП правит нормы отдела (sales.manage)
   assert.equal((await req('PUT', '/api/kpi-norms', 'o.smirnov', { clubId: c1, light: { green: 95, yellow: 70 } })).statusCode, 200);
   assert.deepEqual((await req('GET', `/api/kpi-norms?clubId=${c1}`, 'm.volkova')).json().light, { green: 95, yellow: 70 });
 });

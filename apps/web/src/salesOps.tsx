@@ -1,33 +1,37 @@
 // Отдел продаж: заявки и скорость ответа, списки обзвона, окно продлений, новички, воронка «где теряем», стоп-лист, дубли, настройки.
 // Плюс блок «Обзвон» в карточке клиента (стоп-лист и теги) и кнопка «Беру в работу».
 import { useEffect, useState } from 'react';
+import { useClubPick } from './clubPick.tsx';
 import { api, can, type Club, type Me, navParams } from './api.ts';
 import { dt, errText, toast } from './ui.ts';
 import { AgentSettingsCard } from './agent.tsx';
 import { ManagerRatings, canSeeRating } from './rating.tsx';
+import { CallScripts } from './scripts.tsx';
 
 const d2 = (s: string) => s.split('-').reverse().slice(0, 2).join('.');
 const rubles = (kop: number) => `${Math.round(kop / 100).toLocaleString('ru-RU')} ₽`;
 
-type View = 'leads' | 'lists' | 'renewals' | 'newbies' | 'rating' | 'funnel' | 'base' | 'settings';
+type View = 'leads' | 'lists' | 'renewals' | 'newbies' | 'rating' | 'scripts' | 'funnel' | 'base' | 'settings';
 
 export function SalesOpsPage({ me, clubs, clubId, openPerson }: { me: Me; clubs: Club[]; clubId: string; openPerson: (id: string) => void }) {
   const views: [View, string, boolean][] = [
-    ['leads', 'Заявки', true], ['lists', 'Списки обзвона', true], ['renewals', 'Окно продлений', true], ['newbies', 'Новички', true], ['rating', 'Рейтинг менеджеров', canSeeRating(me)],
-    ['funnel', 'Воронка и источники', can(me, 'dash.view')], ['base', 'Стоп-лист и дубли', can(me, 'crm.view_all')], ['settings', 'Настройки', can(me, 'plan.manage') || can(me, 'tariffs.manage')],
+    ['leads', 'Заявки', true], ['lists', 'Списки обзвона', true], ['renewals', 'Окно продлений', true], ['newbies', 'Новички', true], ['rating', 'Рейтинг менеджеров', canSeeRating(me)], ['scripts', 'Скрипты звонков', true],
+    ['funnel', 'Воронка и источники', can(me, 'dash.view')], ['base', 'Стоп-лист и дубли', can(me, 'crm.view_all')], ['settings', 'Настройки', can(me, 'plan.manage') || can(me, 'sales.manage') || can(me, 'tariffs.manage')],
   ];
   const [view, setView] = useState<View>(() => (views.some((v) => v[0] === navParams('sales').view && v[2]) ? navParams('sales').view as View : 'leads'));
-  const club = clubId !== 'all' ? clubId : clubs[0]?.id ?? '';
+  const [clubObj, clubChips] = useClubPick(clubs, clubId);
+  const club = clubObj?.id ?? '';
   if (!club) return <p className="muted">Нет клубов.</p>;
   return (
     <div style={{ display: 'grid', gap: 12 }}>
-      {clubId === 'all' && <p className="small muted" style={{ margin: 0 }}>Показан клуб «{clubs[0]?.name}». Другой клуб выберите вверху.</p>}
+      {clubChips}
       <div className="tabs" role="group" aria-label="Отдел продаж">{views.filter((v) => v[2]).map(([k, t]) => <button key={k} aria-pressed={view === k} onClick={() => setView(k)}>{t}</button>)}</div>
       {view === 'leads' && <LeadsSpeed clubId={club} openPerson={openPerson} />}
       {view === 'lists' && <CallLists clubId={club} openPerson={openPerson} />}
       {view === 'renewals' && <Renewals clubId={club} openPerson={openPerson} />}
       {view === 'newbies' && <Newbies clubId={club} openPerson={openPerson} />}
       {view === 'rating' && <ManagerRatings clubId={club} mine={!me.roles.some((r) => ['rop', 'gm', 'owner'].includes(r.code))} />}
+      {view === 'scripts' && <CallScripts clubId={club} />}
       {view === 'funnel' && <Funnel clubId={club} />}
       {view === 'base' && <BaseCleanup clubId={club} openPerson={openPerson} />}
       {view === 'settings' && <><Settings clubId={club} /><AgentSettingsCard clubId={club} /></>}

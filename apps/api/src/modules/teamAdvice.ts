@@ -13,7 +13,7 @@ import { badRequest, notFound } from '../errors.ts';
 import { aiChatTopic, type AiConfig } from '../lib/aiClient.ts';
 import type { YandexConfig } from '../lib/yandex.ts';
 import { noContacts } from './agent.ts';
-import { BUILTIN, ensureBuiltins, startProcess } from './agentProcesses.ts';
+import { BUILTIN, ensureBuiltins, ROLE_NAME, startProcess } from './agentProcesses.ts';
 import { learnedWeight, recordSuggestion } from './agentLearn.ts';
 
 export type TopicCode = 'new_client' | 'renewal' | 'return' | 'complaint' | 'new_staff' | 'meeting' | 'equipment' | 'schedule' | 'payment' | 'cleaning' | 'task' | 'other';
@@ -265,11 +265,14 @@ export async function startAdvice(db: Db, ctx: Ctx, id: string) {
     const pid = await startProcess(db, ctx, { clubId: a.club_id, templateId: tpl.id, personId: a.person_id ?? null, note: `Запущен из переписки${a.chat_title ? ` «${a.chat_title}»` : ''} по совету ИИ-помощника` });
     result = { kind: 'process', id: pid, tab: 'processes', label: `Запущен процесс «${tpl.name}»` };
   } else if (act.type === 'task') {
-    const to = act.assignee === 'self' ? ctx.userId : (await userOfRole(db, a.club_id, act.assignee)) ?? ctx.userId;
+    const byRole = act.assignee === 'self' ? null : await userOfRole(db, a.club_id, act.assignee);
+    const to = act.assignee === 'self' ? ctx.userId : byRole ?? ctx.userId;
+    // В клубе нет сотрудника нужной роли — задача остаётся у нажавшего, и мы прямо об этом говорим (проверка CRM, п. 14)
+    const noRole = act.assignee !== 'self' && !byRole ? `В клубе нет сотрудника с ролью «${ROLE_NAME[act.assignee] ?? act.assignee}» — ` : '';
     const tid = (await db.query(`insert into tasks(tenant_id, club_id, assignee_id, person_id, kind, title, due_at, created_by) values ($1,$2,$3,$4,'other',$5, now() + make_interval(mins => $6), $7) returning id`,
       [ctx.tenantId, a.club_id, to, a.person_id ?? null, act.title.slice(0, 300), Math.round(act.hours * 60), ctx.userId])).rows[0].id;
     const whom = to === ctx.userId ? 'вам' : ((await db.query(`select full_name from users where id = $1`, [to])).rows[0]?.full_name ?? 'сотруднику');
-    result = { kind: 'task', id: tid, tab: to === ctx.userId ? act.tab : 'tasks', label: `Задача поставлена ${to === ctx.userId ? 'вам' : `— ${whom}`}` };
+    result = { kind: 'task', id: tid, tab: to === ctx.userId ? act.tab : 'tasks', label: `${noRole}${noRole ? 'задача' : 'Задача'} поставлена ${to === ctx.userId ? 'вам' : `— ${whom}`}` };
   } else {
     result = { kind: 'assistant', prompt: act.prompt, label: 'Открыт ИИ-помощник — проверьте текст и отправьте' };
   }

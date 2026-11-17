@@ -1,7 +1,8 @@
 // Бизнес-процессы (ИИ-агент, этап 6): идущие процессы с ходом по шагам и кнопкой «Коротко о ситуации»,
 // готовые шаблоны и конструктор, «опишите процесс словами» — помощник сам разложит на шаги.
 import { useEffect, useState } from 'react';
-import { api, type Club, type Me } from './api.ts';
+import { useClubPick } from './clubPick.tsx';
+import { api, can, type Club, type Me } from './api.ts';
 import { dt, errText, toast } from './ui.ts';
 import { SituationButton } from './agent.tsx';
 
@@ -14,36 +15,38 @@ type View = 'run' | 'done' | 'templates' | 'words';
 const hoursText = (h: number) => (h >= 24 && h % 24 === 0 ? `${h / 24} дн.` : h < 1 ? `${Math.round(h * 60)} мин` : `${h} ч`);
 
 export function ProcessesPage({ me, clubs, clubId, openPerson }: { me: Me; clubs: Club[]; clubId: string; openPerson: (id: string) => void }) {
-  const club = clubId !== 'all' ? clubId : clubs[0]?.id ?? '';
+  const [clubObj, clubChips] = useClubPick(clubs, clubId);
+  const club = clubObj?.id ?? '';
   const [view, setView] = useState<View>('run');
   const [tpls, setTpls] = useState<{ items: Tpl[]; canEdit: boolean; roles: Record<string, string> } | null>(null);
   const [edit, setEdit] = useState<Partial<Tpl> | null>(null);
   const loadTpls = () => api<{ items: Tpl[]; canEdit: boolean; roles: Record<string, string> }>('GET', '/api/processes/templates').then(setTpls).catch((e) => toast(errText(e)));
   useEffect(() => { void loadTpls(); }, []);
   if (!club) return <p className="muted">Нет клубов.</p>;
-  const views: [View, string, boolean][] = [['run', 'Идут сейчас', true], ['done', 'Завершённые', true], ['templates', 'Шаблоны', true], ['words', 'Описать словами', !!tpls?.canEdit]];
-  void me;
+  // Без права работы в CRM (ресепшн, тренер, финансист) — только свои процессы и шаги, без запуска и шаблонов
+  const work = can(me, 'crm.work');
+  const views: [View, string, boolean][] = [['run', 'Идут сейчас', true], ['done', 'Завершённые', true], ['templates', 'Шаблоны', work], ['words', 'Описать словами', !!tpls?.canEdit]];
   return (
     <div style={{ display: 'grid', gap: 12 }}>
-      {clubId === 'all' && <p className="small muted" style={{ margin: 0 }}>Показан клуб «{clubs[0]?.name}». Другой клуб выберите вверху.</p>}
+      {clubChips}
       <div className="tabs" role="group" aria-label="Бизнес-процессы">{views.filter((v) => v[2]).map(([k, t]) => <button key={k} aria-pressed={view === k} onClick={() => { setView(k); setEdit(null); }}>{t}</button>)}</div>
       {edit && tpls && <TemplateEditor tpl={edit} roles={tpls.roles} onClose={() => setEdit(null)} onSaved={() => { setEdit(null); void loadTpls(); setView('templates'); }} />}
-      {!edit && (view === 'run' || view === 'done') && tpls && <Running clubId={club} status={view === 'run' ? 'active' : 'done'} tpls={tpls.items} canEdit={tpls.canEdit} roles={tpls.roles} openPerson={openPerson} />}
+      {!edit && (view === 'run' || view === 'done') && tpls && <Running work={work} clubId={club} status={view === 'run' ? 'active' : 'done'} tpls={tpls.items} canEdit={tpls.canEdit} roles={tpls.roles} openPerson={openPerson} />}
       {!edit && view === 'templates' && tpls && <Templates data={tpls} onEdit={setEdit} onChanged={loadTpls} />}
       {!edit && view === 'words' && tpls && <Words onDraft={(d) => setEdit(d)} />}
     </div>
   );
 }
 
-function Running({ clubId, status, tpls, canEdit, roles, openPerson }: { clubId: string; status: string; tpls: Tpl[]; canEdit: boolean; roles: Record<string, string>; openPerson: (id: string) => void }) {
+function Running({ work, clubId, status, tpls, canEdit, roles, openPerson }: { work: boolean; clubId: string; status: string; tpls: Tpl[]; canEdit: boolean; roles: Record<string, string>; openPerson: (id: string) => void }) {
   const [items, setItems] = useState<Proc[] | null>(null);
   const [open, setOpen] = useState<string | null>(null);
   const load = () => api<{ items: Proc[] }>('GET', `/api/processes?clubId=${clubId}&status=${status}`).then((r) => setItems(r.items)).catch((e) => toast(errText(e)));
   useEffect(() => { setItems(null); void load(); }, [clubId, status]);
   const act = async (url: string, msg: string) => { try { await api('POST', url, {}); toast(msg); void load(); } catch (e) { toast(errText(e)); } };
   return (<>
-    {status === 'active' && <StartForm clubId={clubId} tpls={tpls} onStarted={load} />}
-    {!items ? <p className="muted">Загрузка…</p> : !items.length ? <p className="muted">{status === 'active' ? 'Запущенных процессов нет. Выберите шаблон выше и запустите.' : 'Завершённых процессов пока нет.'}</p> :
+    {status === 'active' && work && <StartForm clubId={clubId} tpls={tpls} onStarted={load} />}
+    {!items ? <p className="muted">Загрузка…</p> : !items.length ? <p className="muted">{status === 'active' ? (work ? 'Запущенных процессов нет. Выберите шаблон выше и запустите.' : 'Процессов с вашими шагами сейчас нет.') : 'Завершённых процессов пока нет.'}</p> :
       <div style={{ display: 'grid', gap: 10 }}>
         {items.map((p) => {
           const done = p.steps.filter((s) => s.status === 'done').length;
@@ -58,7 +61,7 @@ function Running({ clubId, status, tpls, canEdit, roles, openPerson }: { clubId:
                   <div className="small muted">Ответственный: {p.owner ?? '—'} · запущен {dt(p.startedAt)} · срок {dt(p.dueAt)}{procLate && <span className="proc-late"> · срок прошёл</span>}</div>
                 </div>
                 <div className="proc-acts">
-                  <SituationButton type="process" id={p.id} />
+                  {work && <SituationButton type="process" id={p.id} />}
                   {p.personId && <button className="btn sm" onClick={() => openPerson(p.personId!)}>Клиент</button>}
                 </div>
               </div>

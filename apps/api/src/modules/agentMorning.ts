@@ -170,7 +170,9 @@ async function head(db: Db, u: Person, clubs: string[], today: string): Promise<
 /** Совет из последнего разбора недели для роли — если он свежий (не старше 8 дней) */
 async function weeklyTip(db: Db, clubs: string[], role: string): Promise<Hint[]> {
   const r = (await db.query(`select data->'tips'->>$2 as tip from agent_weekly_reviews where club_id = any($1) and created_at > now() - interval '8 days' order by created_at desc limit 1`, [clubs, role])).rows[0];
-  return r?.tip ? [{ kind: 'weekly_tip', score: 30, text: `**Из разбора недели:** ${r.tip}` }] : [];
+  // Кнопка «Разбор недели» — только тем, кому открыт раздел (руководители и финансист); остальным — совет без кнопки
+  const kind = ['owner', 'gm', 'rop', 'fin'].includes(role) ? 'weekly_tip' : 'weekly_tip_staff';
+  return r?.tip ? [{ kind, score: 30, text: `**Из разбора недели:** ${r.tip}` }] : [];
 }
 
 /* ---------- сборка ---------- */
@@ -225,7 +227,7 @@ const ACTIONS: Record<string, HintAction[]> = {
   hot_calls: [{ label: 'Кому звонить', url: '/?tab=hot' }],
   stuck_deals: [{ label: 'Открыть сделки', url: '/?tab=board' }],
   desk_classes: [{ label: 'Расписание', url: '/?tab=schedule' }],
-  desk_missed: [{ label: 'Открыть звонки', url: '/?tab=calls' }],
+  desk_missed: [], // ресепшну раздел «Звонки» закрыт: кнопки «Позвонить» по каждому пропущенному (ниже)
   plan_red: [{ label: 'Выполним план?', ask: 'выполним план?' }, { label: 'Что горит', ask: 'что горит' }],
   plan_status: [{ label: 'Выполним план?', ask: 'выполним план?' }],
   sales_yesterday: [{ label: 'Выполним план?', ask: 'выполним план?' }],
@@ -234,7 +236,7 @@ const ACTIONS: Record<string, HintAction[]> = {
   weekly_tip: [{ label: 'Разбор недели', url: '/?tab=weekly' }],
 };
 /** Подсказки про конкретных клиентов: кнопка на карточку каждого (до трёх) */
-const PERSON_KINDS = new Set(['desk_renew', 'hot_calls']);
+const PERSON_KINDS = new Set(['desk_renew', 'hot_calls', 'desk_missed']);
 
 const short = (n: string) => n.split(' ').slice(0, 2).join(' ');
 

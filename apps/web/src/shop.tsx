@@ -35,7 +35,7 @@ export function ShopPage({ me: _me, clubs, clubId, openPerson }: { me: Me; clubs
         {clubId === 'all' && <select value={club} onChange={(e) => setClub(e.target.value)} style={{ width: 'auto' }}>{clubs.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}</select>}
       </div>
       {!data ? <p className="muted">Загрузка…</p> : <>
-        {view === 'sell' && data.canSell && <Sell club={club} items={data.items.filter((g) => g.isActive)} onSold={load} />}
+        {view === 'sell' && data.canSell && <Sell club={club} manage={data.canManage} items={data.items.filter((g) => g.isActive)} onSold={load} />}
         {view === 'stock' && <Stock club={club} items={data.items} manage={data.canManage} reload={load} />}
         {view === 'report' && <ReportView club={club} openPerson={openPerson} />}
         {view === 'gifts' && <GiftsView club={club} openPerson={openPerson} />}
@@ -44,7 +44,7 @@ export function ShopPage({ me: _me, clubs, clubId, openPerson }: { me: Me; clubs
   );
 }
 
-function Sell({ club, items, onSold }: { club: string; items: Goods[]; onSold: () => void }) {
+function Sell({ club, manage, items, onSold }: { club: string; manage: boolean; items: Goods[]; onSold: () => void }) {
   const [cart, setCart] = useState<Record<string, number>>({});
   const [q, setQ] = useState('');
   const [found, setFound] = useState<Person[]>([]);
@@ -71,7 +71,7 @@ function Sell({ club, items, onSold }: { club: string; items: Goods[]; onSold: (
   return (
     <div className="grid2" style={{ alignItems: 'start' }}>
       <div className="card" style={{ display: 'grid', gap: 10 }}>
-        {items.length === 0 && <p className="muted" style={{ margin: 0 }}>Товаров пока нет. Добавьте их во вкладке «Товары и остатки».</p>}
+        {items.length === 0 && <p className="muted" style={{ margin: 0 }}>{manage ? 'Товаров пока нет. Добавьте их во вкладке «Товары и остатки».' : 'Товаров пока нет. Товары и услуги добавляет управляющий клуба — напишите ему в мессенджере, что нужно продавать.'}</p>}
         {cats.map((c) => (
           <div key={c} style={{ display: 'grid', gap: 6 }}>
             <span className="small muted">{c}</span>
@@ -114,6 +114,7 @@ function Stock({ club, items, manage, reload }: { club: string; items: Goods[]; 
   const [f, setF] = useState(empty);
   const [open, setOpen] = useState(false);
   const [op, setOp] = useState<{ id: string; kind: string; qty: string; cost: string; comment: string } | null>(null);
+  const [price, setPrice] = useState<{ id: string; v: string } | null>(null);
   const [moves, setMoves] = useState<{ id: string; rows: { kind: string; qty: number; stockAfter: number; costKop: number | null; comment: string | null; createdAt: string; by: string | null }[] } | null>(null);
   const [err, setErr] = useState('');
   const create = async () => {
@@ -152,7 +153,11 @@ function Stock({ club, items, manage, reload }: { club: string; items: Goods[]; 
             <tr className={g.isActive ? '' : 'muted'}>
               <td><b>{g.name}</b>{!g.isActive && <span className="chip">снят с продажи</span>}<div className="small muted">{g.kind === 'service' ? 'услуга' : 'товар'}</div></td>
               <td>{g.category ?? '—'}</td>
-              <td>{manage ? <button className="link" onClick={() => { const v = prompt('Новая цена, ₽', String(g.priceKop / 100)); if (v) patch(g.id, { priceKop: toKop(v) }); }}>{rub(g.priceKop)}</button> : rub(g.priceKop)}</td>
+              <td>{!manage ? rub(g.priceKop) : price?.id === g.id
+                ? <form className="row" style={{ gap: 4 }} onSubmit={(e) => { e.preventDefault(); if (price.v.trim()) patch(g.id, { priceKop: toKop(price.v) }); setPrice(null); }}>
+                    <input autoFocus value={price.v} onChange={(e) => setPrice({ ...price, v: e.target.value })} inputMode="decimal" aria-label="Новая цена, ₽" style={{ width: 90 }} />
+                    <button className="btn sm pri">OK</button><button type="button" className="btn sm" onClick={() => setPrice(null)}>×</button></form>
+                : <button className="link" title="Изменить цену" onClick={() => setPrice({ id: g.id, v: String(g.priceKop / 100) })}>{rub(g.priceKop)}</button>}</td>
               <td className={g.low ? 'bad' : ''}>{g.kind === 'goods' ? `${g.stock ?? 0} шт.${g.low ? ' — пора заказать' : ''}` : '—'}</td>
               <td><div className="row" style={{ gap: 4, flexWrap: 'wrap' }}>
                 {manage && g.kind === 'goods' && <>

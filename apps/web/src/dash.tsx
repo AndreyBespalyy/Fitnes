@@ -41,9 +41,11 @@ export function DashPage({ me, clubs, clubId, openPerson, go: goTo, canGo, pickC
   const club = clubId === 'all' ? null : clubs.find((c) => c.id === clubId) ?? null;
   const manage = can(me, 'plan.manage');
   const dashView = can(me, 'dash.view');
+  // Ресепшну и тренеру служебные кнопки (словарь метрик, настройка стола, выгрузки) не нужны (проверка CRM 17.11.2026, п. 12)
+  const office = !me.roles.every((r) => r.code === 'desk' || r.code === 'trainer');
   const tabs: [typeof view, string, boolean][] = [
     ['desk', 'Рабочий стол', true], ['plan', 'План продаж', dashView || manage], ['norms', 'Нормы KPI', dashView || manage],
-    ['sales', 'Отчёт по продажам', dashView || can(me, 'crm.work') || can(me, 'finance.view')], ['metrics', 'Словарь метрик', true], ['edit', 'Настроить', true],
+    ['sales', 'Отчёт по продажам', dashView || can(me, 'crm.work') || can(me, 'finance.view')], ['metrics', 'Словарь метрик', office], ['edit', 'Настроить', office],
   ];
   const q = `clubId=${clubId}&month=${month}&from=${range.from}&to=${range.to}`;
   return (
@@ -62,7 +64,7 @@ export function DashPage({ me, clubs, clubId, openPerson, go: goTo, canGo, pickC
         </div>}
       </div>
       {drill && <PlanDrill clubId={drill.clubId} month={drill.month} category={drill.category} userId={drill.userId} onClose={() => setDrill(null)} openPerson={openPerson} />}
-      {view === 'desk' && (layout.widgets.length ? layout.widgets.map((w) => <Widget key={`${w}-${clubId}`} id={w} q={q} tick={tick} metrics={metrics} openPerson={openPerson} nav={nav} pickClub={pickClub}
+      {view === 'desk' && (layout.widgets.length ? layout.widgets.map((w) => <Widget key={`${w}-${clubId}`} exportable={office} id={w} q={q} tick={tick} metrics={metrics} openPerson={openPerson} nav={nav} pickClub={pickClub}
         onDrill={(x) => { const c = club?.id ?? (clubs.length === 1 ? clubs[0].id : null); if (!c) { toast('Выберите клуб вверху страницы, чтобы раскрыть цифру до клиентов'); return; } setDrill({ ...x, month, clubId: c }); }}
         title={layout.available.find((a) => a.id === w)?.title ?? w} />)
         : <div className="card"><p>На рабочем столе пока нет виджетов. Нажмите «Настроить» и выберите нужные.</p></div>)}
@@ -113,7 +115,7 @@ const SelectClub = () => <div className="card"><p>Выберите клуб в �
 /* ---------- обёртка виджета ---------- */
 type DrillFn = (x: { category: string | null; userId: string | null }) => void;
 type Nav = { nav: (g: Go) => (() => void) | undefined; pickClub: (id: string) => void };
-function Widget({ id, q, tick, title, metrics, onDrill, openPerson, nav, pickClub }: { id: string; q: string; tick: number; title: string; metrics: Metric[]; onDrill: DrillFn; openPerson?: (id: string) => void } & Nav) {
+function Widget({ exportable = true, id, q, tick, title, metrics, onDrill, openPerson, nav, pickClub }: { exportable?: boolean; id: string; q: string; tick: number; title: string; metrics: Metric[]; onDrill: DrillFn; openPerson?: (id: string) => void } & Nav) {
   const [d, setD] = useState<Any>(null);
   const [err, setErr] = useState('');
   useEffect(() => { api<Any>('GET', `/api/dash/widget/${id}?${q}`).then((x) => { setD(x); setErr(''); }).catch((e) => setErr(errText(e))); }, [id, q, tick]);
@@ -123,8 +125,8 @@ function Widget({ id, q, tick, title, metrics, onDrill, openPerson, nav, pickClu
         <h2 style={{ margin: 0, fontSize: 17 }}>{title}</h2>
         <span className="row small muted" style={{ gap: 6 }}>
           {d && <span title="Цифры пересчитываются каждые 60 секунд">обновлено {time(d.updatedAt)}</span>}
-          <a className="btn sm" href={`/api/dash/widget/${id}/export?${q}&format=xlsx`}>XLSX</a>
-          <a className="btn sm" href={`/api/dash/widget/${id}/export?${q}&format=csv`}>CSV</a>
+          {exportable && <><a className="btn sm" href={`/api/dash/widget/${id}/export?${q}&format=xlsx`}>XLSX</a>
+          <a className="btn sm" href={`/api/dash/widget/${id}/export?${q}&format=csv`}>CSV</a></>}
         </span>
       </div>
       {err && <p className="err">{err}</p>}
@@ -316,7 +318,7 @@ function LayoutEditor({ layout, onSaved }: { layout: Layout; onSaved: () => void
 
 /* ---------- план продаж ---------- */
 type T = { amountKop: number; avgCheckKop: number | null } | null;
-type Plans = { month: string; categories: { id: string; name: string; suggestedAvgCheckKop: number | null }[]; club: Record<string, T>; managers: { userId: string; name: string; role: string; targets: Record<string, T> }[]; canEdit: boolean };
+type Plans = { month: string; categories: { id: string; name: string; suggestedAvgCheckKop: number | null }[]; club: Record<string, T>; managers: { userId: string; name: string; role: string; targets: Record<string, T> }[]; canEdit: boolean; canEditManagers?: boolean };
 const toRub = (kop: number | null | undefined) => (kop === null || kop === undefined ? '' : String(kop / 100));
 const toKop = (s: string) => (s.trim() === '' ? null : Math.round(Number(s.replace(/\s/g, '').replace(',', '.')) * 100));
 
@@ -353,11 +355,12 @@ function PlanEditor({ club, month, setMonth }: { club: Club; month: string; setM
       return [c.id, a === null ? null : { amountKop: a, avgCheckKop: withAvg ? toKop(form[key][c.id].avg) : avgOf(c.id) }];
     }));
     try {
-      await api('PUT', '/api/plans', { clubId: club.id, month, club: pack('club', true), managers: Object.fromEntries(p.managers.map((m) => [m.userId, pack(m.userId, false)])) });
+      await api('PUT', '/api/plans', { clubId: club.id, month, club: roClub ? undefined : pack('club', true), managers: Object.fromEntries(p.managers.map((m) => [m.userId, pack(m.userId, false)])) });
       toast('План сохранён'); load();
     } catch (e) { setErr(e instanceof Error && !('status' in e) ? e.message : errText(e)); }
   };
-  const ro = !p.canEdit;
+  // План клуба — управляющий и собственник; план по менеджерам — ещё и РОП (canEditManagers)
+  const roClub = !p.canEdit; const ro = !(p.canEditManagers ?? p.canEdit);
   return (
     <div className={`card${ro ? ' ro-view' : ''}`} style={{ display: 'grid', gap: 10 }}>
       <div className="row between" style={{ flexWrap: 'wrap', gap: 8 }}><h2 style={{ margin: 0 }}>План продаж: {club.name}</h2>
@@ -368,8 +371,8 @@ function PlanEditor({ club, month, setMonth }: { club: Club; month: string; setM
         <tbody>{p.categories.map((c) => {
           const clubKop = toKop(form.club[c.id].amount) ?? 0; const dist = sumMgr(c.id);
           return <tr key={c.id}><td><b>{c.name}</b></td>
-            <td><input inputMode="decimal" aria-label={`План клуба: ${c.name}`} value={form.club[c.id].amount} disabled={ro} onChange={(e) => set('club', c.id, 'amount', e.target.value)} style={{ minWidth: 110 }} /></td>
-            <td><input inputMode="decimal" aria-label={`Средний чек: ${c.name}`} value={form.club[c.id].avg} disabled={ro} placeholder={c.suggestedAvgCheckKop ? `≈ ${toRub(c.suggestedAvgCheckKop)}` : ''} onChange={(e) => set('club', c.id, 'avg', e.target.value)} style={{ minWidth: 90 }} /></td>
+            <td><input inputMode="decimal" aria-label={`План клуба: ${c.name}`} value={form.club[c.id].amount} disabled={roClub} onChange={(e) => set('club', c.id, 'amount', e.target.value)} style={{ minWidth: 110 }} /></td>
+            <td><input inputMode="decimal" aria-label={`Средний чек: ${c.name}`} value={form.club[c.id].avg} disabled={roClub} placeholder={c.suggestedAvgCheckKop ? `≈ ${toRub(c.suggestedAvgCheckKop)}` : ''} onChange={(e) => set('club', c.id, 'avg', e.target.value)} style={{ minWidth: 90 }} /></td>
             <td className="num">{clients('club', c.id) ?? '—'}</td>
             {p.managers.map((m) => <td key={m.userId}><input inputMode="decimal" aria-label={`${m.name}: ${c.name}`} value={form[m.userId][c.id].amount} disabled={ro} onChange={(e) => set(m.userId, c.id, 'amount', e.target.value)} style={{ minWidth: 100 }} />
               {clients(m.userId, c.id) ? <div className="small muted">{clients(m.userId, c.id)} кл.</div> : null}</td>)}
@@ -394,7 +397,7 @@ function PlanEditor({ club, month, setMonth }: { club: Club; month: string; setM
           <b>Расчётный план ИИ на {month} · уверенность {ai.confidence}</b>
           {ai.rows.map((r) => <div key={r.category} className="small"><b>{r.name}: {r.suggestedKop ? rub(r.suggestedKop) : 'данных недостаточно'}</b>{r.basis.length ? ` · ${r.basis.join('; ')}` : ''}</div>)}
           <div className="small muted">{ai.note}</div>
-          {!ro && <div><button className="btn sm pri" onClick={applyAi}>Подставить в план клуба</button></div>}
+          {!roClub && <div><button className="btn sm pri" onClick={applyAi}>Подставить в план клуба</button></div>}
         </div>)}
     </div>
   );
