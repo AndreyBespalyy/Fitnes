@@ -129,7 +129,7 @@ test('кнопки под подсказками и под ответами по
   assert.equal(acts.length, 3);
   assert.deepEqual(acts[0], [{ label: 'Открыть заявки без ответа', url: '/?tab=leads&filter=noresponse' }]);
   assert.deepEqual(acts[1].map((a) => a.ask ?? a.url), ['что просрочено', '/?tab=tasks']);
-  assert.ok(acts[2].some((a) => a.label === 'Злата Горячева' && /^\/\?person=/.test(a.url!)), JSON.stringify(acts[2]));
+  assert.ok(acts[2].some((a) => a.label === 'Позвонить: Злата Горячева' && !!(a as { dial?: { personId: string } }).dial?.personId), JSON.stringify(acts[2])); // клиенту — сразу звонок
   // Кнопка «Показать просроченные» — помощник отвечает списком и даёт следующий шаг
   const chat = (await req('POST', '/api/agent/chat', 'm.volkova')).json().id;
   await ask('что просрочено', 'm.volkova');

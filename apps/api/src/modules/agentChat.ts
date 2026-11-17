@@ -304,7 +304,9 @@ export async function handleBotMessage(pool: pg.Pool, ctx: Ctx, chatId: string, 
         return;
       }
       // Кнопки под ответом — следующий шаг по той же ветке разговора
-      const actions = [...(out.actions ?? []), ...followUps(text, isLeader(ctx))];
+      // Уточняющий вопрос с вариантами «1 — …, 2 — …, напишите номер» — варианты кнопками, писать номер не нужно
+      const choice = choiceButtons(reply);
+      const actions = choice.length ? choice : [...(out.actions ?? []), ...followUps(text, isLeader(ctx))];
       const msgId = await say(db, ctx.tenantId, chatId, bot, reply, actions.length ? { actions } : null);
       // Ответ помощника тоже учится: его можно оценить, удачные ответы становятся образцами для нейросети
       if (rateable(reply)) {
@@ -315,6 +317,14 @@ export async function handleBotMessage(pool: pg.Pool, ctx: Ctx, chatId: string, 
       }
     });
   } catch (e) { console.error('ИИ-помощник в мессенджере:', (e as Error).message); }
+}
+
+/** Варианты из вопроса помощника «1 — …» → кнопки; нажатие отправляет номер */
+export function choiceButtons(reply: string) {
+  if (!/(напишите|укажите|выберите)\s+номер/i.test(reply)) return [];
+  const out: { label: string; ask: string }[] = [];
+  for (const m of reply.matchAll(/^(\d{1,2}) — (.+)$/gm)) out.push({ label: m[2].replace(/\*\*/g, '').slice(0, 60), ask: m[1] });
+  return out.slice(0, 10);
 }
 
 export function agentChatRoutes(app: FastifyInstance, pool: pg.Pool) {

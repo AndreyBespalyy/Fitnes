@@ -88,9 +88,9 @@ async function rop(db: Db, u: Person, clubs: string[]): Promise<Hint[]> {
     and not exists (select 1 from msg_messages m where m.conversation_id = c.id and m.direction = 'out' and not m.auto and m.created_at > c.last_inbound_at)`, [clubs])).rows[0];
   const wait = wr.n as number;
   if (wait) out.push({ kind: 'rop_msgs', targets: { conversationIds: wr.ids }, score: 90, text: `**Клиентов ждут ответа в переписке: ${wait}** — попросите менеджеров разобрать «Переписку» до обеда.` });
-  const worst = (await db.query(`select u.full_name as name, count(*)::int as n from tasks t join users u on u.id = t.assignee_id
-    where t.club_id = any($1) and t.done_at is null and t.due_at < now() and u.id <> $2 and not u.is_bot group by u.full_name order by n desc limit 1`, [clubs, u.id])).rows[0];
-  if (worst && worst.n >= 3) out.push({ kind: 'rop_help', score: 80, text: `**Помогите сотруднику ${worst.name}**: у него просрочено задач — ${worst.n}. Разберите загрузку или передайте часть задач (напишите мне «передай задачи ${worst.name.split(' ')[0]}»).` });
+  const worst = (await db.query(`select u.id, u.full_name as name, count(*)::int as n from tasks t join users u on u.id = t.assignee_id
+    where t.club_id = any($1) and t.done_at is null and t.due_at < now() and u.id <> $2 and not u.is_bot group by u.id, u.full_name order by n desc limit 1`, [clubs, u.id])).rows[0];
+  if (worst && worst.n >= 3) out.push({ kind: 'rop_help', targets: { userIds: [worst.id] }, score: 80, text: `**Помогите сотруднику ${worst.name}**: просрочено задач — ${worst.n}. Напишите ему, посмотрите его задачи или передайте их свободному коллеге — кнопки ниже.` });
   return out;
 }
 
@@ -208,6 +208,7 @@ export type HintAction = {
   /** позвонить клиенту (АТС клуба или телефон) */ dial?: { personId: string };
   /** окно со списком «Позвонить …» по каждому клиенту */ call?: { persons: { id: string; name: string }[] };
   /** окно «Написать клиентам» с готовым приглашением */ write?: { kind: 'noshow' | 'newbie' | 'idle'; personIds: string[] };
+  /** личный чат с сотрудником, в поле ввода — готовое сообщение */ chat?: { userId: string; text: string };
 };
 
 const ACTIONS: Record<string, HintAction[]> = {
@@ -260,13 +261,28 @@ export async function hintActions(db: Db, h: MorningHint): Promise<HintAction[]>
     out.push({ label: 'Позвонить клиентам', call: { persons: ps.map((p) => ({ id: p.id, name: p.full_name })) } });
     return out;
   }
+  // Руководителю: сотрудник с просрочками — сразу чат с ним (тема готова) и его задачи; передать задачи — одной кнопкой
+  if (h.kind === 'rop_help' && h.targets?.userIds?.length) {
+    const w = (await db.query(`select u.id, u.full_name, (select count(*)::int from tasks t where t.assignee_id = u.id and t.done_at is null and t.due_at < now()) as n from users u where u.id = $1`, [h.targets.userIds[0]])).rows[0];
+    if (w) {
+      const last = w.full_name.split(' ').slice(-1)[0];
+      return [
+        { label: `Чат: ${last}`, chat: { userId: w.id, text: `Просроченных задач: ${w.n}. Давайте разберём: что закрыть сегодня, что перенести, а что передать — помогу.` } },
+        { label: `Задачи: ${last}`, url: `/?tab=tasks&scope=all&user=${w.id}&day=today` },
+        { label: `Передать задачи: ${last}`, ask: `передай задачи ${w.full_name.split(' ')[0]}` },
+      ];
+    }
+  }
+  // Подсказки про конкретных клиентов: сразу позвонить каждому (до трёх), остальные — в разделе
   const ids = (h.targets?.personIds ?? []).slice(0, 3);
   if (PERSON_KINDS.has(h.kind) && ids.length) {
-    const rows = (await db.query(`select id, full_name from persons where id = any($1)`, [ids])).rows as { id: string; full_name: string }[];
+    const rows = (await db.query(`select p.id, p.full_name, exists (select 1 from person_contacts c where c.person_id = p.id and c.type = 'phone') as ph from persons p where p.id = any($1)`, [ids])).rows as { id: string; full_name: string; ph: boolean }[];
+    const dial: HintAction[] = [];
     for (const id of ids) {
       const r = rows.find((x) => x.id === id);
-      if (r) out.push({ label: r.full_name.split(' ').slice(0, 2).join(' '), url: `/?person=${id}` });
+      if (r) dial.push(r.ph ? { label: `Позвонить: ${short(r.full_name)}`, dial: { personId: id } } : { label: short(r.full_name), url: `/?person=${id}` });
     }
+    return [...dial, ...out].slice(0, 4);
   }
   return out.slice(0, 4);
 }
