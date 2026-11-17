@@ -1,0 +1,34 @@
+/* Пошаговая инструкция установки на телефон (CRM и Мессенджер). Цвета — из общих токенов оформления. */
+.iw{display:grid;gap:10px}
+.iw-q{font-weight:800;font-size:15px;margin-top:4px}
+.iw-seg{display:flex;flex-wrap:wrap;gap:6px}
+.iw-seg button{border:2px solid var(--line);background:var(--surface-2);color:var(--ink);border-radius:12px;padding:10px 14px;font:700 14px var(--f,inherit);cursor:pointer;min-height:44px}
+.iw-seg button:hover{border-color:var(--muted)}
+.iw-seg button[aria-pressed="true"]{border-color:var(--accent);background:var(--accent-soft);color:var(--accent-strong,var(--accent))}
+.iw-dots{list-style:none;margin:0;padding:0;display:flex;gap:6px;align-items:center}
+.iw-dots li{display:flex;align-items:center}
+.iw-dots li+li::before{content:'';width:18px;height:2px;background:var(--line);margin-right:6px}
+.iw-dots button{width:34px;height:34px;border-radius:50%;border:2px solid var(--line);background:var(--surface-2);color:var(--muted);font:800 14px var(--f,inherit);cursor:pointer}
+.iw-dots button.done{background:var(--ok-soft,var(--accent-soft));border-color:var(--ok,var(--accent));color:var(--ok,var(--accent))}
+.iw-dots button[aria-current="step"]{background:var(--accent);border-color:var(--accent);color:var(--accent-ink,#000)}
+.iw-step{display:grid;grid-template-columns:64px 1fr;gap:14px;align-items:start;background:var(--surface-2);border:1px solid var(--line);border-left:4px solid var(--accent);border-radius:14px;padding:14px 16px}
+.iw-step b{font-size:17px;line-height:1.3;display:block}
+.iw-step p{margin:6px 0 8px;color:var(--muted);line-height:1.5}
+.iw-ico{width:64px;height:64px;border-radius:16px;background:var(--accent-soft);display:grid;place-items:center;font-size:32px;color:var(--accent);font-weight:800}
+.iw-n{font-size:12px;color:var(--muted);font-weight:700;text-transform:uppercase;letter-spacing:.04em;margin-bottom:2px}
+.iw-row{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.iw-row.between{justify-content:space-between}
+.iw-btn{border:1px solid var(--line);background:var(--surface);color:var(--ink);border-radius:10px;padding:9px 14px;font:700 14px var(--f,inherit);cursor:pointer;min-height:40px}
+.iw-btn:disabled{opacity:.4;cursor:default}
+.iw-btn.pri{background:var(--accent);border-color:var(--accent);color:var(--accent-ink,#000)}
+.iw-btn.big{min-height:52px;font-size:16px;width:100%}
+.iw-ok{color:var(--ok,var(--accent));font-weight:700;font-size:13px;flex:1;text-align:right}
+.iw-fast{display:grid;gap:4px}.iw-fast span{font-size:12px;color:var(--muted);text-align:center}
+.iw-done{padding:12px 14px;border-radius:12px;background:var(--surface-2)}
+.iw-link{display:grid;grid-template-columns:auto 1fr;gap:16px;align-items:center;background:var(--surface-2);border:1px dashed var(--accent);border-radius:14px;padding:14px}
+.iw-link img{width:150px;height:150px;border-radius:10px;background:#fff;image-rendering:pixelated}
+.iw-link-t{display:grid;gap:6px;min-width:0}
+.iw-link-t b{font-size:16px}
+.iw-link-t span{color:var(--muted);font-size:13px;line-height:1.45}
+.iw-link-t code{font-family:var(--f-num,monospace);font-size:13px;overflow-wrap:anywhere;color:var(--ink)}
+@media (max-width:560px){.iw-link{grid-template-columns:1fr;justify-items:start}.iw-step{grid-template-columns:48px 1fr;padding:12px}.iw-ico{width:48px;height:48px;font-size:24px}.iw-ok{text-align:left}}

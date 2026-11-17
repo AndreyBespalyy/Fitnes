@@ -3,6 +3,7 @@
 import { StrictMode, useEffect, useState, type FormEvent, type ReactNode } from 'react';
 import { createRoot } from 'react-dom/client';
 import qrcode from 'qrcode-generator';
+import { InstallWizard } from '../installWizard.tsx';
 import { api, ApiError, type Me } from '../api.ts';
 import { Avatar, Sheet, TeamChat } from './chat.tsx';
 import './team.css';
@@ -33,7 +34,7 @@ const DOTS = 'M12 5h.01M12 12h.01M12 19h.01';
 function App() {
   const params = new URLSearchParams(location.search);
   const token = params.get('i');
-  const [guide, setGuide] = useState(() => !!token && !standalone());
+  const [guide, setGuide] = useState(() => (!!token || params.has('guide')) && !standalone());
   const [me, setMe] = useState<Me | null | undefined>(undefined);
   const [invite, setInvite] = useState<{ fullName: string | null; login: string | null; clubName: string | null; inviter: string | null } | null>(null);
   const [inviteErr, setInviteErr] = useState('');
@@ -172,15 +173,6 @@ function Main({ me, onLogout, openGuide }: { me: Me; onLogout: () => void; openG
 
 /* ---------- Инструкция по установке ---------- */
 function InstallGuide({ invite, inviteErr, onSkip }: { invite: { fullName: string | null; login: string | null; clubName: string | null; inviter: string | null } | null; inviteErr: string; onSkip: () => void }) {
-  const [os, setOs] = useState<'ios' | 'android' | 'desktop'>(platform);
-  const [canInstall, setCanInstall] = useState(!!installEvt);
-  const [copied, setCopied] = useState(false);
-  useEffect(() => { const f = () => setCanInstall(true); installListeners.add(f); return () => { installListeners.delete(f); }; }, []);
-  const link = location.href;
-  const copy = async () => { try { await navigator.clipboard.writeText(link); setCopied(true); } catch { prompt('Скопируйте ссылку', link); } };
-  const install = async () => { if (!installEvt) return; await installEvt.prompt(); const r = await installEvt.userChoice; if (r.outcome === 'accepted') { installEvt = null; setCanInstall(false); } };
-  const iosOther = isIos && /CriOS|FxiOS|EdgiOS|YaBrowser|OPiOS|Telegram|WhatsApp|Instagram|FBAN|FBAV/.test(ua);
-  const qr = (() => { const q = qrcode(0, 'M'); q.addData(link); q.make(); return q.createDataURL(6, 1); })();
   const first = invite?.fullName?.split(' ')[0];
   return (
     <div className="guide">
@@ -191,41 +183,7 @@ function InstallGuide({ invite, inviteErr, onSkip }: { invite: { fullName: strin
         <p>Общий чат клуба и вашего отдела, личные сообщения коллегам и объявления управляющего — в одном приложении. Ставится за минуту, без App Store и Google Play.</p>
       </section>
       {inviteErr && <div className="note-warn">{inviteErr}. Инструкция ниже всё равно подходит.</div>}
-      <div className="guide-seg" role="group" aria-label="Ваш телефон">
-        <button aria-pressed={os === 'ios'} onClick={() => setOs('ios')}>iPhone</button>
-        <button aria-pressed={os === 'android'} onClick={() => setOs('android')}>Android</button>
-        {platform === 'desktop' && <button aria-pressed={os === 'desktop'} onClick={() => setOs('desktop')}>Компьютер</button>}
-      </div>
-      {os === 'desktop' && (
-        <div className="qr-box">
-          <img src={qr} alt="QR-код ссылки на установку" />
-          <b>Наведите камеру телефона на код</b>
-          <p className="hint">На телефоне откроется эта страница с инструкцией. Мессенджер можно открыть и на компьютере — кнопка внизу.</p>
-        </div>
-      )}
-      {os === 'ios' && <>
-        {iosOther && <div className="note-warn">Вы открыли ссылку не в Safari. На iPhone установить приложение можно только из Safari — начните с шага 1.</div>}
-        <ol className="steps">
-          <li><div><b>Откройте эту страницу в Safari</b><p>Если ссылка открылась в WhatsApp, Telegram или другом браузере, нажмите <span className="kbd"><Svg d={DOTS} s={14} /></span> или значок компаса и выберите «Открыть в Safari». Или скопируйте ссылку и вставьте в Safari.</p>
-            <p style={{ marginTop: 8 }}><button className="tm-btn sm" onClick={copy}>{copied ? 'Ссылка скопирована ✓' : 'Скопировать ссылку'}</button></p></div></li>
-          <li><div><b>Нажмите «Поделиться»</b><p>Кнопка <span className="kbd"><Svg d={SHARE} s={15} /></span> внизу экрана (на iPad — вверху справа).</p></div></li>
-          <li><div><b>Выберите «На экран „Домой“»</b><p>Пролистайте меню вниз до пункта <span className="kbd"><Svg d={ADD} s={15} /> На экран «Домой»</span>.</p></div></li>
-          <li><div><b>Нажмите «Добавить»</b><p>Название уже заполнено — «Мессенджер». На экране телефона появится оранжевый значок с облачком.</p></div></li>
-          <li><div><b>Откройте Мессенджер со значка и войдите</b><p>Логин и пароль — те же, что для CRM. Приложение предложит включить уведомления — нажмите «Включить» и «Разрешить».</p></div></li>
-        </ol>
-        <p className="hint">Уведомления на iPhone работают на iOS 16.4 и новее и только в приложении со значка.</p>
-      </>}
-      {os === 'android' && <>
-        {canInstall && <button className="big" onClick={install}>Установить приложение</button>}
-        <ol className="steps">
-          <li><div><b>Откройте эту страницу в Chrome</b><p>Подойдёт и Яндекс Браузер. Если ссылка открылась внутри WhatsApp или Telegram, нажмите <span className="kbd"><Svg d={DOTS} s={14} /></span> → «Открыть в браузере».</p>
-            <p style={{ marginTop: 8 }}><button className="tm-btn sm" onClick={copy}>{copied ? 'Ссылка скопирована ✓' : 'Скопировать ссылку'}</button></p></div></li>
-          <li><div><b>Нажмите <span className="kbd"><Svg d={DOTS} s={14} /></span> в правом верхнем углу</b><p>{canInstall ? 'Или просто нажмите оранжевую кнопку «Установить приложение» выше.' : 'Это меню браузера.'}</p></div></li>
-          <li><div><b>Выберите «Установить приложение»</b><p>В некоторых телефонах пункт называется «Добавить на главный экран» (в Яндекс Браузере — «Добавить ярлык»).</p></div></li>
-          <li><div><b>Подтвердите «Установить»</b><p>Значок «Мессенджер» появится на главном экране и в списке приложений.</p></div></li>
-          <li><div><b>Откройте Мессенджер и войдите</b><p>Логин и пароль — те же, что для CRM. Разрешите уведомления, когда приложение спросит.</p></div></li>
-        </ol>
-      </>}
+      <InstallWizard app="team" link={location.href} />
       <div className="login-box">
         {invite?.login ? <><span className="hint">Ваш логин</span><span className="num">{invite.login}</span></> : <b>Вход — по вашему логину от CRM</b>}
         <span className="hint">Пароль — тот же, что для CRM. Забыли — спросите управляющего, он выдаст временный.</span>
