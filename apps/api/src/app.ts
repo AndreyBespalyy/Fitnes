@@ -19,6 +19,7 @@ import { financeRoutes } from './modules/finance.ts';
 import { importRoutes } from './modules/import.ts';
 import { messagingRoutes, startMessagingWorker } from './modules/messaging.ts';
 import { acsRoutes } from './modules/acs.ts';
+import { pocketkeyRoutes } from './modules/pocketkey.ts';
 import { billingRoutes, startBillingWorker } from './modules/billing.ts';
 import { bankRoutes } from './modules/bank.ts';
 import { dashRoutes } from './modules/dash.ts';
@@ -142,6 +143,7 @@ export async function buildApp(pool: pg.Pool, opts: { webDist?: string; secureCo
   importRoutes(app, pool);
   messagingRoutes(app, pool, { fetch: opts.fetch });
   acsRoutes(app, pool);
+  pocketkeyRoutes(app, pool);
   billingRoutes(app, pool, { fetch: opts.fetch });
   bankRoutes(app, pool);
   dashRoutes(app, pool);

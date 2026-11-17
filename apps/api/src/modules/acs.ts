@@ -35,7 +35,7 @@ export async function accessSettings(db: Db, clubId: string) {
 }
 
 /* ---------- кто приложил карту и можно ли ему ---------- */
-async function credentialByCode(db: Db, code: string) {
+export async function credentialByCode(db: Db, code: string) {
   return (await db.query(`select c.*, coalesce(p.full_name, u.full_name) as holder_name, u.status as user_status
     from access_credentials c left join persons p on p.id = c.person_id left join users u on u.id = c.user_id
     where c.code = $1 order by (c.status = 'active') desc, c.issued_at desc limit 1`, [code.trim()])).rows[0];
@@ -47,7 +47,7 @@ type M = Awaited<ReturnType<typeof personMemberships>>[number];
 type Holder = { allow: boolean; reasonCode: string; reason: string; windows: Window[] | null; validUntil: string | null; membershipId: string | null; warn?: string | null; ms?: M[] };
 
 /** Статус держателя карты на дату клуба (без учёта часов) — основа и онлайн-решения, и снимка правил для шлюза. */
-async function holderStatus(db: Db, clubId: string, cred: { person_id: string | null; user_id: string | null; holder_name: string; user_status?: string }): Promise<Holder> {
+export async function holderStatus(db: Db, clubId: string, cred: { person_id: string | null; user_id: string | null; holder_name: string; user_status?: string }): Promise<Holder> {
   if (cred.user_id) {
     if (cred.user_status !== 'active') return { allow: false, reasonCode: 'staff_inactive', reason: 'Сотрудник отключён в системе', windows: null, validUntil: null, membershipId: null };
     const ok = (await db.query(`select 1 from user_assignments a join roles r on r.code = a.role_code
@@ -212,13 +212,16 @@ export function acsRoutes(app: FastifyInstance, pool: pg.Pool) {
       const inside = (await db.query(`select count(*)::int as n from visits where club_id = $1 and exit_at is null and visited_at > now() - interval '16 hours' and source <> 'import'`, [clubId])).rows[0].n;
       const today = (await db.query(`select count(*)::int as n from visits v where v.club_id = $1
         and v.visited_at >= (select (now() at time zone timezone)::date::timestamp at time zone timezone from clubs where id = $1)`, [clubId])).rows[0].n;
-      const gateways = (await db.query(`select id, name, status, last_seen_at as "lastSeenAt", queued, extract(epoch from now() - last_seen_at)::int as ago from access_gateways where club_id = $1 order by name`, [clubId])).rows
+      const gateways = (await db.query(`select id, name, kind, status, last_seen_at as "lastSeenAt", queued, extract(epoch from now() - last_seen_at)::int as ago from access_gateways where club_id = $1 order by name`, [clubId])).rows
         .map((g) => ({ ...g, online: g.lastSeenAt != null && g.ago < GW_ONLINE_SEC }));
       const points = (await db.query(`select id, name, direction, gateway_id as "gatewayId" from access_points where club_id = $1 and is_active order by name`, [clubId])).rows;
       // Тревоги: шлюз без связи, турникет не работает (ручные проходы с этой причиной за последний час)
       const alerts: string[] = [];
-      for (const g of gateways) if (g.status === 'active' && !g.online) alerts.push(g.lastSeenAt ? `Шлюз «${g.name}» не на связи ${Math.round(g.ago / 60)} мин. Турникеты пускают по сохранённым правилам, проходы выгрузятся после восстановления связи` : `Шлюз «${g.name}» ещё ни разу не подключался`);
+      for (const g of gateways) if (g.kind === 'gateway' && g.status === 'active' && !g.online) alerts.push(g.lastSeenAt ? `Шлюз «${g.name}» не на связи ${Math.round(g.ago / 60)} мин. Турникеты пускают по сохранённым правилам, проходы выгрузятся после восстановления связи` : `Шлюз «${g.name}» ещё ни разу не подключался`);
       const faults = (await db.query(`select count(*)::int as n from access_events where club_id = $1 and manual_reason like 'turnstile_fault%' and happened_at > now() - interval '1 hour'`, [clubId])).rows[0].n;
+      // PocketKey сам обращается к CRM только при проходе, поэтому «нет связи» не тревога; тревога — ошибки обмена
+      const pkErr = (await db.query(`select count(*)::int as n from acs_integration_log where club_id = $1 and status = 'error' and at > now() - interval '1 hour'`, [clubId])).rows[0].n;
+      if (pkErr) alerts.push(`Ошибок обмена с PocketKey за последний час: ${pkErr}. Подробности — «Проходы → Настройка → PocketKey», журнал обмена`);
       if (faults) alerts.push(`Ручных проходов за последний час с причиной «Турникет не работает»: ${faults}. Управляющий увидит это в отчёте`);
       return { events, inside, today, gateways, points, alerts };
     });
@@ -329,7 +332,8 @@ export function acsRoutes(app: FastifyInstance, pool: pg.Pool) {
     const direction: Direction = b.direction === 'out' ? 'out' : 'in';
     const pre = await withCtx(pool, ctx, async (db) => {
       const clubId = await clubCheck(db, b.clubId);
-      const pt = b.pointId ? (await db.query('select id, gateway_id from access_points where id = $1 and club_id = $2', [b.pointId, clubId])).rows[0] : null;
+      const pt = b.pointId ? (await db.query(`select p.id, case when g.kind = 'gateway' then p.gateway_id end as gateway_id from access_points p
+        left join access_gateways g on g.id = p.gateway_id where p.id = $1 and p.club_id = $2`, [b.pointId, clubId])).rows[0] : null;
       if (b.pointId && !pt) throw badRequest('Турникет не найден');
       const person = b.personId ? (await db.query('select id, full_name from persons where id = $1', [b.personId])).rows[0] : null;
       if (b.personId && !person) throw notFound('Клиент не найден');
@@ -370,8 +374,8 @@ export function acsRoutes(app: FastifyInstance, pool: pg.Pool) {
       await clubCheck(db, clubId);
       const settings = await accessSettings(db, clubId!);
       const gateways = (await db.query(`select id, name, status, last_seen_at as "lastSeenAt", last_sync_at as "lastSyncAt", version, queued, token_hash is not null as "hasKey",
-          extract(epoch from now() - last_seen_at)::int as ago from access_gateways where club_id = $1 order by created_at`, [clubId])).rows.map((g) => ({ ...g, online: g.lastSeenAt != null && g.ago < GW_ONLINE_SEC }));
-      const points = (await db.query(`select id, name, direction, gateway_id as "gatewayId", is_active as "isActive" from access_points where club_id = $1 order by name`, [clubId])).rows;
+          extract(epoch from now() - last_seen_at)::int as ago from access_gateways where club_id = $1 and kind = 'gateway' order by created_at`, [clubId])).rows.map((g) => ({ ...g, online: g.lastSeenAt != null && g.ago < GW_ONLINE_SEC }));
+      const points = (await db.query(`select id, name, direction, gateway_id as "gatewayId", is_active as "isActive", external_id as "externalId" from access_points where club_id = $1 order by name`, [clubId])).rows;
       const staff = (await db.query(`select u.id, u.full_name as name, string_agg(distinct r.name, ', ') as roles,
           (select json_agg(json_build_object('id', c.id, 'kind', c.kind, 'code', c.code)) from access_credentials c where c.user_id = u.id and c.status = 'active') as credentials
         from users u join user_assignments a on a.user_id = u.id join roles r on r.code = a.role_code
@@ -511,7 +515,7 @@ export function acsRoutes(app: FastifyInstance, pool: pg.Pool) {
     const token = String(req.headers['x-gateway-key'] ?? '');
     if (!/^[0-9a-f-]{36}$/i.test(id) || !token) return null;
     const a = (await pool.query('select * from acs_gateway_by_token($1, $2)', [id, token])).rows[0];
-    if (!a) return null;
+    if (!a || a.kind !== 'gateway') return null;
     const queued = Number(req.headers['x-gateway-queued'] ?? 0);
     await withCtx(pool, { tenantId: a.tenant_id, allClubs: true, clubIds: [] }, (db) => db.query(`update access_gateways set last_seen_at = now(), version = coalesce($2, version), queued = $3 where id = $1`,
       [id, String(req.headers['x-gateway-version'] ?? '') || null, Number.isFinite(queued) ? queued : 0]));
