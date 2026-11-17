@@ -240,6 +240,8 @@ function Setup({ clubId }: { clubId: string }) {
           </tr>)}</tbody></table></div>
       </div>
 
+      <PocketKeySetup clubId={clubId} />
+
       <div className="card" style={{ display: 'grid', gap: 8 }}>
         <b>Турникеты и двери</b>
         <div className="tbl"><table><thead><tr><th>Название</th><th>Направление</th><th>Шлюз</th><th /></tr></thead>
@@ -266,6 +268,94 @@ function Setup({ clubId }: { clubId: string }) {
               : <button className="btn sm" onClick={() => setStaffCard({ id: u.id, code: '' })}>Выдать карту</button>}</td></tr>)}</tbody></table></div>
       </div>
     </>
+  );
+}
+
+/* ---------------- СКУД PocketKey ---------------- */
+type PkConn = { id: string; name: string; status: string; lastSeenAt: string | null; settings: { visitBy: 'event' | 'check'; allowedIps: string[] };
+  devices: { id: string; name: string; direction: string; externalId: string | null; isActive: boolean }[];
+  journal: { at: string; op: string; status: string; correlationId: string | null; device: string | null; codeTail: string | null; message: string | null; ms: number | null }[];
+  stats: { checks: number; events: number; errors: number } };
+type PkInfo = { connections: PkConn[]; unsupported: string[] };
+type PkKey = { id: string; token: string; urls: Record<string, string> };
+const PK_OP: Record<string, string> = { check: 'Проверка', event: 'Проход', identify: 'Опознание', health: 'Связь', devices: 'Устройства', sync: 'Выгрузка людей', auth: 'Вход' };
+const PK_URL: [string, string][] = [['check-access', 'Проверка права прохода'], ['event', 'Событие прохода'], ['identify', 'Опознание по карте'], ['devices', 'Список устройств'], ['health', 'Проверка связи']];
+const PK_ST: Record<string, [string, string]> = { allow: ['ok', 'пропуск'], deny: ['bad', 'отказ'], ok: ['ok', 'ок'], duplicate: ['', 'повтор'], error: ['bad', 'ошибка'], unsupported: ['', 'недоступно'] };
+
+function PocketKeySetup({ clubId }: { clubId: string }) {
+  const [info, setInfo] = useState<PkInfo | null>(null);
+  const [key, setKey] = useState<PkKey | null>(null);
+  const [err, setErr] = useState('');
+  const [ips, setIps] = useState<Record<string, string>>({});
+  const [tst, setTst] = useState({ op: 'check-access', device: '', code: '', direction: 'in' });
+  const [answer, setAnswer] = useState<string>('');
+  const load = () => api<PkInfo>('GET', `/api/acs/pocketkey?clubId=${clubId}`).then((r) => { setInfo(r); setIps(Object.fromEntries(r.connections.map((c) => [c.id, c.settings.allowedIps.join(', ')]))); }).catch((e) => setErr(errText(e)));
+  useEffect(() => { load(); }, [clubId]);
+  const act = async (fn: () => Promise<unknown>, ok: string) => { setErr(''); try { await fn(); toast(ok); load(); } catch (e) { setErr(errText(e)); } };
+  const copy = (t: string) => { navigator.clipboard?.writeText(t).then(() => toast('Скопировано'), () => {}); };
+  if (!info) return err ? <p className="err">{err}</p> : null;
+  return (
+    <div className="card" style={{ display: 'grid', gap: 10 }}>
+      <div className="row between"><b>СКУД PocketKey</b>
+        {info.connections.length === 0 && <button className="btn sm" onClick={() => act(async () => setKey(await api('POST', '/api/acs/pocketkey', { clubId })), 'Подключение создано')}>Подключить PocketKey</button>}</div>
+      <span className="small">PocketKey сам спрашивает CRM, пускать ли человека, и сообщает о проходе. Решение принимает CRM по абонементу, оплате и часам, турникетами управляет PocketKey.
+        Адреса ниже передайте специалисту PocketKey: он впишет их в свой сервер.</span>
+      {err && <p className="err">{err}</p>}
+      {key && <div className="note" style={{ display: 'grid', gap: 6 }}>
+        <b>Скопируйте сейчас: ключ входит в адреса, больше мы его не покажем</b>
+        {PK_URL.map(([k, t]) => <div key={k} style={{ display: 'grid', gap: 2 }}><span className="small">{t}</span>
+          <span className="row"><span className="secret" style={{ wordBreak: 'break-all' }}>{key.urls[k]}</span><button className="btn sm" onClick={() => copy(key.urls[k])}>Копировать</button></span></div>)}
+        <span className="small">Передавайте адреса только специалисту PocketKey, по почте или в кабинете поддержки. Если адрес попал не туда, нажмите «Новый ключ».</span>
+        <div><button className="btn sm" onClick={() => setKey(null)}>Скопировал</button></div></div>}
+      {info.connections.map((c) => <div key={c.id} style={{ display: 'grid', gap: 10 }}>
+        <div className="row">
+          <span className={`chip ${c.status !== 'active' ? 'bad' : c.lastSeenAt ? 'ok' : ''}`}>{c.status !== 'active' ? 'отключено' : c.lastSeenAt ? `последний запрос ${dt(c.lastSeenAt)}` : 'PocketKey ещё не обращался'}</span>
+          <span className="small">За сутки: проверок {c.stats.checks}, проходов {c.stats.events}, ошибок {c.stats.errors}</span>
+        </div>
+        <div className="row">
+          <button className="btn sm" onClick={() => act(async () => setKey(await api('POST', `/api/acs/pocketkey/${c.id}/key`)), 'Выпущен новый ключ, старые адреса больше не действуют')}>Новый ключ и адреса</button>
+          <button className="btn sm" onClick={() => act(() => api('PATCH', `/api/acs/pocketkey/${c.id}`, { status: c.status === 'active' ? 'disabled' : 'active' }), 'Сохранено')}>{c.status === 'active' ? 'Отключить' : 'Включить'}</button>
+        </div>
+        <label className="row small">Посещение считать
+          <select value={c.settings.visitBy} onChange={(e) => act(() => api('PATCH', `/api/acs/pocketkey/${c.id}`, { visitBy: e.target.value }), 'Сохранено')} style={{ width: 'auto' }}>
+            <option value="event">по событию прохода от PocketKey (надёжнее)</option>
+            <option value="check">сразу по разрешению (если PocketKey не присылает проходы)</option>
+          </select></label>
+        <form className="row small" onSubmit={(e) => { e.preventDefault(); act(() => api('PATCH', `/api/acs/pocketkey/${c.id}`, { allowedIps: ips[c.id] ?? '' }), 'Сохранено'); }}>
+          Принимать запросы только с адресов <input placeholder="пусто — с любых" value={ips[c.id] ?? ''} onChange={(e) => setIps({ ...ips, [c.id]: e.target.value })} style={{ flex: '1 1 180px' }} />
+          <button className="btn sm">Сохранить</button></form>
+
+        <b className="small">Устройства PocketKey</b>
+        {c.devices.length === 0 ? <span className="small muted">Появятся сами при первом запросе от PocketKey.</span>
+          : <div className="tbl"><table><thead><tr><th>Номер в PocketKey</th><th>Название в CRM</th><th>Направление</th><th /></tr></thead>
+            <tbody>{c.devices.map((d) => <tr key={d.id} className={d.isActive ? '' : 'muted'}>
+              <td className="num">{d.externalId ?? '—'}</td>
+              <td><input defaultValue={d.name} aria-label="Название" onBlur={(e) => e.target.value.trim() && e.target.value !== d.name && act(() => api('PATCH', `/api/acs/pocketkey/${c.id}/devices/${d.id}`, { name: e.target.value }), 'Сохранено')} /></td>
+              <td><select aria-label="Направление" value={d.direction} onChange={(e) => act(() => api('PATCH', `/api/acs/pocketkey/${c.id}/devices/${d.id}`, { direction: e.target.value }), 'Сохранено')} style={{ width: 'auto' }}>
+                {Object.entries(DIR).map(([k, t]) => <option key={k} value={k}>{t}</option>)}</select></td>
+              <td><button className="btn sm" onClick={() => act(() => api('PATCH', `/api/acs/pocketkey/${c.id}/devices/${d.id}`, { isActive: !d.isActive }), 'Сохранено')}>{d.isActive ? 'Выключить' : 'Включить'}</button></td></tr>)}</tbody></table></div>}
+
+        <b className="small">Проверить без оборудования</b>
+        <form className="row" onSubmit={(e) => { e.preventDefault(); setErr(''); api<{ response: unknown }>('POST', `/api/acs/pocketkey/${c.id}/test`, { op: tst.op === 'event' ? 'event' : tst.op === 'identify' ? 'identify' : 'check', device: tst.device, code: tst.code, direction: tst.direction })
+          .then((r) => { setAnswer(JSON.stringify(r.response, null, 2)); load(); }).catch((x) => setErr(errText(x))); }}>
+          <select aria-label="Запрос" value={tst.op} onChange={(e) => setTst({ ...tst, op: e.target.value })} style={{ width: 'auto' }}>
+            <option value="check-access">Проверка прохода</option><option value="event">Проход состоялся</option><option value="identify">Опознание</option></select>
+          <select aria-label="Устройство" value={tst.device} onChange={(e) => setTst({ ...tst, device: e.target.value })} style={{ width: 'auto' }}>
+            <option value="">Тестовое устройство</option>{c.devices.filter((d) => d.externalId).map((d) => <option key={d.id} value={d.externalId!}>{d.name}</option>)}</select>
+          <input placeholder="Номер карты" value={tst.code} onChange={(e) => setTst({ ...tst, code: e.target.value })} style={{ width: 140 }} />
+          <select aria-label="Направление" value={tst.direction} onChange={(e) => setTst({ ...tst, direction: e.target.value })} style={{ width: 'auto' }}><option value="in">вход</option><option value="out">выход</option></select>
+          <button className="btn">Отправить</button></form>
+        {answer && <pre className="small" style={{ whiteSpace: 'pre-wrap', margin: 0 }}>{answer}</pre>}
+
+        <b className="small">Журнал обмена (последние 50)</b>
+        {c.journal.length === 0 ? <span className="small muted">Запросов ещё не было.</span>
+          : <div className="tbl"><table><thead><tr><th>Время</th><th>Запрос</th><th>Итог</th><th>Устройство</th><th>Карта</th><th>Подробности</th></tr></thead>
+            <tbody>{c.journal.map((j, i) => <tr key={i}><td className="small">{dt(j.at)}</td><td>{PK_OP[j.op] ?? j.op}</td>
+              <td><span className={`chip ${PK_ST[j.status]?.[0] ?? ''}`}>{PK_ST[j.status]?.[1] ?? j.status}</span></td>
+              <td className="small">{j.device ?? '—'}</td><td className="num">{j.codeTail ?? '—'}</td><td className="small">{j.message ?? ''}{j.ms != null ? ` (${j.ms} мс)` : ''}</td></tr>)}</tbody></table></div>}
+      </div>)}
+      <div className="small muted">Пока недоступно, ждём документацию PocketKey: {info.unsupported.join('; ')}.</div>
+    </div>
   );
 }
 
