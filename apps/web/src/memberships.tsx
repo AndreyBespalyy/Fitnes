@@ -53,7 +53,7 @@ export function TariffsPage({ me, clubs, clubId }: { me: Me; clubs: Club[]; club
       <SettingsForm key={`s${club}`} club={c} manage={manage} />
       <Products key={`p${club}`} club={c} manage={manage} />
       <PromosBlock key={`a${club}`} club={c} manage={manage} />
-      <LoyaltySettings key={`l${club}`} club={c} />
+      {manage && <LoyaltySettings key={`l${club}`} club={c} />}
     </>
   );
 }
@@ -77,6 +77,15 @@ function SettingsForm({ club, manage }: { club: Club; manage: boolean }) {
   };
   const ro = !manage;
   const sub = club.salesModel === 'subscription';
+  // Кто не может менять правила (менеджер, ресепшн), видит их коротким текстом, без полей ввода
+  if (ro) return (
+    <div className="card" style={{ display: 'grid', gap: 6 }}>
+      <h2>Правила клуба</h2>
+      <div className="small"><b>Заморозка:</b> {s.freezeEnabled ? `до ${s.freezeMaxDaysPerYear} дн. в год, не больше ${s.freezeMaxTimesPerYear} раз, от ${s.freezeMinDays} дн.${s.freezePaid ? `, платная — ${rub(s.freezePriceKop)}` : ', бесплатно'}` : 'нет'}</div>
+      <div className="small"><b>Рассрочка:</b> {s.installmentsEnabled ? `до ${s.installmentsMaxPayments} платежей, раз в месяц` : 'нет'}. Проход закрывается при просрочке больше {s.overdueBlockAfterDays} дн.; напоминание о продлении за {s.renewalReminderDays} дн.</div>
+      <div className="small"><b>Семья:</b> скидка второму и следующим {s.familyDiscountPercent} %, до {s.familyMaxMembers} человек.{s.contractRequiredForAccess ? ' Без подписанного договора в клуб не пускаем.' : ''}</div>
+      {sub && <div className="small"><b>Подписка:</b> повторных попыток списания {s.subscriptionRetryAttempts}, раз в {s.subscriptionRetryIntervalDays} дн.</div>}
+    </div>);
   return (
     <form className="card" onSubmit={save} style={{ display: 'grid', gap: 14 }}>
       <h2>Правила клуба</h2>
@@ -267,7 +276,7 @@ export function MembershipsBlock({ me, personId, homeClubId }: { me: Me; personI
                       {(can(me, 'memberships.sell') || can(me, 'shifts.work')) && <button className="btn sm" title="Списать с депозита клиента" onClick={() => act(() => api('POST', `/api/charges/${c.id}/pay-deposit`), 'Оплачено с депозита')}>С депозита</button>}
                       {can(me, 'memberships.sell') && <PayLinkButton chargeId={c.id} />}</span>}
                 </div>))}</div>)}
-            {m.contract && <ContractLine me={me} c={m.contract} reload={reload} />}
+            {m.contract && (canSell || canManage || can(me, 'contracts.sign') || can(me, 'finance.view')) && <ContractLine me={me} c={m.contract} reload={reload} />}
             {m.seatOf && <div className="small">Место в общем семейном абонементе. Купил и платит: <b>{m.seatOf.holderName}</b>. Срок, заморозка и продление — по основному абонементу.</div>}
             {m.familySeats && m.status === 'active' && <SeatsLine membershipId={m.id} clubId={m.clubId} buyerId={personId} seats={m.familySeats} taken={m.seats ?? []} canEdit={canSell} reload={reload} />}
             {m.seatOf && m.status === 'active' && canSell && <div className="row"><button className="btn sm" onClick={() => act(() => api('POST', `/api/memberships/${m.seatOf!.membershipId}/seats/${m.id}/remove`), 'Место освобождено')}>Освободить место</button></div>}

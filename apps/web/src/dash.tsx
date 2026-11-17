@@ -359,7 +359,7 @@ function PlanEditor({ club, month, setMonth }: { club: Club; month: string; setM
   };
   const ro = !p.canEdit;
   return (
-    <div className="card" style={{ display: 'grid', gap: 10 }}>
+    <div className={`card${ro ? ' ro-view' : ''}`} style={{ display: 'grid', gap: 10 }}>
       <div className="row between" style={{ flexWrap: 'wrap', gap: 8 }}><h2 style={{ margin: 0 }}>План продаж: {club.name}</h2>
         <input type="month" value={month} onChange={(e) => e.target.value && setMonth(e.target.value)} style={{ width: 'auto' }} /></div>
       <p className="small muted" style={{ margin: 0 }}>Суммы в рублях. Количество клиентов система считает сама: сумма ÷ плановый средний чек. Пустое поле — план по категории не задан. {ro ? 'Менять план может собственник или управляющий.' : ''}</p>
@@ -415,7 +415,7 @@ function NormsEditor({ club }: { club: Club }) {
     catch (e) { setErr(errText(e)); }
   };
   return (
-    <div className="card" style={{ display: 'grid', gap: 10 }}>
+    <div className={`card${d.canEdit ? '' : ' ro-view'}`} style={{ display: 'grid', gap: 10 }}>
       <h2 style={{ margin: 0 }}>Нормы KPI: {club.name}</h2>
       <p className="small muted" style={{ margin: 0 }}>Норма на один рабочий день сотрудника отдела продаж. За период норма умножается на число дней; «просрочено задач» и «первый ответ» — предел на любой момент.</p>
       {err && <p className="err">{err}</p>}

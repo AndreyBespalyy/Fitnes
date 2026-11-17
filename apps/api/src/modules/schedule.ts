@@ -4,7 +4,7 @@
 import type { FastifyInstance } from 'fastify';
 import type pg from 'pg';
 import { randomUUID } from 'node:crypto';
-import { can, requirePerm } from '../auth.ts';
+import { can, requirePerm, trainerOnly } from '../auth.ts';
 import { audit, withCtx, type Ctx, type Db } from '../db.ts';
 import { badRequest, forbidden, notFound } from '../errors.ts';
 import { PERMISSIONS as P } from '../roles.ts';
@@ -241,6 +241,8 @@ export function scheduleRoutes(app: FastifyInstance, pool: pg.Pool, opts: { fetc
     const ctx = requirePerm(req, P.scheduleBook);
     const q = req.query as { clubId?: string; from?: string; to?: string; trainerId?: string };
     if (!isDate(q.from) || !isDate(q.to)) throw badRequest('Укажите период');
+    // Тренер видит только свои занятия
+    if (trainerOnly(ctx)) q.trainerId = ctx.userId;
     return withCtx(pool, ctx, async (db) => {
       await clubOf(db, q.clubId);
       return (await db.query(`${SESSION} where s.club_id = $1 and (s.starts_at >= ($2)::date::timestamp at time zone c.timezone and s.starts_at < (($3)::date + 1)::timestamp at time zone c.timezone)
@@ -357,6 +359,7 @@ export function scheduleRoutes(app: FastifyInstance, pool: pg.Pool, opts: { fetc
     const { id } = req.params as { id: string };
     return withCtx(pool, ctx, async (db) => {
       const s = await loadSession(db, id);
+      if (trainerOnly(ctx) && s.trainerId !== ctx.userId) throw forbidden('Это занятие другого тренера');
       const bookings = (await db.query(`select b.id, b.person_id as "personId", p.full_name as "name", b.status, b.trial, b.late_cancel as "lateCancel", b.charged,
           m.product_name as membership, m.visits_left as "visitsLeft", b.created_at as "createdAt",
           (select value from person_contacts pc where pc.person_id = p.id and pc.is_primary limit 1) as phone
@@ -372,6 +375,7 @@ export function scheduleRoutes(app: FastifyInstance, pool: pg.Pool, opts: { fetc
     const b = (req.body ?? {}) as { personId?: string; trial?: boolean };
     if (!uuid(b.personId)) throw badRequest('Выберите клиента');
     const r = await withCtx(pool, ctx, async (db) => {
+      if (trainerOnly(ctx) && (await loadSession(db, id)).trainerId !== ctx.userId) throw forbidden('Это занятие другого тренера');
       const res = await bookPerson(db, f, ctx, id, b.personId!, !!b.trial);
       await audit(db, ctx, 'class.booked', 'class_booking', res.id, null, { sessionId: id, personId: b.personId, status: res.status, trial: !!b.trial });
       return res;

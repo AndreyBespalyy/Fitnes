@@ -2,6 +2,7 @@
 import { useEffect, useState } from 'react';
 import { api, can, type Club, type Me, navParams } from './api.ts';
 import { errText, toast } from './ui.ts';
+import { trainerOnly } from './roleMenu.ts';
 
 type Session = { id: string; typeName: string; kind: 'group' | 'personal'; roomName: string | null; trainerId: string | null; trainerName: string | null; localStart: string; localEnd: string;
   capacity: number; status: 'scheduled' | 'done' | 'cancelled'; booked: number; waitlist: number; note: string | null; cancelReason: string | null };
@@ -52,10 +53,11 @@ export function SchedulePage({ me, clubs, clubId, openPerson }: { me: Me; clubs:
           <b>{ddmm(week)} – {ddmm(addDays(week, 6))}</b>
           <button className="btn sm" onClick={() => setWeek(addDays(week, 7))}>Неделя →</button>
           <button className="btn sm" onClick={() => setWeek(monday(today))}>Сегодня</button>
-          <select value={trainer} onChange={(e) => setTrainer(e.target.value)} aria-label="Тренер">
+          {/* Тренер видит только свои занятия — выбора тренера у него нет (замечание №23) */}
+          {!trainerOnly(me) && <select value={trainer} onChange={(e) => setTrainer(e.target.value)} aria-label="Тренер">
             <option value="">Все тренеры</option>
             {setup?.trainers.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
-          </select>
+          </select>}
         </div>
         <div className="week7">
           {DOW.map((d, i) => {

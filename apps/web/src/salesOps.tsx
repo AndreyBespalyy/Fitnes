@@ -13,7 +13,7 @@ type View = 'leads' | 'lists' | 'renewals' | 'newbies' | 'funnel' | 'base' | 'se
 export function SalesOpsPage({ me, clubs, clubId, openPerson }: { me: Me; clubs: Club[]; clubId: string; openPerson: (id: string) => void }) {
   const views: [View, string, boolean][] = [
     ['leads', 'Заявки', true], ['lists', 'Списки обзвона', true], ['renewals', 'Окно продлений', true], ['newbies', 'Новички', true],
-    ['funnel', 'Воронка и источники', can(me, 'dash.view')], ['base', 'Стоп-лист и дубли', can(me, 'crm.view_all')], ['settings', 'Настройки', true],
+    ['funnel', 'Воронка и источники', can(me, 'dash.view')], ['base', 'Стоп-лист и дубли', can(me, 'crm.view_all')], ['settings', 'Настройки', can(me, 'plan.manage') || can(me, 'tariffs.manage')],
   ];
   const [view, setView] = useState<View>(() => (views.some((v) => v[0] === navParams('sales').view && v[2]) ? navParams('sales').view as View : 'leads'));
   const club = clubId !== 'all' ? clubId : clubs[0]?.id ?? '';
