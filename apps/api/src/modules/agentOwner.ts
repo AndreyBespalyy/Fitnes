@@ -11,7 +11,7 @@ import { goodExamples } from './agentLearn.ts';
 import { callsGoal, draftButton, draftTask, type TaskDraft } from './agentDrafts.ts';
 import { classesText, clientClasses, fmtDate, noContacts, situationBrief } from './agent.ts';
 import { card, leastLoaded, reassignOpenWork } from './agentReminders.ts';
-import { clientsFact, kpi, lightOf, monthInfo, planFact, salesFact, targets } from './dash.ts';
+import { clientsFact, kpi, lightOf, monthInfo, planFact, salesFact, salesStaff, targets } from './dash.ts';
 
 export type Topic = 'sales' | 'forecast' | 'attendance' | 'trainers' | 'staff' | 'client' | 'problems' | 'advice';
 export const TOPIC_NAME: Record<Topic, string> = {
@@ -580,6 +580,40 @@ export async function ownerAnswer(db: Db, ctx: Ctx, text: string, yandex: Yandex
   const shown = onlyAdvice ? [] : body.map((b, i) => (i === 0 ? b.replace(/^\*\*(.+?)\*\*/, `**$1**${ctxLabel}`) : b));
   const parts = [...shown, advice ? `**Советы**${onlyAdvice ? ctxLabel : ''}\n${advice}` : '', onlyAdvice && !advice ? 'Серьёзных проблем по данным не вижу: план, посещаемость и задачи в норме.' : ''].filter(Boolean);
   return fitAnswer(parts.join('\n\n'));
+}
+
+/* ---------- «кто из менеджеров отстаёт от плана» ---------- */
+export const MGR_PLAN_RE = /(отстающ|отста(е|ё)т|отстал|хуже\s+всех|рейтинг|кто\s+(не\s+)?выполня).*менеджер|менеджер\S*.*(отстающ|отста(е|ё)т|отстал|план)/i;
+
+/** Менеджеры по отставанию от графика личного плана (к сегодняшнему дню), самый отстающий первым; кнопка — его задачи на сегодня */
+export async function managersPlanAnswer(db: Db, text: string): Promise<{ text: string; actions: { label: string; url: string }[] } | null> {
+  const all = await visibleClubs(db);
+  if (!all.length) return null;
+  const clubs = pickClubs(text, all);
+  const today = await todayOf(db, clubs[0].timezone);
+  const month = today.slice(0, 7);
+  const mi = monthInfo(month, today);
+  const ids = clubs.map((c) => c.id);
+  const staff = (await salesStaff(db, ids)).filter((s, i, a) => a.findIndex((x) => x.id === s.id) === i);
+  if (!staff.length) return { text: 'В отделе продаж нет менеджеров.', actions: [] };
+  const tg = await targets(db, ids, month); const sf = await salesFact(db, ids, mi.from, today); const cf = await clientsFact(db, ids, mi.from, today);
+  const rows = staff.map((s) => {
+    const t = planFact(mi, tg, sf, cf, { userId: s.id }).total;
+    const expected = t.planKop ? Math.round((t.planKop * mi.passed) / mi.days) : null;
+    const pace = expected ? Math.round((t.factKop * 100) / expected) : null; // % от графика к сегодняшнему дню
+    return { id: s.id, name: s.name, plan: t.planKop, fact: t.factKop, percent: t.percent, expected, lag: pace === null ? null : 100 - pace };
+  });
+  const withPlan = rows.filter((r) => r.lag !== null).sort((a, b) => b.lag! - a.lag! || (a.percent ?? 0) - (b.percent ?? 0));
+  const noPlan = rows.filter((r) => r.lag === null);
+  const label = clubs.length === all.length && all.length > 1 ? 'вся сеть' : clubs.map((c) => c.name).join(', ');
+  const lines = [`**Менеджеры по отставанию от плана** · ${label}, ${mi.passed} из ${mi.days} дн. месяца`];
+  withPlan.forEach((r, i) => lines.push(`${i + 1}. **${r.name}** — ${r.lag! > 0 ? `отстаёт от графика на **${r.lag} %**` : r.lag! < 0 ? `опережает график на ${-r.lag!} %` : 'идёт точно по графику'}: ${rub(r.fact)} из ${rub(r.plan!)} (${r.percent} % плана, к сегодняшнему дню нужно ${rub(r.expected!)})`));
+  if (!withPlan.length) lines.push('Личные планы менеджерам на этот месяц не заданы — задайте их в «Отделе продаж» → «План продаж».');
+  if (noPlan.length) lines.push(`Без личного плана: ${noPlan.map((r) => `${r.name} (${rub(r.fact)})`).join(', ')}.`);
+  if (withPlan[0]?.lag && withPlan[0].lag > 15) lines.push(`\nНачните с первого в списке (${withPlan[0].name}): откройте его задачи на сегодня — есть ли звонки по горячим и продлениям.`);
+  const surname = (n: string) => n.split(' ').slice(-1)[0];
+  const actions = [...withPlan, ...noPlan].slice(0, 4).map((r) => ({ label: `Задачи на сегодня: ${surname(r.name)}`, url: `/?tab=tasks&scope=all&user=${r.id}&day=today` }));
+  return { text: lines.join('\n'), actions };
 }
 
 /** Сотрудники в порядке упоминания (для «передай задачи Марии Ксении»): для каждого слова-имени — подходящие сотрудники */

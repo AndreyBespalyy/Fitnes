@@ -98,3 +98,15 @@ test('тренер: «кто не пришёл на последнюю трен�
     assert.match(msg[0].body, /^Алексей, здравствуйте!/);
   } else assert.match(r.failed[0].reason, /мессенджер|позвоните/);
 });
+
+test('руководитель: «кто из менеджеров отстаёт от плана» — список по отставанию и кнопки «Задачи на сегодня»', async () => {
+  const c = (await sql(`select id, tenant_id, timezone from clubs where name like '%Центр%'`))[0];
+  const vol = (await sql(`select id from users where login = 'm.volkova'`))[0].id;
+  await sql(`insert into plan_targets(tenant_id, club_id, month, user_id, category, amount_kop) values ($1, $2, date_trunc('month', now() at time zone $3)::date, $4, 'new', 500000000)
+    on conflict (club_id, month, coalesce(user_id, '00000000-0000-0000-0000-000000000000'::uuid), category) do update set amount_kop = 500000000`, [c.tenant_id, c.id, c.timezone, vol]);
+  const m = await ask('кто самый отстающий от выполнения плана из менеджеров', 'o.smirnov');
+  assert.match(m.body, /^\*\*Менеджеры по отставанию от плана\*\* · .+, \d+ из \d+ дн\. месяца\n1\. \*\*Мария Волкова\*\* — отстаёт от графика на \*\*\d+ %\*\*: .+ из .+ \(\d+(\.\d+)? % плана, к сегодняшнему дню нужно .+\)/);
+  const a = m.meta!.actions![0] as { label: string; url: string };
+  assert.equal(a.label, 'Задачи на сегодня: Волкова');
+  assert.equal(a.url, `/?tab=tasks&scope=all&user=${vol}&day=today`);
+});

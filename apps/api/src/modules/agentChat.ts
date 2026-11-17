@@ -17,7 +17,7 @@ import { HINTS_RE, followUps, hintsChatAnswer, roleOf } from './agentMorning.ts'
 import { NOSHOW_RE, noShowAnswer } from './agentInvite.ts';
 import { recordSuggestion } from './agentLearn.ts';
 import { MEETING_RE, MEETING_STATUS_RE, meetingPendingReply, meetingStatus, proposeMeeting } from './agentMeetings.ts';
-import { OWNER_HELP, isLeader, ownerAnswer, ownerPendingReply } from './agentOwner.ts';
+import { MGR_PLAN_RE, OWNER_HELP, isLeader, managersPlanAnswer, ownerAnswer, ownerPendingReply } from './agentOwner.ts';
 
 export const BOT_NAME = 'ИИ-помощник';
 
@@ -214,6 +214,11 @@ export async function botReply(db: Db, ctx: Ctx, text: string, yandex: YandexCon
     if (mp) return mp;
     if (MEETING_RE.test(text.trim())) return proposeMeeting(db, ctx, text);
     if (WEEKLY_RE.test(text)) return weeklyChatAnswer(db, ctx, text, yandex);
+    // «Кто из менеджеров больше всех отстаёт от плана» — список по отставанию и кнопки «Задачи на сегодня»
+    if (MGR_PLAN_RE.test(text)) {
+      const a = await managersPlanAnswer(db, text);
+      if (a) { if (out) out.actions = [...a.actions, ...(out.actions ?? [])]; return a.text; }
+    }
     if (/^(создай|сделай|добавь|запиши|опиши)\s+(новый\s+)?(бизнес[- ]?)?процесс/i.test(text.trim())) return processByWords(db, ctx, text, yandex);
     if (/^(процессы|как идут процессы|бизнес[- ]?процессы|что с процессами)/i.test(text.trim())) return processesText(db);
     const p = await ownerPendingReply(db, ctx, text, yandex);
