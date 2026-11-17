@@ -23,7 +23,7 @@ type Lead = { id: string; createdAt: string; clubName: string; personId: string;
   isRepeat: boolean; assigneeName: string | null; dueAt: string; respondedAt: string | null; takenAt?: string | null; responseState: 'in_time' | 'late' | 'overdue' | 'waiting' };
 type Opp = { id: string; stageId: string; personId: string; personName: string; ownerName: string | null; nextTaskAt: string | null; overdue: boolean };
 type Task = { id: string; kind: string; title: string; dueAt: string; doneAt: string | null; result: string | null; personId: string | null; personName: string | null;
-  opportunityId: string | null; assigneeName: string | null; overdue: boolean; callId: string | null };
+  opportunityId: string | null; assigneeId?: string | null; assigneeName: string | null; overdue: boolean; callId: string | null };
 type Card = {
   person: { id: string; fullName: string; segment: string; homeClubId: string | null; homeClubName: string | null; createdAt: string; autopayEnabled: boolean; autopayChangedAt: string | null; marketingConsent: boolean; messagingOptOut: boolean };
   contacts: { type: string; value: string; isPrimary: boolean }[];
@@ -157,18 +157,25 @@ export function TasksPage({ me, clubId, openPerson }: { me: Me; clubId: string; 
   const [scope, setScope] = useState<'mine' | 'all'>(() => (navParams('tasks').scope === 'all' && can(me, 'crm.view_all') ? 'all' : 'mine'));
   const [doing, setDoing] = useState<Task | null>(null);
   const [call, setCall] = useState<string | null>(null);
-  const reload = () => api<Task[]>('GET', `/api/tasks?scope=${scope}${clubId !== 'all' ? `&clubId=${clubId}` : ''}`).then(setTasks).catch(() => setTasks([]));
-  useEffect(() => { reload(); }, [scope, clubId]);
+  // Из ИИ-помощника: «Задачи на сегодня: <менеджер>» — задачи одного сотрудника, только просроченные и на сегодня
+  const [only, setOnly] = useState<{ user: string; today: boolean } | null>(() => { const q = navParams('tasks'); return q.user && can(me, 'crm.view_all') ? { user: q.user, today: q.day === 'today' } : null; });
+  const [all, setAll] = useState<Task[]>([]);
+  const reload = () => api<Task[]>('GET', `/api/tasks?scope=${only ? 'all' : scope}${clubId !== 'all' ? `&clubId=${clubId}` : ''}`).then(setAll).catch(() => setAll([]));
+  useEffect(() => { setTasks(only ? all.filter((t) => t.assigneeId === only.user) : all); }, [all, only]);
+  useEffect(() => { reload(); }, [scope, clubId, only]);
   const now = Date.now();
   const endOfDay = new Date(); endOfDay.setHours(23, 59, 59, 999);
   const groups: [string, Task[]][] = [
     ['Просрочено', tasks.filter((t) => t.overdue)],
     ['Сегодня', tasks.filter((t) => !t.overdue && new Date(t.dueAt).getTime() <= endOfDay.getTime())],
-    ['Позже', tasks.filter((t) => new Date(t.dueAt).getTime() > endOfDay.getTime() && new Date(t.dueAt).getTime() > now)],
+    ['Позже', only?.today ? [] : tasks.filter((t) => new Date(t.dueAt).getTime() > endOfDay.getTime() && new Date(t.dueAt).getTime() > now)],
   ];
+  const whoName = only ? all.find((t) => t.assigneeId === only.user)?.assigneeName : null;
   return (
     <>
-      {can(me, 'crm.view_all') && (
+      {only && <div className="card row between" style={{ alignItems: 'center' }}><b>{whoName ? `Задачи: ${whoName}` : 'Задачи сотрудника'}{only.today ? ' — просроченные и на сегодня' : ''}</b>
+        <button className="btn sm" onClick={() => setOnly(null)}>Все задачи</button></div>}
+      {can(me, 'crm.view_all') && !only && (
         <div className="tabs" role="group"><button aria-pressed={scope === 'mine'} onClick={() => setScope('mine')}>Мои</button><button aria-pressed={scope === 'all'} onClick={() => setScope('all')}>Все в клубе</button></div>
       )}
       {groups.map(([title, list]) => list.length > 0 && (

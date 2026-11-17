@@ -8,9 +8,10 @@ import { audit, type Ctx, type Db } from '../db.ts';
 import { PERMISSIONS as P } from '../roles.ts';
 import { ygptComplete, ygptJson, type YandexConfig } from '../lib/yandex.ts';
 import { goodExamples } from './agentLearn.ts';
+import { callsGoal, draftButton, draftTask, type TaskDraft } from './agentDrafts.ts';
 import { classesText, clientClasses, fmtDate, noContacts, situationBrief } from './agent.ts';
 import { card, leastLoaded, reassignOpenWork } from './agentReminders.ts';
-import { clientsFact, kpi, lightOf, monthInfo, planFact, salesFact, targets } from './dash.ts';
+import { clientsFact, kpi, lightOf, monthInfo, planFact, salesFact, salesStaff, targets } from './dash.ts';
 
 export type Topic = 'sales' | 'forecast' | 'attendance' | 'trainers' | 'staff' | 'client' | 'problems' | 'advice';
 export const TOPIC_NAME: Record<Topic, string> = {
@@ -42,7 +43,8 @@ export type Period = { from: string; to: string; label: string; month?: string }
 export type Club = { id: string; name: string; timezone: string };
 export type Who = { type: 'employee' | 'client'; id: string; label: string; role?: string };
 export type Pending = { kind: 'topic' | 'who' | 'meeting' | 'meeting_club'; data?: unknown; text: string; options?: Who[] };
-type Section = { title: string; lines: string[]; tips: string[] };
+/** buttons — готовые задачи по советам: кнопка «Поставить задачу» под ответом */
+type Section = { title: string; lines: string[]; tips: string[]; buttons?: { label: string; task: TaskDraft }[] };
 
 const rub = (kop: number) => `${Math.round(kop / 100).toLocaleString('ru-RU').replace(/[ ,]/g, ' ')} ₽`;
 const pctOf = (a: number, b: number) => (b > 0 ? Math.round((a * 100) / b) : 0);
@@ -177,13 +179,29 @@ async function salesSection(db: Db, clubs: Club[], per: Period, today: string): 
     for (const r of pf.rows) lines.push(`• ${r.name}: ${rub(r.factKop)}${r.planKop ? ` из ${rub(r.planKop)} (${r.percent} %)${r.light === 'red' ? ' 🔴' : r.light === 'yellow' ? ' 🟡' : ' 🟢'}` : ''}`);
     if (mi.current && t.planKop && t.dayPlanKop) lines.push(`Чтобы выйти на план, нужно продавать **${rub(t.dayPlanKop)} в день** до конца месяца (осталось ${mi.left} дн.).`);
     const red = pf.rows.filter((r) => r.light === 'red');
-    if (red.length) tips.push(`Отстаёт: ${red.map((r) => r.name.toLowerCase()).join(', ')}. Откройте «Кому звонить» по этим категориям и поставьте менеджерам дневную цель на звонки.`);
+    // По каждому клубу, где направление отстаёт, — готовая задача «дневная цель на звонки» самому свободному менеджеру
+    const buttons: NonNullable<Section['buttons']> = [];
+    if (mi.current) {
+      for (const c of clubs) {
+        const cpf = clubs.length > 1 ? planFact(mi, tg.filter((x) => x.clubId === c.id), sf.filter((x) => x.clubId === c.id), cf.filter((x) => x.clubId === c.id), {}) : pf;
+        const cred = cpf.rows.filter((r) => r.light === 'red');
+        if (!cred.length) continue;
+        const n = callsGoal(cred.length);
+        const cats = cred.map((r) => `${r.name.toLowerCase()} (${r.percent ?? 0} % плана)`).join(', ');
+        const d = await draftTask(db, c, `Дневная цель: ${n} звонков за день по отстающим направлениям — ${cats}. Списки — в «Кому звонить». Итог: сколько дозвонились и сколько договорились о покупке.`);
+        if (d) buttons.push(draftButton(d, 'цель на звонки', clubs.length > 1));
+      }
+    }
+    if (red.length) tips.push(buttons.length
+      ? `Отстаёт: ${red.map((r) => r.name.toLowerCase()).join(', ')}. Нужна дневная цель на звонки — задача уже подготовлена, проверьте и поставьте кнопкой ниже.`
+      : `Отстаёт: ${red.map((r) => r.name.toLowerCase()).join(', ')}. Откройте «Кому звонить» по этим категориям и поставьте менеджерам дневную цель на звонки.`);
     if (clubs.length > 1) {
       for (const c of clubs) {
         const cpf = planFact(mi, tg.filter((x) => x.clubId === c.id), sf.filter((x) => x.clubId === c.id), cf.filter((x) => x.clubId === c.id), {});
         lines.push(`• ${c.name}: ${rub(cpf.total.factKop)}${cpf.total.planKop ? ` — ${cpf.total.percent} % плана` : ''}`);
       }
     }
+    if (buttons.length) return { title: 'Продажи', lines, tips, buttons };
   } else {
     const len = daysBetween(per.from, per.to) + 1;
     const cur = await sum(per.from, per.to); const prev = await sum(addDays(per.from, -len), addDays(per.from, -1));
@@ -475,7 +493,7 @@ export async function ownerPendingReply(db: Db, ctx: Ctx, text: string, yandex: 
 }
 
 /** Главный ответ помощника руководителю */
-export async function ownerAnswer(db: Db, ctx: Ctx, text: string, yandex: YandexConfig | null, force: { topics?: Topic[]; who?: Who } = {}): Promise<string> {
+export async function ownerAnswer(db: Db, ctx: Ctx, text: string, yandex: YandexConfig | null, force: { topics?: Topic[]; who?: Who } = {}, out?: { actions?: { label: string; task?: TaskDraft }[] }): Promise<string> {
   const all = await visibleClubs(db);
   if (!all.length) return 'Не вижу ни одного клуба, к которому у вас есть доступ.';
   const clubs = pickClubs(text, all);
@@ -546,6 +564,8 @@ export async function ownerAnswer(db: Db, ctx: Ctx, text: string, yandex: Yandex
   if (want.has('problems')) sections.push(await problemsSection(db, clubs, today));
 
   const tipsRule = [...new Set(sections.flatMap((s) => s.tips))].slice(0, 5);
+  const buttons = sections.flatMap((s) => s.buttons ?? []);
+  if (out && buttons.length) out.actions = [...buttons, ...(out.actions ?? [])];
   const body = sections.filter((s) => !onlyAdvice || s.tips.length).map((s) => `**${s.title}**\n${s.lines.join('\n')}`);
   let advice = tipsRule.map((x) => `• ${x}`).join('\n');
   if (yandex && (want.has('advice') || tipsRule.length)) {
@@ -560,6 +580,40 @@ export async function ownerAnswer(db: Db, ctx: Ctx, text: string, yandex: Yandex
   const shown = onlyAdvice ? [] : body.map((b, i) => (i === 0 ? b.replace(/^\*\*(.+?)\*\*/, `**$1**${ctxLabel}`) : b));
   const parts = [...shown, advice ? `**Советы**${onlyAdvice ? ctxLabel : ''}\n${advice}` : '', onlyAdvice && !advice ? 'Серьёзных проблем по данным не вижу: план, посещаемость и задачи в норме.' : ''].filter(Boolean);
   return fitAnswer(parts.join('\n\n'));
+}
+
+/* ---------- «кто из менеджеров отстаёт от плана» ---------- */
+export const MGR_PLAN_RE = /(отстающ|отста(е|ё)т|отстал|хуже\s+всех|рейтинг|кто\s+(не\s+)?выполня).*менеджер|менеджер\S*.*(отстающ|отста(е|ё)т|отстал|план)/i;
+
+/** Менеджеры по отставанию от графика личного плана (к сегодняшнему дню), самый отстающий первым; кнопка — его задачи на сегодня */
+export async function managersPlanAnswer(db: Db, text: string): Promise<{ text: string; actions: { label: string; url: string }[] } | null> {
+  const all = await visibleClubs(db);
+  if (!all.length) return null;
+  const clubs = pickClubs(text, all);
+  const today = await todayOf(db, clubs[0].timezone);
+  const month = today.slice(0, 7);
+  const mi = monthInfo(month, today);
+  const ids = clubs.map((c) => c.id);
+  const staff = (await salesStaff(db, ids)).filter((s, i, a) => a.findIndex((x) => x.id === s.id) === i);
+  if (!staff.length) return { text: 'В отделе продаж нет менеджеров.', actions: [] };
+  const tg = await targets(db, ids, month); const sf = await salesFact(db, ids, mi.from, today); const cf = await clientsFact(db, ids, mi.from, today);
+  const rows = staff.map((s) => {
+    const t = planFact(mi, tg, sf, cf, { userId: s.id }).total;
+    const expected = t.planKop ? Math.round((t.planKop * mi.passed) / mi.days) : null;
+    const pace = expected ? Math.round((t.factKop * 100) / expected) : null; // % от графика к сегодняшнему дню
+    return { id: s.id, name: s.name, plan: t.planKop, fact: t.factKop, percent: t.percent, expected, lag: pace === null ? null : 100 - pace };
+  });
+  const withPlan = rows.filter((r) => r.lag !== null).sort((a, b) => b.lag! - a.lag! || (a.percent ?? 0) - (b.percent ?? 0));
+  const noPlan = rows.filter((r) => r.lag === null);
+  const label = clubs.length === all.length && all.length > 1 ? 'вся сеть' : clubs.map((c) => c.name).join(', ');
+  const lines = [`**Менеджеры по отставанию от плана** · ${label}, ${mi.passed} из ${mi.days} дн. месяца`];
+  withPlan.forEach((r, i) => lines.push(`${i + 1}. **${r.name}** — ${r.lag! > 0 ? `отстаёт от графика на **${r.lag} %**` : r.lag! < 0 ? `опережает график на ${-r.lag!} %` : 'идёт точно по графику'}: ${rub(r.fact)} из ${rub(r.plan!)} (${r.percent} % плана, к сегодняшнему дню нужно ${rub(r.expected!)})`));
+  if (!withPlan.length) lines.push('Личные планы менеджерам на этот месяц не заданы — задайте их в «Отделе продаж» → «План продаж».');
+  if (noPlan.length) lines.push(`Без личного плана: ${noPlan.map((r) => `${r.name} (${rub(r.fact)})`).join(', ')}.`);
+  if (withPlan[0]?.lag && withPlan[0].lag > 15) lines.push(`\nНачните с первого в списке (${withPlan[0].name}): откройте задачи на сегодня — есть ли звонки по горячим и продлениям.`);
+  const surname = (n: string) => n.split(' ').slice(-1)[0];
+  const actions = [...withPlan, ...noPlan].slice(0, 4).map((r) => ({ label: `Задачи на сегодня: ${surname(r.name)}`, url: `/?tab=tasks&scope=all&user=${r.id}&day=today` }));
+  return { text: lines.join('\n'), actions };
 }
 
 /** Сотрудники в порядке упоминания (для «передай задачи Марии Ксении»): для каждого слова-имени — подходящие сотрудники */

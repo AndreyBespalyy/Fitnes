@@ -126,7 +126,12 @@ async function trainer(db: Db, u: Person, clubs: string[], tzName: string): Prom
     from class_sessions s left join class_bookings b on b.session_id = s.id left join persons p on p.id = b.person_id
     where s.trainer_id = $1 and s.club_id = any($2) and s.status = 'scheduled' and s.starts_at > now() and (s.starts_at at time zone $3)::date = (now() at time zone $3)::date`, [u.id, clubs, tzName])).rows[0];
   const nb = my.newbies as string[];
-  if (my.n) out.push({ kind: 'trainer_classes', score: 90, text: `**Сегодня у вас ${my.n} ${plural(my.n, 'занятие', 'занятия', 'занятий')}, первое в ${my.first}, записано ${my.booked}.**${nb.length ? ` Новички: ${names(nb.map((name) => ({ name })))} — познакомьтесь до начала и пригласите на следующее.` : ''}` });
+  // Занятия по порядку и новички — для кнопок «Занятие 1», «Написать новичкам»
+  const sess = (await db.query(`select s.id from class_sessions s where s.trainer_id = $1 and s.club_id = any($2) and s.status = 'scheduled' and s.starts_at > now()
+    and (s.starts_at at time zone $3)::date = (now() at time zone $3)::date order by s.starts_at`, [u.id, clubs, tzName])).rows.map((r) => r.id as string);
+  const nbIds = sess.length ? (await db.query(`select distinct b.person_id from class_bookings b where b.session_id = any($1) and b.status = 'booked'
+    and (b.trial or not exists (select 1 from visits v where v.person_id = b.person_id and v.visited_at < now() - interval '1 day'))`, [sess])).rows.map((r) => r.person_id as string) : [];
+  if (my.n) out.push({ kind: 'trainer_classes', targets: { sessionIds: sess, personIds: nbIds }, score: 90, text: `**Сегодня у вас ${my.n} ${plural(my.n, 'занятие', 'занятия', 'занятий')}, первое в ${my.first}, записано ${my.booked}.**${nb.length ? ` Новички: ${names(nb.map((name) => ({ name })))} — познакомьтесь до начала и пригласите на следующее.` : ''}` });
   const ns = (await db.query(`select distinct p.id, p.full_name as name from class_bookings b join class_sessions s on s.id = b.session_id join persons p on p.id = b.person_id
     where s.trainer_id = $1 and b.status = 'no_show' and (s.starts_at at time zone $2)::date = (now() at time zone $2)::date - 1`, [u.id, tzName])).rows;
   if (ns.length) out.push({ kind: 'trainer_noshow', targets: { personIds: ns.map((x) => x.id) }, score: 75, text: `**Напишите не пришедшим вчера: ${names(ns)}** — спросите, всё ли в порядке, и позовите на следующее занятие.` });
@@ -197,7 +202,12 @@ export function hintsText(name: string, hints: MorningHint[]) {
 
 /* ---------- кнопки под подсказками: сразу в нужную ветку диалога или в нужный раздел CRM ---------- */
 /** ask — кнопка отправляет помощнику эту фразу; url — открывает раздел CRM (/?tab=…&person=…) */
-export type HintAction = { label: string; ask?: string; url?: string };
+export type HintAction = {
+  label: string; ask?: string; url?: string;
+  /** позвонить клиенту (АТС клуба или телефон) */ dial?: { personId: string };
+  /** окно со списком «Позвонить …» по каждому клиенту */ call?: { persons: { id: string; name: string }[] };
+  /** окно «Написать клиентам» с готовым приглашением */ write?: { kind: 'noshow' | 'newbie' | 'idle'; personIds: string[] };
+};
 
 const ACTIONS: Record<string, HintAction[]> = {
   overdue_tasks: [{ label: 'Показать просроченные', ask: 'что просрочено' }, { label: 'Открыть задачи', url: '/?tab=tasks' }],
@@ -214,7 +224,6 @@ const ACTIONS: Record<string, HintAction[]> = {
   stuck_deals: [{ label: 'Открыть сделки', url: '/?tab=board' }],
   desk_classes: [{ label: 'Расписание', url: '/?tab=schedule' }],
   desk_missed: [{ label: 'Открыть звонки', url: '/?tab=calls' }],
-  trainer_classes: [{ label: 'Моё расписание', url: '/?tab=schedule&mine=1' }],
   plan_red: [{ label: 'Выполним план?', ask: 'выполним план?' }, { label: 'Что горит', ask: 'что горит' }],
   plan_status: [{ label: 'Выполним план?', ask: 'выполним план?' }],
   sales_yesterday: [{ label: 'Выполним план?', ask: 'выполним план?' }],
@@ -223,10 +232,33 @@ const ACTIONS: Record<string, HintAction[]> = {
   weekly_tip: [{ label: 'Разбор недели', url: '/?tab=weekly' }],
 };
 /** Подсказки про конкретных клиентов: кнопка на карточку каждого (до трёх) */
-const PERSON_KINDS = new Set(['desk_renew', 'trainer_noshow', 'trainer_idle', 'hot_calls']);
+const PERSON_KINDS = new Set(['desk_renew', 'hot_calls']);
+
+const short = (n: string) => n.split(' ').slice(0, 2).join(' ');
 
 export async function hintActions(db: Db, h: MorningHint): Promise<HintAction[]> {
   const out = [...(ACTIONS[h.kind] ?? [])];
+  // Самая старая просроченная задача про клиента — позвонить ему сразу
+  if (h.kind === 'overdue_tasks' && h.targets?.taskIds?.length) {
+    const t = (await db.query(`select p.id, p.full_name from tasks t join persons p on p.id = t.person_id where t.id = any($1) and t.done_at is null
+      and exists (select 1 from person_contacts c where c.person_id = p.id and c.type = 'phone') order by t.due_at limit 1`, [h.targets.taskIds])).rows[0];
+    if (t) out.unshift({ label: `Позвонить: ${short(t.full_name)}`, dial: { personId: t.id } });
+  }
+  // Тренер: каждое занятие сегодня — своей кнопкой; новичкам — написать
+  if (h.kind === 'trainer_classes') {
+    const ss = (await db.query(`select s.id, t.name, to_char(s.starts_at at time zone c.timezone, 'HH24:MI') as at, to_char(s.starts_at at time zone c.timezone, 'YYYY-MM-DD') as day
+      from class_sessions s join class_types t on t.id = s.type_id join clubs c on c.id = s.club_id where s.id = any($1) order by s.starts_at limit 3`, [h.targets?.sessionIds ?? []])).rows;
+    ss.forEach((x, i) => out.push({ label: `Занятие ${i + 1} · ${x.at} ${x.name}`, url: `/?tab=schedule&date=${x.day}&session=${x.id}` }));
+    if (h.targets?.personIds?.length) out.push({ label: 'Написать новичкам', write: { kind: 'newbie', personIds: h.targets.personIds } });
+    return out.slice(0, 4);
+  }
+  // Тренер: не пришли вчера / пропали — написать с приглашением или позвонить каждому
+  if ((h.kind === 'trainer_noshow' || h.kind === 'trainer_idle') && h.targets?.personIds?.length) {
+    const ps = (await db.query(`select id, full_name from persons where id = any($1) order by full_name`, [h.targets.personIds])).rows;
+    out.push({ label: 'Написать клиентам', write: { kind: h.kind === 'trainer_noshow' ? 'noshow' : 'idle', personIds: ps.map((p) => p.id) } });
+    out.push({ label: 'Позвонить клиентам', call: { persons: ps.map((p) => ({ id: p.id, name: p.full_name })) } });
+    return out;
+  }
   const ids = (h.targets?.personIds ?? []).slice(0, 3);
   if (PERSON_KINDS.has(h.kind) && ids.length) {
     const rows = (await db.query(`select id, full_name from persons where id = any($1)`, [ids])).rows as { id: string; full_name: string }[];

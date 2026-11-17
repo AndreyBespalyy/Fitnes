@@ -15,7 +15,10 @@ type Msg = { id: string; userId: string | null; author: string | null; body: str
   replyTo: string | null; replyBody: string | null; replyAuthor: string | null; file: FileMeta | null; pending?: boolean;
   meta?: { kind?: string; meetingId?: string; status?: 'confirmed' | 'declined'; sids?: string[]; sid?: string; rated?: Record<string, number>; acts?: Act[][]; actions?: Act[] } | null };
 /** Кнопка под сообщением помощника: ask — отправить помощнику фразу, url — открыть раздел CRM */
-type Act = { label: string; ask?: string; url?: string };
+type Act = { label: string; ask?: string; url?: string; task?: Draft; done?: { taskId: string; name: string };
+  dial?: { personId: string }; call?: { persons: { id: string; name: string }[] }; write?: { kind: 'noshow' | 'newbie' | 'idle'; personIds: string[] } };
+/** Готовая задача по совету помощника: руководитель проверяет и ставит */
+type Draft = { clubId: string; clubName: string; assigneeId: string; assigneeName: string; why: string; title: string; dueAt: string; candidates: { id: string; name: string; open: number; overdue: number }[] };
 type Person = { id: string; fullName: string; login: string; roles: string[]; clubs: string[]; app: string | null };
 
 const err = (x: unknown) => (x instanceof ApiError ? x.message : 'Нет связи с сервером');
@@ -315,7 +318,8 @@ function Conversation({ id, meId, item, onBack, onChanged, onLeft, initialText, 
                       : <span className="tm-file"><Ico d={I.file} s={22} /><span><b>{m.file.name}</b><small>Отправляется…</small></span></span>)}
                   {m.body && (m.meta?.kind === 'morning_hints' && m.meta.sids?.length ? <HintsWithRates body={m.body} sids={m.meta.sids} rated={m.meta.rated} acts={m.meta.acts} onAct={act} />
                     : <div className="tm-text">{boldify(m.body)}</div>)}
-                  {!!m.meta?.actions?.length && <ActButtons acts={m.meta.actions} onAct={act} />}
+                  {!!m.meta?.actions?.length && <ActButtons acts={m.meta.actions} onAct={act} msgId={m.id}
+                    onDone={(idx, done) => setMsgs((cur) => cur.map((x) => (x.id === m.id && x.meta?.actions ? { ...x, meta: { ...x.meta, actions: x.meta.actions.map((a, i) => (i === idx ? { ...a, done } : a)) } } : x)))} />}
                   {m.meta?.kind === 'agent_answer' && m.meta.sid && <RateButtons compact url={`/api/agent/suggestions/${m.meta.sid}/rate`} value={m.meta.rated?.[m.meta.sid]} />}
                   {m.meta?.kind === 'meeting_invite' && m.meta.meetingId && <MeetingButtons meetingId={m.meta.meetingId} status={m.meta.status}
                     onDone={(st) => setMsgs((cur) => cur.map((x) => (x.meta?.meetingId === m.meta!.meetingId ? { ...x, meta: { ...x.meta, status: st } } : x)))} />}
@@ -525,11 +529,117 @@ function HintsWithRates({ body, sids, rated, acts, onAct }: { body: string; sids
 }
 
 /** Ряд кнопок «куда дальше»: вопрос помощнику (✦) или переход в раздел CRM (→) */
-function ActButtons({ acts, onAct }: { acts: Act[]; onAct: (a: Act) => void }) {
+function ActButtons({ acts, onAct, msgId, onDone }: { acts: Act[]; onAct: (a: Act) => void; msgId?: string; onDone?: (idx: number, done: { taskId: string; name: string }) => void }) {
+  const [open, setOpen] = useState<number | null>(null);
+  const [sheet, setSheet] = useState<Act | null>(null);
+  const [note, setNote] = useState('');
+  const press = (a: Act) => {
+    if (a.dial) void dialPerson(a.dial.personId, setNote);
+    else if (a.call || a.write) setSheet(a);
+    else onAct(a);
+  };
   return (
     <div className="tm-acts" onClick={(e) => e.stopPropagation()}>
-      {acts.map((a, i) => <button key={i} type="button" className={a.ask ? 'ask' : 'go'} onClick={() => onAct(a)}>{a.ask ? '✦ ' : ''}{a.label}{a.url ? ' →' : ''}</button>)}
+      {note && <small className="tm-acts-note">{note}</small>}
+      {sheet?.call && <Sheet title="Позвонить клиентам" onClose={() => setSheet(null)}>
+        <div className="tm-draft">{sheet.call.persons.map((p) => <button key={p.id} type="button" className="tm-btn" onClick={() => void dialPerson(p.id, setNote)}>📞 Позвонить: {p.name}</button>)}
+          {note && <small>{note}</small>}</div></Sheet>}
+      {sheet?.write && <WriteSheet write={sheet.write} onClose={() => setSheet(null)} />}
+      {acts.map((a, i) => a.task
+        ? (a.done
+          ? <button key={i} type="button" className="done" onClick={() => goUrl('/?tab=tasks&scope=all')}>✓ Поставлено: {a.done.name.split(' ').slice(0, 2).join(' ')} →</button>
+          : <button key={i} type="button" className="task" onClick={() => setOpen(i)}>✚ {a.label}</button>)
+        : <button key={i} type="button" className={a.ask ? 'ask' : a.dial || a.call || a.write ? 'act' : 'go'} onClick={() => press(a)}>
+          {a.ask ? '✦ ' : a.dial || a.call ? '📞 ' : a.write ? '✉ ' : ''}{a.label}{a.url ? ' →' : ''}</button>)}
+      {open !== null && acts[open]?.task && msgId && <DraftSheet draft={acts[open].task!} msgId={msgId} idx={open} onClose={() => setOpen(null)}
+        onDone={(d) => { setOpen(null); onDone?.(open, d); }} />}
     </div>
+  );
+}
+
+/** Звонок клиенту: через АТС клуба (перезвонит вам на внутренний номер), без неё — с телефона */
+async function dialPerson(personId: string, say: (s: string) => void) {
+  try {
+    const r = await api<{ phone: string; mode: 'pbx' | 'device'; ext?: string }>('POST', `/api/persons/${personId}/dial`);
+    if (r.mode === 'pbx') { say(`АТС звонит вам на внутренний номер ${r.ext} — возьмите трубку, и она соединит с клиентом.`); return; }
+    window.location.href = `tel:${r.phone}`;
+  } catch (e) { say(e instanceof ApiError ? e.message : 'Не получилось позвонить'); }
+}
+
+/** «Написать клиентам»: помощник готовит приглашение на ближайшее занятие, тренер проверяет и отправляет */
+function WriteSheet({ write, onClose }: { write: NonNullable<Act['write']>; onClose: () => void }) {
+  type D = { text: string; session: { name: string; when: string } | null; people: { id: string; name: string; ok: boolean; note: string }[] };
+  const [d, setD] = useState<D | null>(null);
+  const [text, setText] = useState('');
+  const [pick, setPick] = useState<string[]>([]);
+  const [busy, setBusy] = useState(false);
+  const [res, setRes] = useState<{ sent: string[]; failed: { name: string; reason: string }[] } | null>(null);
+  const [error, setError] = useState('');
+  useEffect(() => {
+    api<D>('POST', '/api/agent/invite-draft', write).then((r) => { setD(r); setText(r.text); setPick(r.people.filter((p) => p.ok).map((p) => p.id)); })
+      .catch((e) => setError(e instanceof ApiError ? e.message : 'Не получилось подготовить текст'));
+  }, []);
+  const send = async () => {
+    setBusy(true); setError('');
+    try { setRes(await api('POST', '/api/agent/invite-send', { personIds: pick, text })); }
+    catch (e) { setError(e instanceof ApiError ? e.message : 'Не получилось отправить'); } finally { setBusy(false); }
+  };
+  return (
+    <Sheet title="Написать клиентам" onClose={onClose}>
+      <div className="tm-draft">
+        {!d && !error && <small>Готовлю приглашение…</small>}
+        {d && !res && <>
+          {d.session && <small>✦ Приглашение на ближайшее занятие: «{d.session.name}», {d.session.when}</small>}
+          <label>Текст<textarea rows={6} value={text} onChange={(e) => setText(e.target.value)} /><small>{'{имя}'} — подставится имя каждого клиента</small></label>
+          <div className="tm-draft-who">{d.people.map((p) => (
+            <label key={p.id} className="tm-who-row"><input type="checkbox" disabled={!p.ok} checked={pick.includes(p.id)}
+              onChange={(e) => setPick((cur) => (e.target.checked ? [...cur, p.id] : cur.filter((x) => x !== p.id)))} /><span>{p.name} <small>— {p.note}</small></span></label>))}</div>
+          <div className="tm-draft-btns">
+            <button type="button" className="tm-btn" onClick={onClose}>Отмена</button>
+            <button type="button" className="tm-btn pri" disabled={busy || !pick.length || text.trim().length < 5} onClick={() => void send()}>{busy ? 'Отправляю…' : `Отправить (${pick.length})`}</button>
+          </div></>}
+        {res && <>
+          {res.sent.length > 0 && <div>✓ Отправлено: {res.sent.join(', ')}</div>}
+          {res.failed.map((f) => <div key={f.name} className="tm-meet-err">Не отправлено: {f.name} — {f.reason}</div>)}
+          <div className="tm-draft-btns"><button type="button" className="tm-btn pri" onClick={onClose}>Готово</button></div></>}
+        {error && <small className="tm-meet-err">{error}</small>}
+      </div>
+    </Sheet>
+  );
+}
+
+const localInput = (iso: string) => { const d = new Date(iso); const p = (n: number) => String(n).padStart(2, '0'); return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`; };
+/** «Проверить и поставить»: задача уже заполнена помощником, исполнитель — самый свободный менеджер */
+function DraftSheet({ draft, msgId, idx, onClose, onDone }: { draft: Draft; msgId: string; idx: number; onClose: () => void; onDone: (d: { taskId: string; name: string }) => void }) {
+  const [who, setWho] = useState(draft.assigneeId);
+  const [title, setTitle] = useState(draft.title);
+  const [due, setDue] = useState(localInput(draft.dueAt));
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  const save = async () => {
+    setBusy(true); setError('');
+    try { onDone(await api<{ taskId: string; name: string }>('POST', '/api/agent/advice-task', { messageId: msgId, idx, assigneeId: who, title, dueAt: new Date(due).toISOString() })); }
+    catch (e) { setError(e instanceof ApiError ? e.message : 'Не получилось, попробуйте ещё раз'); } finally { setBusy(false); }
+  };
+  return (
+    <Sheet title="Проверьте и поставьте задачу" onClose={onClose}>
+      <div className="tm-draft">
+        <label>Кому
+          <select value={who} onChange={(e) => setWho(e.target.value)}>
+            {draft.candidates.map((c) => <option key={c.id} value={c.id}>{c.name} — {c.open} задач{c.overdue ? `, просрочено ${c.overdue}` : ''}</option>)}
+          </select>
+          {who === draft.assigneeId && <small>✦ {draft.why}</small>}
+        </label>
+        <label>Что сделать<textarea rows={4} value={title} onChange={(e) => setTitle(e.target.value)} /></label>
+        <label>Срок<input type="datetime-local" value={due} onChange={(e) => setDue(e.target.value)} /></label>
+        <small>Клуб: {draft.clubName}. Сотрудник получит задачу и сообщение от помощника.</small>
+        {error && <small className="tm-meet-err">{error}</small>}
+        <div className="tm-draft-btns">
+          <button type="button" className="tm-btn" onClick={onClose}>Отмена</button>
+          <button type="button" className="tm-btn pri" disabled={busy || title.trim().length < 3} onClick={() => void save()}>{busy ? 'Ставлю…' : 'Поставить'}</button>
+        </div>
+      </div>
+    </Sheet>
   );
 }
 /** Открыть адрес CRM (/?tab=…&person=…); из отдельного приложения-мессенджера — в новой вкладке */
