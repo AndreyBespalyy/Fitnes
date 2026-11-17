@@ -231,6 +231,7 @@ export function teamRoutes(app: FastifyInstance, pool: pg.Pool, storage: string,
            coalesce(c.last_message_at, c.created_at) as "at",
            (select count(*) from team_messages x where x.chat_id = c.id and x.created_at > m.last_read_at and x.deleted_at is null and x.user_id is distinct from $1)::int as unread,
            (select count(*) from team_members y where y.chat_id = c.id)::int as members,
+           (select count(*) from team_advice a where a.chat_id = c.id and a.user_id = $1 and a.status = 'new')::int as advice,
            lm.body as "lastBody", lm.file as "lastFile", lm.author as "lastAuthor", lm.user_id = $1 as "lastMine", lm.user_id is null and lm.at is not null as "lastSystem",
            peer.id as "peerId", peer.full_name as "peerName", peer.app as "peerApp"
          from team_members m join team_chats c on c.id = m.chat_id

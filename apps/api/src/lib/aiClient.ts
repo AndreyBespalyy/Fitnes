@@ -159,3 +159,22 @@ export async function aiEvaluateCall(cfg: AiConfig, transcript: unknown, checkli
     method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ transcript, checklist }),
   }, 15 * 60_000);
 }
+
+/* ---------- тема переписки сотрудников (мессенджер CRM) ---------- */
+export type ChatTopic = { topic: string; summary: string; client: string; confidence: number; engine?: string };
+const TOPIC_PROMPT = `Ты читаешь рабочую переписку сотрудников фитнес-клуба и определяешь, о чём она.
+Верни JSON {topic, summary, client, confidence}. topic — одно из: new_client (заявка, пробная, экскурсия), renewal (продление абонемента),
+return (вернуть ушедшего клиента), complaint (жалоба клиента), new_staff (новый сотрудник), meeting (собрание, планёрка),
+equipment (поломка, ремонт), schedule (расписание, замена тренера, перенос занятия), payment (оплата, касса, возврат денег, долг),
+cleaning (уборка, чистота), task (другое поручение), other (нет рабочего дела).
+summary — суть одной фразой до 140 знаков; client — имя и фамилия клиента, если переписка о нём, иначе ""; confidence — от 0 до 1.`;
+/** Тема переписки. Уходят только имена авторов и тексты без телефонов и почты; на своём сервере переписка не покидает контур. */
+export async function aiChatTopic(cfg: AiConfig, messages: { author: string; text: string }[]) {
+  const y = ya(cfg);
+  if (y) {
+    const r = await ygptJson<ChatTopic>(y, TOPIC_PROMPT, messages.map((m) => `${m.author}: ${m.text}`).join('\n').slice(-6000), 400);
+    return { topic: String(r?.topic ?? 'other'), summary: String(r?.summary ?? '').slice(0, 200), client: String(r?.client ?? '').slice(0, 120), confidence: Number(r?.confidence) || 0, engine: 'yandexgpt' };
+  }
+  const r = await call<ChatTopic>(cfg, '/v1/chat-topic', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ messages }) }, 3 * 60_000);
+  return { ...r, engine: 'ai' };
+}
