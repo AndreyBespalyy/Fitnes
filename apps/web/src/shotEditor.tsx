@@ -6,9 +6,9 @@ import { useEffect, useRef, useState, type KeyboardEvent as RKeyboardEvent, type
 type Pt = { x: number; y: number };
 type Area = { t: 'area'; color: string; a: Pt; b: Pt; note: string };
 type Shape = Area | { t: 'pen'; color: string; pts: Pt[] } | { t: 'arrow'; color: string; a: Pt; b: Pt };
-type Tool = 'area' | 'arrow' | 'pen';
+type Tool = 'area' | 'arrow' | 'pen' | 'pan';
 
-const TOOLS: [Tool, string, string][] = [['area', '▭', 'Выделить область'], ['arrow', '➚', 'Стрелка'], ['pen', '✎', 'Карандаш']];
+const TOOLS: [Tool, string, string][] = [['area', '▭', 'Выделить область'], ['arrow', '➚', 'Стрелка'], ['pen', '✎', 'Карандаш'], ['pan', '✋', 'Листать']];
 const COLORS: [string, string][] = [['#FF3B30', 'Красный'], ['#FF9500', 'Оранжевый'], ['#FFD60A', 'Жёлтый'], ['#34C759', 'Зелёный'], ['#0A84FF', 'Синий']];
 const box = (s: { a: Pt; b: Pt }) => ({ x: Math.min(s.a.x, s.b.x), y: Math.min(s.a.y, s.b.y), w: Math.abs(s.b.x - s.a.x), h: Math.abs(s.b.y - s.a.y) });
 
@@ -68,6 +68,7 @@ function draw(ctx: CanvasRenderingContext2D, W: number, H: number, s: Shape, n: 
 export function ShotEditor({ src, onSave, onCancel }: { src: string; onSave: (dataUrl: string, areaNotes: string[]) => void; onCancel: () => void }) {
   const canvas = useRef<HTMLCanvasElement>(null);
   const root = useRef<HTMLDivElement>(null);
+  const stage = useRef<HTMLDivElement>(null);
   const [img, setImg] = useState<HTMLImageElement | null>(null);
   const [shapes, setShapes] = useState<Shape[]>([]);
   const [cur, setCur] = useState<Shape | null>(null);
@@ -111,6 +112,7 @@ export function ShotEditor({ src, onSave, onCancel }: { src: string; onSave: (da
 
   const down = (e: RPointerEvent<HTMLCanvasElement>) => {
     if (typing) commitText();
+    if (tool === 'pan') return; // режим «Листать»: палец и колёсико просто прокручивают снимок
     const p = pos(e);
     if (tool === 'area') {
       const h = hit(p);
@@ -122,6 +124,13 @@ export function ShotEditor({ src, onSave, onCancel }: { src: string; onSave: (da
   };
   const move = (e: RPointerEvent<HTMLCanvasElement>) => {
     if (!cur) return;
+    // Тянем рамку к краю окна — снимок сам прокручивается, чтобы выделить то, что ниже или выше
+    const st = stage.current;
+    if (st) {
+      const r = st.getBoundingClientRect(), edge = 48;
+      if (e.clientY > r.bottom - edge) st.scrollTop += Math.min(40, e.clientY - (r.bottom - edge));
+      else if (e.clientY < r.top + edge) st.scrollTop -= Math.min(40, r.top + edge - e.clientY);
+    }
     const p = pos(e);
     setCur(cur.t === 'pen' ? { ...cur, pts: [...cur.pts, p] } : { ...cur, b: p });
   };
@@ -163,6 +172,8 @@ export function ShotEditor({ src, onSave, onCancel }: { src: string; onSave: (da
     return { left: Math.max(0, r.x * k), top: (r.y + r.h) * k + 6, width: Math.max(220, Math.min(420, r.w * k)), color: s.color };
   })();
   const selArea = sel != null && shapes[sel]?.t === 'area';
+  // Снимок выше окна — показываем по ширине и листаем вниз
+  const tall = !!img && img.height / img.width > 1.15 * (window.innerHeight - 130) / window.innerWidth;
 
   return (
     <div ref={root} tabIndex={-1} onKeyDown={onKey} className="shot-ed" role="dialog" aria-modal="true" aria-label="Скриншот: выделите, что не так">
@@ -185,11 +196,12 @@ export function ShotEditor({ src, onSave, onCancel }: { src: string; onSave: (da
       <div className="shot-hint small">
         {typing ? 'Напишите, что не так в этой области. Enter — готово, Shift+Enter — новая строка.'
           : tool === 'area' ? (selArea ? 'Область выделена: нажмите «Вставить текст», чтобы подписать её. Нажатие на другую область выбирает её.' : 'Обведите мышью или пальцем место на снимке, затем нажмите «Вставить текст».')
-          : tool === 'arrow' ? 'Потяните от начала стрелки к её острию.' : 'Рисуйте, удерживая кнопку мыши или пальцем.'}
+          : tool === 'arrow' ? 'Потяните от начала стрелки к её острию.' : tool === 'pan' ? 'Листайте снимок пальцем или колёсиком мыши, затем выберите «Выделить область».' : 'Рисуйте, удерживая кнопку мыши или пальцем.'}
+        {tall && !typing && tool !== 'pan' && ' Снимок длинный: листайте колёсиком, полосой справа или кнопкой «✋ Листать». Рамку можно тянуть к краю окна — снимок прокрутится.'}
       </div>
-      <div className="shot-stage">
+      <div className="shot-stage" ref={stage}>
         <div className="shot-wrap">
-          <canvas ref={canvas} className={`shot-canvas tool-${tool}${img && img.height / img.width > 1.3 * window.innerHeight / window.innerWidth ? ' tall' : ''}`} onPointerDown={down} onPointerMove={move} onPointerUp={up} onPointerCancel={up} />
+          <canvas ref={canvas} className={`shot-canvas tool-${tool}${tall ? ' tall' : ''}`} onPointerDown={down} onPointerMove={move} onPointerUp={up} onPointerCancel={up} />
           {typing && field && <textarea autoFocus className="shot-text" rows={2} value={typing.text} placeholder={`Что не так в области ${areaNo(typing.idx)}?`}
             style={{ left: field.left, top: field.top, width: field.width, borderColor: field.color }}
             onChange={(e) => setTyping({ ...typing, text: e.target.value })}
