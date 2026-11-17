@@ -76,3 +76,10 @@ test('перебор с одного адреса: пауза после 20 не
   await sql(`update login_attempts set at = at - interval '11 minutes' where ip = $1`, [ip]);
   assert.equal((await tryLogin('m.volkova', 'Volkova-Own-Pass-7', ip)).statusCode, 200);
 });
+
+test('логин с кириллическими двойниками, большими буквами и пробелами находит ту же учётку', async () => {
+  // «а.bеspаlуу» набран с русскими а, е, у — выглядит так же, как латиница
+  const r = await tryLogin(' А.bеspаlуу​ ', PASSWORD, '10.9.9.9');
+  assert.equal(r.statusCode, 200, r.body);
+  assert.equal(r.json().login, 'a.bespalyy');
+});
