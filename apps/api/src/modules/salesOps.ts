@@ -453,7 +453,8 @@ export function salesOpsRoutes(app: FastifyInstance, pool: pg.Pool) {
   app.get('/api/notifications', async (req) => {
     const ctx = requireCtx(req);
     return withCtx(pool, ctx, async (db) => {
-      const items = (await db.query(`select id, kind, title, body, link, created_at as "createdAt", read_at as "readAt", object_type as "objectType", object_id as "objectId", actions, acted, acted_at as "actedAt" from staff_notifications
+      const items = (await db.query(`select id, kind, title, body, link, created_at as "createdAt", read_at as "readAt", object_type as "objectType", object_id as "objectId", actions, acted, acted_at as "actedAt",
+          (select s.rating from agent_suggestions s where s.notification_id = staff_notifications.id limit 1) as rating from staff_notifications
         where user_id = $1 order by created_at desc limit 50`, [ctx.userId])).rows;
       const unread = (await db.query('select count(*)::int as n from staff_notifications where user_id = $1 and read_at is null', [ctx.userId])).rows[0].n as number;
       return { items, unread };

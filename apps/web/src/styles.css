@@ -607,3 +607,15 @@ input[type="checkbox"],input[type="radio"]{accent-color:var(--accent)}
 .tr-done{display:grid;grid-template-columns:auto 1fr;gap:2px 10px;padding:8px 0;border-top:1px solid var(--line)}
 .tr-done .small{grid-column:2}
 .kpi-c.on{border-color:var(--accent)}
+.bell-rate{padding:0 14px 10px}
+/* «Чему научился помощник» (17.11.2026) */
+.learn-lessons{margin:8px 0 0;padding-left:18px;display:grid;gap:6px}
+.learn-st{display:inline-block;border-radius:999px;padding:2px 9px;font-size:12px;font-weight:700;border:1px solid var(--line);white-space:nowrap}
+.learn-st.good{color:var(--ok);border-color:color-mix(in srgb,var(--ok) 45%,var(--line))}
+.learn-st.warn{color:var(--warn,#f59e0b);border-color:color-mix(in srgb,var(--warn,#f59e0b) 45%,var(--line))}
+.learn-st.bad{color:var(--bad);border-color:color-mix(in srgb,var(--bad) 45%,var(--line))}
+.learn-cols{display:grid;gap:12px;grid-template-columns:repeat(auto-fit,minmax(300px,1fr))}
+.learn-reasons{list-style:none;margin:8px 0 0;padding:0;display:grid;gap:4px}
+.learn-reasons li{display:flex;justify-content:space-between;border-bottom:1px dashed var(--line);padding:3px 0}
+.learn-comments{list-style:none;margin:8px 0 0;padding:0;display:grid;gap:10px}
+.learn-comments li{border-left:3px solid var(--line);padding-left:10px}

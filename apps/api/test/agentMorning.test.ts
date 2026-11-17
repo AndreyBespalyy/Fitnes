@@ -13,7 +13,7 @@ const sql = async (q: string, p: unknown[] = []) => { const c = new pg.Client(t.
 let centr = ''; let tenant = ''; let tz = ''; let classToday = false;
 const uid: Record<string, string> = {};
 const sys = () => ({ tenantId: tenant, allClubs: true, clubIds: [] });
-const hintsOf = (login: string, role: string) => withCtx(t.pool, sys(), (db) => morningHints(db, { id: uid[login], name: login, role }, [centr]));
+const hintsOf = (login: string, role: string) => withCtx(t.pool, sys(), async (db) => (await morningHints(db, { id: uid[login], name: login, role }, [centr])).map((h) => h.text));
 
 async function ask(text: string, who: string) {
   const chat = (await req('POST', '/api/agent/chat', who)).json().id;

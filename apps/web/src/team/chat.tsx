@@ -1,6 +1,7 @@
 // Мессенджер сотрудников: список чатов и переписка. Один и тот же экран в разделе CRM «Мессенджер» и в приложении на телефоне.
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent, type ReactNode } from 'react';
 import { api, ApiError } from '../api.ts';
+import { RateButtons } from './rate.tsx';
 
 export type ChatItem = {
   id: string; kind: 'direct' | 'group' | 'club' | 'dept'; title: string; clubId: string | null; dept: string | null; onlyAdminsPost: boolean; isAdmin: boolean; muted: boolean;
@@ -12,7 +13,7 @@ type ChatInfo = { id: string; kind: ChatItem['kind']; title: string; onlyAdminsP
 type FileMeta = { id: string; name: string; mime: string; size: number };
 type Msg = { id: string; userId: string | null; author: string | null; body: string; important: boolean; createdAt: string; editedAt: string | null; deleted: boolean;
   replyTo: string | null; replyBody: string | null; replyAuthor: string | null; file: FileMeta | null; pending?: boolean;
-  meta?: { kind?: string; meetingId?: string; status?: 'confirmed' | 'declined' } | null };
+  meta?: { kind?: string; meetingId?: string; status?: 'confirmed' | 'declined'; sids?: string[]; sid?: string; rated?: Record<string, number> } | null };
 type Person = { id: string; fullName: string; login: string; roles: string[]; clubs: string[]; app: string | null };
 
 const err = (x: unknown) => (x instanceof ApiError ? x.message : 'Нет связи с сервером');
@@ -308,7 +309,9 @@ function Conversation({ id, meId, item, onBack, onChanged, onLeft, initialText, 
                     ? <a href={`/api/team/files/${m.file.id}`} target="_blank" rel="noreferrer" onClick={(e) => e.stopPropagation()}><img className="tm-img" src={`/api/team/files/${m.file.id}`} alt={m.file.name} loading="lazy" /></a>
                     : m.file.id ? <a className="tm-file" href={`/api/team/files/${m.file.id}`} target="_blank" rel="noreferrer" onClick={(e) => e.stopPropagation()}><Ico d={I.file} s={22} /><span><b>{m.file.name}</b><small>{size(m.file.size)}</small></span></a>
                       : <span className="tm-file"><Ico d={I.file} s={22} /><span><b>{m.file.name}</b><small>Отправляется…</small></span></span>)}
-                  {m.body && <div className="tm-text">{boldify(m.body)}</div>}
+                  {m.body && (m.meta?.kind === 'morning_hints' && m.meta.sids?.length ? <HintsWithRates body={m.body} sids={m.meta.sids} rated={m.meta.rated} />
+                    : <div className="tm-text">{boldify(m.body)}</div>)}
+                  {m.meta?.kind === 'agent_answer' && m.meta.sid && <RateButtons compact url={`/api/agent/suggestions/${m.meta.sid}/rate`} value={m.meta.rated?.[m.meta.sid]} />}
                   {m.meta?.kind === 'meeting_invite' && m.meta.meetingId && <MeetingButtons meetingId={m.meta.meetingId} status={m.meta.status}
                     onDone={(st) => setMsgs((cur) => cur.map((x) => (x.meta?.meetingId === m.meta!.meetingId ? { ...x, meta: { ...x.meta, status: st } } : x)))} />}
                 </>}
@@ -493,6 +496,24 @@ function MeetingButtons({ meetingId, status, onDone }: { meetingId: string; stat
         {status !== 'declined' && <button type="button" className="tm-meet-later" disabled={busy} onClick={() => void send('declined')}>{status === 'confirmed' ? 'Не смогу' : 'Не смогу прийти'}</button>}
       </div>
       {err && <small className="tm-meet-err">{err}</small>}
+    </div>
+  );
+}
+
+/** «3 подсказки на сегодня»: под каждой подсказкой — «Полезно» / «Не то», чтобы помощник учился */
+function HintsWithRates({ body, sids, rated }: { body: string; sids: string[]; rated?: Record<string, number> }) {
+  const lines = body.split('\n');
+  const head = lines.filter((l) => !/^\d+\. /.test(l));
+  const items = lines.filter((l) => /^\d+\. /.test(l));
+  return (
+    <div className="tm-text">
+      {head.map((l, i) => <div key={`h${i}`}>{boldify(l)}</div>)}
+      {items.map((l, i) => (
+        <div key={i} className="tm-hint">
+          <div>{boldify(l)}</div>
+          {sids[i] && <RateButtons compact url={`/api/agent/suggestions/${sids[i]}/rate`} value={rated?.[sids[i]]} />}
+        </div>
+      ))}
     </div>
   );
 }
