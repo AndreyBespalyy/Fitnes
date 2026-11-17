@@ -13,7 +13,7 @@ const GROUP: Record<string, string> = {
   sales: 'sales', leads: 'sales', board: 'sales', home: 'sales', chats: 'sales', retention: 'sales', reviews: 'sales', corp: 'sales',
   schedule: 'club', access: 'club', load: 'club', shop: 'club', tariffs: 'club', contracts: 'club',
   finance: 'money', payouts: 'money', fiscal: 'money', pnl: 'money', cohorts: 'money',
-  team: 'today', staff: 'team', stafftime: 'team',
+  team: 'today', staff: 'team', stafftime: 'team', activity: 'team',
   clubs: 'setup', config: 'setup', pipelines: 'setup', intake: 'setup', messaging: 'setup', site: 'setup', import: 'setup', onboarding: 'setup', usage: 'setup', notes: 'setup', privacy: 'setup', system: 'setup',
   help: 'foot', profile: 'foot',
 };
@@ -62,6 +62,7 @@ const P: Record<string, string> = {
   system: 'M3 12h4l3-8 4 16 3-8h4',
   onboarding: 'M5 15c-1.5 1.5-2 5-2 5s3.5-.5 5-2M9 13l-3-3c2-5 7-8 13-8 0 6-3 11-8 13zM14 7.5a1.5 1.5 0 1 1 0 3 1.5 1.5 0 0 1 0-3',
   usage: 'M3 12h4l3-8 4 16 3-8h4',
+  activity: 'M4 20V14M9 20V9M14 20V12M19 20V5M3 20h18',
   help: 'M12 3a9 9 0 1 1 0 18 9 9 0 0 1 0-18M9.5 9a2.5 2.5 0 1 1 3.5 2.3c-.6.3-1 .9-1 1.7M12 17h.01',
   profile: 'M12 4a4 4 0 1 1 0 8 4 4 0 0 1 0-8M4 21a8 8 0 0 1 16 0',
 };

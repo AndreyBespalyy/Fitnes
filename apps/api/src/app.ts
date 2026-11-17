@@ -49,6 +49,7 @@ import { pnlRoutes } from './modules/pnl.ts';
 import { rulesRoutes } from './modules/rules.ts';
 import { loginSecurityRoutes } from './modules/loginSecurity.ts';
 import { usageRoutes } from './modules/usage.ts';
+import { activityRoutes } from './modules/activity.ts';
 import { leadIntakeRoutes } from './modules/leadIntake.ts';
 import { contractSmsRoutes } from './modules/contractSms.ts';
 import { loyaltyRoutes } from './modules/loyalty.ts';
@@ -171,6 +172,7 @@ export async function buildApp(pool: pg.Pool, opts: { webDist?: string; secureCo
   rulesRoutes(app, pool);
   loginSecurityRoutes(app, pool);
   usageRoutes(app, pool);
+  activityRoutes(app, pool);
   leadIntakeRoutes(app, pool, { fetch: opts.fetch });
   contractSmsRoutes(app, pool, storage, { fetch: opts.fetch });
   loyaltyRoutes(app, pool);

@@ -9,7 +9,7 @@ const ALWAYS = ['dash', 'team', 'help', 'profile'];
 export const ROLE_MENU: Record<string, string[]> = {
   // Собственник: только отчёты — финансы, посещаемость, выплаты, проблемные моменты. Без операционки.
   // Тарифы и настройки клуба — отдельным блоком «Настройки» внизу меню.
-  owner: ['problems', 'finance', 'pnl', 'load', 'cohorts', 'payouts', 'weekly', 'reviews', 'staff', 'tariffs', 'config', 'privacy', 'system', 'notes', 'usage'],
+  owner: ['problems', 'finance', 'pnl', 'load', 'cohorts', 'payouts', 'weekly', 'reviews', 'staff', 'activity', 'tariffs', 'config', 'privacy', 'system', 'notes', 'usage'],
   // Управляющий: отчёты собственника по своему клубу + управление клубом. Без сетевых разделов и рабочих экранов сотрудников.
   gm: ['problems', 'finance', 'pnl', 'load', 'cohorts', 'weekly', 'reviews', 'staff', 'sales', 'calls', 'tasks', 'processes', 'schedule', 'home',
     'retention', 'fiscal', 'tariffs', 'shop', 'contracts', 'site', 'messaging', 'stafftime', 'config', 'corp', 'access', 'privacy'],
