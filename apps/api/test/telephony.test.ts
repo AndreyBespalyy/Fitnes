@@ -41,7 +41,7 @@ const event = (fields: Record<string, string | number>) => t.app.inject({
 
 before(async () => {
   t = await setupTestApp({ fetch: fakeFetch });
-  for (const l of ['a.bespalyy', 'o.astafeva', 'm.volkova', 'i.zuev']) ck[l] = (await login(t.app, l)).cookie!;
+  for (const l of ['a.bespalyy', 'o.astafeva', 'm.volkova', 'i.zuev', 'o.smirnov', 's.pavlov']) ck[l] = (await login(t.app, l)).cookie!;
   const clubs = (await req('GET', '/api/clubs', 'a.bespalyy')).json();
   c1 = clubs.find((c: { name: string }) => c.name.includes('Центр')).id;
   for (const r of await sql(`select id, login from users where login in ('m.volkova', 'o.astafeva', 'i.zuev')`)) users[r.login] = r.id;
@@ -80,6 +80,10 @@ test('подключение: ключ API обязателен, ключ про
   assert.equal(row.domain, 'pbx1.onpbx.ru');
   assert.ok(!String(row.secret_enc).includes('good-key'));
 
+  // Управляющий настраивает телефонию только своего клуба
+  assert.equal((await req('GET', `/api/pbx?clubId=${c1}`, 'o.smirnov')).statusCode, 200);
+  assert.equal((await req('GET', `/api/pbx?clubId=${c1}`, 's.pavlov')).statusCode, 404);
+  assert.equal((await req('POST', `/api/pbx/${connId}/test`, 's.pavlov')).statusCode, 404);
   const s = (await req('GET', `/api/pbx?clubId=${c1}`, 'a.bespalyy')).json();
   assert.match(s.connection.webhookUrl, new RegExp(`/api/hooks/pbx/${connId}/`));
   assert.equal(s.connection.hasKey, true);
