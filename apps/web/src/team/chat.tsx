@@ -13,7 +13,9 @@ type ChatInfo = { id: string; kind: ChatItem['kind']; title: string; onlyAdminsP
 type FileMeta = { id: string; name: string; mime: string; size: number };
 type Msg = { id: string; userId: string | null; author: string | null; body: string; important: boolean; createdAt: string; editedAt: string | null; deleted: boolean;
   replyTo: string | null; replyBody: string | null; replyAuthor: string | null; file: FileMeta | null; pending?: boolean;
-  meta?: { kind?: string; meetingId?: string; status?: 'confirmed' | 'declined'; sids?: string[]; sid?: string; rated?: Record<string, number> } | null };
+  meta?: { kind?: string; meetingId?: string; status?: 'confirmed' | 'declined'; sids?: string[]; sid?: string; rated?: Record<string, number>; acts?: Act[][]; actions?: Act[] } | null };
+/** Кнопка под сообщением помощника: ask — отправить помощнику фразу, url — открыть раздел CRM */
+type Act = { label: string; ask?: string; url?: string };
 type Person = { id: string; fullName: string; login: string; roles: string[]; clubs: string[]; app: string | null };
 
 const err = (x: unknown) => (x instanceof ApiError ? x.message : 'Нет связи с сервером');
@@ -231,9 +233,9 @@ function Conversation({ id, meId, item, onBack, onChanged, onLeft, initialText, 
   const autosize = () => { const el = ta.current; if (el) { el.style.height = 'auto'; el.style.height = `${Math.min(el.scrollHeight, 160)}px`; } };
   useEffect(autosize, [text]);
 
-  const send = async (e?: FormEvent, file?: { fileName: string; dataBase64: string }) => {
+  const send = async (e?: FormEvent, file?: { fileName: string; dataBase64: string }, say?: string) => {
     e?.preventDefault();
-    const body = text.trim();
+    const body = (say ?? text).trim();
     if (!body && !file) return;
     setSendErr('');
     if (edit) {
@@ -241,18 +243,20 @@ function Conversation({ id, meId, item, onBack, onChanged, onLeft, initialText, 
       catch (x) { setSendErr(err(x)); }
       return;
     }
-    const tmp: Msg = { id: `tmp-${Date.now()}`, userId: meId, author: null, body: file ? body : body, important, createdAt: new Date().toISOString(), editedAt: null, deleted: false,
-      replyTo: reply?.id ?? null, replyBody: reply?.body ?? null, replyAuthor: reply?.author ?? null, file: file ? { id: '', name: file.fileName, mime: '', size: 0 } : null, pending: true };
+    const tmp: Msg = { id: `tmp-${Date.now()}`, userId: meId, author: null, body, important: say === undefined && important, createdAt: new Date().toISOString(), editedAt: null, deleted: false,
+      replyTo: (say === undefined && reply?.id) || null, replyBody: say === undefined ? reply?.body ?? null : null, replyAuthor: say === undefined ? reply?.author ?? null : null, file: file ? { id: '', name: file.fileName, mime: '', size: 0 } : null, pending: true };
     stick.current = true;
-    setMsgs((m) => [...m, tmp]); setText(''); setReply(null); setImportant(false); setBusy(!!file);
+    setMsgs((m) => [...m, tmp]); if (say === undefined) { setText(''); setReply(null); setImportant(false); } setBusy(!!file);
     try {
       const m = await api<Msg>('POST', `/api/team/chats/${id}/messages`, { body, replyTo: tmp.replyTo, important: tmp.important, file });
       setMsgs((cur) => cur.filter((x) => x.id !== tmp.id && x.id !== m.id).concat(m).sort((a, b) => Number(!!a.pending) - Number(!!b.pending) || a.createdAt.localeCompare(b.createdAt)));
       onChanged();
     } catch (x) {
-      setMsgs((cur) => cur.filter((m) => m.id !== tmp.id)); setText(body); setSendErr(err(x));
+      setMsgs((cur) => cur.filter((m) => m.id !== tmp.id)); if (say === undefined) setText(body); setSendErr(err(x));
     } finally { setBusy(false); }
   };
+  // Кнопка под сообщением помощника: фраза уходит помощнику как ваше сообщение, ссылка открывает раздел CRM
+  const act = (a: Act) => { if (a.ask) void send(undefined, undefined, a.ask); else if (a.url) goUrl(a.url); };
   const onKey = (e: KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === 'Enter' && !e.shiftKey && !coarse() && !e.nativeEvent.isComposing) { e.preventDefault(); void send(); }
     if (e.key === 'Escape') { setReply(null); setEdit(null); }
@@ -309,8 +313,9 @@ function Conversation({ id, meId, item, onBack, onChanged, onLeft, initialText, 
                     ? <a href={`/api/team/files/${m.file.id}`} target="_blank" rel="noreferrer" onClick={(e) => e.stopPropagation()}><img className="tm-img" src={`/api/team/files/${m.file.id}`} alt={m.file.name} loading="lazy" /></a>
                     : m.file.id ? <a className="tm-file" href={`/api/team/files/${m.file.id}`} target="_blank" rel="noreferrer" onClick={(e) => e.stopPropagation()}><Ico d={I.file} s={22} /><span><b>{m.file.name}</b><small>{size(m.file.size)}</small></span></a>
                       : <span className="tm-file"><Ico d={I.file} s={22} /><span><b>{m.file.name}</b><small>Отправляется…</small></span></span>)}
-                  {m.body && (m.meta?.kind === 'morning_hints' && m.meta.sids?.length ? <HintsWithRates body={m.body} sids={m.meta.sids} rated={m.meta.rated} />
+                  {m.body && (m.meta?.kind === 'morning_hints' && m.meta.sids?.length ? <HintsWithRates body={m.body} sids={m.meta.sids} rated={m.meta.rated} acts={m.meta.acts} onAct={act} />
                     : <div className="tm-text">{boldify(m.body)}</div>)}
+                  {!!m.meta?.actions?.length && <ActButtons acts={m.meta.actions} onAct={act} />}
                   {m.meta?.kind === 'agent_answer' && m.meta.sid && <RateButtons compact url={`/api/agent/suggestions/${m.meta.sid}/rate`} value={m.meta.rated?.[m.meta.sid]} />}
                   {m.meta?.kind === 'meeting_invite' && m.meta.meetingId && <MeetingButtons meetingId={m.meta.meetingId} status={m.meta.status}
                     onDone={(st) => setMsgs((cur) => cur.map((x) => (x.meta?.meetingId === m.meta!.meetingId ? { ...x, meta: { ...x.meta, status: st } } : x)))} />}
@@ -501,7 +506,7 @@ function MeetingButtons({ meetingId, status, onDone }: { meetingId: string; stat
 }
 
 /** «3 подсказки на сегодня»: под каждой подсказкой — «Полезно» / «Не то», чтобы помощник учился */
-function HintsWithRates({ body, sids, rated }: { body: string; sids: string[]; rated?: Record<string, number> }) {
+function HintsWithRates({ body, sids, rated, acts, onAct }: { body: string; sids: string[]; rated?: Record<string, number>; acts?: Act[][]; onAct: (a: Act) => void }) {
   const lines = body.split('\n');
   const head = lines.filter((l) => !/^\d+\. /.test(l));
   const items = lines.filter((l) => /^\d+\. /.test(l));
@@ -511,11 +516,26 @@ function HintsWithRates({ body, sids, rated }: { body: string; sids: string[]; r
       {items.map((l, i) => (
         <div key={i} className="tm-hint">
           <div>{boldify(l)}</div>
+          {!!acts?.[i]?.length && <ActButtons acts={acts[i]} onAct={onAct} />}
           {sids[i] && <RateButtons compact url={`/api/agent/suggestions/${sids[i]}/rate`} value={rated?.[sids[i]]} />}
         </div>
       ))}
     </div>
   );
+}
+
+/** Ряд кнопок «куда дальше»: вопрос помощнику (✦) или переход в раздел CRM (→) */
+function ActButtons({ acts, onAct }: { acts: Act[]; onAct: (a: Act) => void }) {
+  return (
+    <div className="tm-acts" onClick={(e) => e.stopPropagation()}>
+      {acts.map((a, i) => <button key={i} type="button" className={a.ask ? 'ask' : 'go'} onClick={() => onAct(a)}>{a.ask ? '✦ ' : ''}{a.label}{a.url ? ' →' : ''}</button>)}
+    </div>
+  );
+}
+/** Открыть адрес CRM (/?tab=…&person=…); из отдельного приложения-мессенджера — в новой вкладке */
+function goUrl(url: string) {
+  if (location.pathname.startsWith('/team')) window.open(url, '_blank');
+  else window.dispatchEvent(new CustomEvent('crm-go', { detail: url }));
 }
 
 /* ---------- Советы ИИ-помощника по переписке (видит только сам сотрудник) ---------- */
