@@ -603,3 +603,4 @@ input[type="checkbox"],input[type="radio"]{accent-color:var(--accent)}
 .tr-unm:first-of-type{border-top:0}
 .tr-done{display:grid;grid-template-columns:auto 1fr;gap:2px 10px;padding:8px 0;border-top:1px solid var(--line)}
 .tr-done .small{grid-column:2}
+.kpi-c.on{border-color:var(--accent)}

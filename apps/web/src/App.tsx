@@ -58,6 +58,7 @@ const StaffTimePage = page(() => import('./staff.tsx'), 'StaffTimePage');
 const ProblemsPage = page(() => import('./problems.tsx'), 'ProblemsPage');
 const LoginSecurity = page(() => import('./loginSecurity.tsx'), 'LoginSecurity');
 const UsagePage = page(() => import('./usage.tsx'), 'UsagePage');
+const ActivityPage = page(() => import('./activity.tsx'), 'ActivityPage');
 const IntakePage = page(() => import('./intake.tsx'), 'IntakePage');
 const ConfigPage = page(() => import('./config.tsx'), 'ConfigPage');
 const ReviewsPage = page(() => import('./insights.tsx'), 'ReviewsPage');
@@ -135,7 +136,7 @@ function ChangePassword({ me, forced, onDone, onLogout }: { me: Me; forced?: boo
   );
 }
 
-type Tab = 'dash' | 'hot' | 'calls' | 'leads' | 'board' | 'tasks' | 'home' | 'clubs' | 'tariffs' | 'contracts' | 'site' | 'fiscal' | 'finance' | 'import' | 'chats' | 'access' | 'messaging' | 'pipelines' | 'staff' | 'stafftime' | 'config' | 'reviews' | 'onboarding' | 'privacy' | 'system' | 'help' | 'schedule' | 'retention' | 'shop' | 'corp' | 'trainer' | 'desk' | 'load' | 'cohorts' | 'pnl' | 'usage' | 'intake' | 'sales' | 'processes' | 'weekly' | 'team' | 'notes' | 'profile' | 'problems' | 'payouts';
+type Tab = 'dash' | 'hot' | 'calls' | 'leads' | 'board' | 'tasks' | 'home' | 'clubs' | 'tariffs' | 'contracts' | 'site' | 'fiscal' | 'finance' | 'import' | 'chats' | 'access' | 'messaging' | 'pipelines' | 'staff' | 'stafftime' | 'config' | 'reviews' | 'onboarding' | 'privacy' | 'system' | 'help' | 'schedule' | 'retention' | 'shop' | 'corp' | 'trainer' | 'desk' | 'load' | 'cohorts' | 'pnl' | 'usage' | 'intake' | 'sales' | 'processes' | 'weekly' | 'team' | 'notes' | 'profile' | 'problems' | 'payouts' | 'activity';
 
 function Shell({ me, onLogout }: { me: Me; onLogout: () => void }) {
   const firstTab: Tab = 'dash';
@@ -248,6 +249,7 @@ function Shell({ me, onLogout }: { me: Me; onLogout: () => void }) {
     ['config', 'Настройки клуба', can(me, 'config.manage')],
     ['onboarding', 'Подключение клубов', can(me, 'clubs.manage')],
     ['notes', 'Журнал замечаний', can(me, '*')],
+    ['activity', 'Статистика сотрудников', me.allClubs && can(me, '*')],
     ['usage', 'Использование', me.allClubs && (can(me, '*') || me.roles.some((r) => r.code === 'admin'))],
     ['privacy', 'Защита данных', can(me, 'data.protect')],
     ['system', 'Состояние системы', can(me, 'system.monitor')],
@@ -314,6 +316,7 @@ function Shell({ me, onLogout }: { me: Me; onLogout: () => void }) {
         {tab === 'import' && <ImportPage clubs={clubs} clubId={clubId} />}
         {tab === 'pnl' && <PnlPage me={me} clubs={clubs} clubId={clubId} />}
         {tab === 'intake' && <IntakePage me={me} clubs={clubs} clubId={clubId} openPerson={openPerson} />}
+        {tab === 'activity' && <ActivityPage />}
         {tab === 'usage' && <UsagePage tabs={tabs.map(([k, l]) => [k, l])} />}
         {tab === 'cohorts' && <CohortsPage me={me} clubs={clubs} clubId={clubId} />}
         {tab === 'load' && <LoadPage me={me} clubs={clubs} clubId={clubId} />}
