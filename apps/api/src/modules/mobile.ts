@@ -1,4 +1,5 @@
 // Шаг 16. Мобильное рабочее место (FR-MOB): push-уведомления, мои устройства, звонок в один клик.
+import { isTrainerClient } from './agentInvite.ts';
 import type { FastifyInstance } from 'fastify';
 import type pg from 'pg';
 import { can, requireCtx, requirePerm } from '../auth.ts';
@@ -223,8 +224,10 @@ export function mobileRoutes(app: FastifyInstance, pool: pg.Pool, opts: { fetch?
   // Звонок в один клик: полный номер отдаётся только для звонка и записывается в журнал. Если у клуба подключена АТС — звонок идёт через неё.
   app.post('/api/persons/:id/dial', async (req) => {
     const ctx = requirePerm(req, P.personsView);
-    if (!can(ctx, P.crmWork) && !can(ctx, P.messagesWork) && !can(ctx, P.acsWork)) throw badRequest('Звонки клиентам недоступны для вашей роли');
     const { id } = req.params as { id: string };
+    // Тренер звонит только своим клиентам (кнопки под подсказками ИИ-помощника)
+    if (!can(ctx, P.crmWork) && !can(ctx, P.messagesWork) && !can(ctx, P.acsWork)
+      && !(await withCtx(pool, ctx, (db) => isTrainerClient(db, ctx.userId, id)))) throw badRequest('Звонки клиентам недоступны для вашей роли');
     await guardReveal(pool, ctx, { personId: id });
     return withCtx(pool, ctx, async (db) => {
       const p = (await db.query('select id from persons where id = $1', [id])).rows[0];

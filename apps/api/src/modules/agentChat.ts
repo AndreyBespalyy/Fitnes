@@ -14,6 +14,7 @@ import { processDigest, processFromText } from './agentProcesses.ts';
 import { ROLE_NAME } from './agentProcesses.ts';
 import { WEEKLY_RE, weeklyChatAnswer } from './agentWeekly.ts';
 import { HINTS_RE, followUps, hintsChatAnswer, roleOf } from './agentMorning.ts';
+import { NOSHOW_RE, noShowAnswer } from './agentInvite.ts';
 import { recordSuggestion } from './agentLearn.ts';
 import { MEETING_RE, MEETING_STATUS_RE, meetingPendingReply, meetingStatus, proposeMeeting } from './agentMeetings.ts';
 import { OWNER_HELP, isLeader, ownerAnswer, ownerPendingReply } from './agentOwner.ts';
@@ -197,6 +198,11 @@ export async function botReply(db: Db, ctx: Ctx, text: string, yandex: YandexCon
   const leader = isLeader(ctx);
   // Руководитель: сначала — ответ на уточняющий вопрос помощника и команды «напомни Марии» / «передай задачи Марии Ксении»
   if (MEETING_STATUS_RE.test(text)) return meetingStatus(db, ctx);
+  // Тренер: «кто не пришёл на последнюю тренировку» — список и кнопки «Позвонить» / «Написать»
+  if (NOSHOW_RE.test(text)) {
+    const a = await noShowAnswer(db, ctx);
+    if (a) { if (out) out.actions = [...a.actions, ...(out.actions ?? [])]; return a.text; }
+  }
   if (HINTS_RE.test(text.trim())) {
     const h = await hintsChatAnswer(db, ctx);
     if (typeof h === 'string') return h;

@@ -59,3 +59,42 @@ test('«что с продажами»: отстающее направлени�
   const note = await sql(`select m.body from team_messages m where m.meta->>'kind' = 'advice_task' and m.meta->>'taskId' = $1`, [r.json().taskId]);
   if (d.assigneeId !== (await sql(`select id from users where login = 'o.smirnov'`))[0].id) assert.match(note[0].body, /^\*\*Новая задача от руководителя — Олег Смирнов:\*\* Дневная цель/);
 });
+
+test('тренер: «кто не пришёл на последнюю тренировку», кнопки «Позвонить» / «Написать», звонок своему клиенту', async () => {
+  ck['a.kim'] ??= (await login(t.app, 'a.kim')).cookie!;
+  const c = (await sql(`select id, tenant_id from clubs where name like '%Центр%'`))[0];
+  const kim = (await sql(`select id from users where login = 'a.kim'`))[0].id;
+  const type = (await sql(`select id from class_types where club_id = $1 limit 1`, [c.id]))[0]?.id
+    ?? (await sql(`insert into class_types(tenant_id, club_id, name, kind, description) values ($1, $2, 'Пилатес', 'group', 'Мягкая сила и растяжка') returning id`, [c.tenant_id, c.id]))[0].id;
+  const s = (await sql(`insert into class_sessions(tenant_id, club_id, type_id, trainer_id, starts_at, ends_at, capacity, status) values ($1,$2,$3,$4, now() - interval '10 minutes', now() - interval '5 minutes', 10, 'done') returning id`,
+    [c.tenant_id, c.id, type, kim]))[0].id;
+  await sql(`insert into class_sessions(tenant_id, club_id, type_id, trainer_id, starts_at, ends_at, capacity) values ($1,$2,$3,$4, now() + interval '2 days', now() + interval '2 days 1 hour', 10)`, [c.tenant_id, c.id, type, kim]);
+  const p1 = (await req('POST', '/api/leads', 'm.volkova', { clubId: c.id, fullName: 'Громов Алексей', phone: '+79006660011', sourceCode: 'walk_in' })).json().personId;
+  const p2 = (await req('POST', '/api/leads', 'm.volkova', { clubId: c.id, fullName: 'Пришедший Пётр', phone: '+79006660012', sourceCode: 'walk_in' })).json().personId;
+  await sql(`insert into class_bookings(tenant_id, club_id, session_id, person_id, status) values ($1,$2,$3,$4,'no_show'), ($1,$2,$3,$5,'attended')`, [c.tenant_id, c.id, s, p1, p2]);
+
+  const m = await ask('кто не пришел на последнюю тренировку', 'a.kim');
+  assert.match(m.body, /^\*\*Прошлое занятие — «.+», .. \d\d\.\d\d в \d\d:\d\d\.\*\*\nНе пришли \(1 из 2\):\n1\. Громов Алексей/);
+  const acts = m.meta!.actions as { label: string; call?: { persons: { id: string }[] }; write?: { kind: string; personIds: string[] } }[];
+  assert.deepEqual(acts.map((a) => a.label), ['Позвонить клиентам', 'Написать клиентам', 'Открыть занятие']);
+  assert.deepEqual(acts[0].call!.persons.map((p) => p.id), [p1]);
+
+  // Тренер звонит своему клиенту, чужому — нет
+  assert.equal((await req('POST', `/api/persons/${p1}/dial`, 'a.kim')).statusCode, 200);
+  const other = (await req('POST', '/api/leads', 'm.volkova', { clubId: c.id, fullName: 'Чужой Клиент', phone: '+79006660013', sourceCode: 'walk_in' })).json().personId;
+  assert.equal((await req('POST', `/api/persons/${other}/dial`, 'a.kim')).statusCode, 400);
+
+  // Приглашение на ближайшее занятие с датой, временем и описанием
+  const d = (await req('POST', '/api/agent/invite-draft', 'a.kim', { kind: 'noshow', personIds: [p1, other] })).json();
+  assert.match(d.text, /^\{имя\}, здравствуйте! Это .+, ваш тренер\. Вчера не увиделись на занятии — всё в порядке\? Приглашаю на следующее: «.+», (сегодня|завтра|.. \d\d\.\d\d) в \d\d:\d\d\./);
+  assert.deepEqual(d.people.map((p: { id: string }) => p.id), [p1]); // чужого клиента в списке нет
+  const r = (await req('POST', '/api/agent/invite-send', 'a.kim', { personIds: [p1, other], text: d.text })).json();
+  assert.ok(r.failed.some((f: { name: string; reason: string }) => f.name === 'Чужой Клиент' && f.reason === 'не ваш клиент'));
+  // Без подключённого мессенджера — понятная причина; с ним — сообщение с именем клиента
+  const ch = await sql(`select id from msg_channels where status = 'active' and messenger = 'whatsapp' limit 1`);
+  assert.equal(r.sent.length > 0, ch.length > 0, JSON.stringify(r));
+  if (r.sent.length) {
+    const msg = await sql(`select m.body from msg_messages m join msg_conversations c on c.id = m.conversation_id where c.person_id = $1 order by m.created_at desc limit 1`, [p1]);
+    assert.match(msg[0].body, /^Алексей, здравствуйте!/);
+  } else assert.match(r.failed[0].reason, /мессенджер|позвоните/);
+});

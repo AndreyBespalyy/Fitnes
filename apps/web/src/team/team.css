@@ -209,3 +209,8 @@
 .tm-draft select,.tm-draft textarea,.tm-draft input{font:inherit;font-weight:400;background:var(--surface-2);color:var(--ink);border:1px solid var(--line);border-radius:10px;padding:9px 11px}
 .tm-draft small{font-weight:400;color:var(--muted, #9aa4b2)}
 .tm-draft-btns{display:flex;gap:8px;justify-content:flex-end}
+.tm-acts button.act{border-color:var(--accent)}
+.tm-acts-note{flex-basis:100%;color:var(--muted, #9aa4b2)}
+.tm-draft-who{display:grid;gap:8px}
+.tm-check{display:flex !important;align-items:center;gap:8px;font-weight:400 !important}
+.tm-check input{width:18px;height:18px}
