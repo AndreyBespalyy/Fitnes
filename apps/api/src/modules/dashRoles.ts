@@ -259,13 +259,21 @@ async function protectionPanel(db: Db): Promise<Panel> {
 }
 
 export const ROLE_PANELS = ['club_today', 'retention', 'my_day', 'desk_day', 'fin_day', 'trainer_day', 'system', 'protection'] as const;
+/** «Мои задачи» первой плиткой у ресепшна, финансиста и тренера: шаги процессов и задачи из советов не теряются (проверка CRM 17.11.2026) */
+async function withMyTasks(db: Db, ctx: Ctx, clubs: Club[], panel: Panel): Promise<Panel> {
+  const d = await one(db, `select count(*)::int as open, count(*) filter (where due_at < now())::int as late from tasks
+    where assignee_id = $1 and done_at is null and club_id = any($2)`, [ctx.userId, clubs.map((c) => c.id)]);
+  panel.tiles.unshift({ label: 'Мои задачи', value: d.open, sub: d.late ? `просрочено ${d.late}` : undefined, tone: d.late ? 'bad' : undefined, go: { tab: 'tasks' } });
+  return panel;
+}
+
 export async function rolePanel(db: Db, ctx: Ctx, id: string, clubs: Club[]): Promise<Panel> {
   if (id === 'club_today') return clubToday(db, clubs);
   if (id === 'retention') return retentionPanel(db, clubs);
   if (id === 'my_day') return myDay(db, ctx, clubs);
-  if (id === 'desk_day') return deskDay(db, clubs);
-  if (id === 'fin_day') return finDay(db, clubs);
-  if (id === 'trainer_day') return trainerDay(db, ctx, clubs);
+  if (id === 'desk_day') return withMyTasks(db, ctx, clubs, await deskDay(db, clubs));
+  if (id === 'fin_day') return withMyTasks(db, ctx, clubs, await finDay(db, clubs));
+  if (id === 'trainer_day') return withMyTasks(db, ctx, clubs, await trainerDay(db, ctx, clubs));
   if (id === 'protection') return protectionPanel(db);
   return systemPanel(db, clubs);
 }

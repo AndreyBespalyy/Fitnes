@@ -509,15 +509,18 @@ export function dashRoutes(app: FastifyInstance, pool: pg.Pool) {
       const avg = (await db.query(`select coalesce(sale_category, 'new') as c, (round(avg(amount_kop) / 100) * 100)::bigint as a from memberships
         where club_id = $1 and kind <> 'guest' and created_at > now() - interval '90 days' group by 1`, [clubId])).rows;
       return { month: m, categories: CATS.map((c) => ({ id: c, name: CAT_NAME[c], suggestedAvgCheckKop: avg.find((a) => a.c === c) ? Number(avg.find((a) => a.c === c)!.a) : null })),
-        club: pack(null), managers: staff.map((s) => ({ userId: s.id, name: s.name, role: s.roleName, targets: pack(s.id) })), canEdit: can(ctx, P.planManage) };
+        club: pack(null), managers: staff.map((s) => ({ userId: s.id, name: s.name, role: s.roleName, targets: pack(s.id) })), canEdit: can(ctx, P.planManage),
+        canEditManagers: can(ctx, P.planManage) || can(ctx, P.salesManage) };
     });
   });
 
   app.put('/api/plans', async (req) => {
     const ctx = requireCtx(req);
-    if (!can(ctx, P.planManage)) throw forbidden('План устанавливает собственник или управляющий');
+    // План клуба — собственник и управляющий; план по менеджерам — ещё и РОП своего клуба
+    if (!can(ctx, P.planManage) && !can(ctx, P.salesManage)) throw forbidden('План устанавливают управляющий и РОП');
     type T = Record<string, { amountKop: number; avgCheckKop?: number | null } | null>;
     const b = (req.body ?? {}) as { clubId?: string; month?: string; club?: T; managers?: Record<string, T> };
+    if (!can(ctx, P.planManage)) delete b.club;
     if (!b.clubId || !isMonth(b.month)) throw badRequest('Выберите клуб и месяц');
     return withCtx(pool, ctx, async (db) => {
       await scope(db, b.clubId);
@@ -551,12 +554,12 @@ export function dashRoutes(app: FastifyInstance, pool: pg.Pool) {
     return withCtx(pool, ctx, async (db) => {
       await scope(db, clubId);
       const l = await lightOf(db, [clubId]);
-      return { metrics: KPI, norms: (await norms(db, [clubId]))[clubId], light: { green: Math.round(l.green * 100), yellow: Math.round(l.yellow * 100) }, canEdit: can(ctx, P.planManage) };
+      return { metrics: KPI, norms: (await norms(db, [clubId]))[clubId], light: { green: Math.round(l.green * 100), yellow: Math.round(l.yellow * 100) }, canEdit: can(ctx, P.planManage) || can(ctx, P.salesManage) };
     });
   });
   app.put('/api/kpi-norms', async (req) => {
     const ctx = requireCtx(req);
-    if (!can(ctx, P.planManage)) throw forbidden();
+    if (!can(ctx, P.planManage) && !can(ctx, P.salesManage)) throw forbidden();
     const b = (req.body ?? {}) as { clubId?: string; norms?: Record<string, number>; light?: { green?: number; yellow?: number } };
     if (!b.clubId) throw badRequest('Выберите клуб');
     if (b.light) {

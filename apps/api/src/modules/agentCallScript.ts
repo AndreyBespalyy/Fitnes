@@ -4,11 +4,12 @@
 // Тексты — «Скрипты ОП — коротко» Сандов Фитнес (PDF от Андрея 17.11.2026).
 import type { FastifyInstance } from 'fastify';
 import type pg from 'pg';
-import { requirePerm } from '../auth.ts';
-import { withCtx, type Db } from '../db.ts';
-import { badRequest, notFound } from '../errors.ts';
+import { can, requireCtx, requirePerm } from '../auth.ts';
+import { audit, withCtx, type Db } from '../db.ts';
+import { badRequest, forbidden, notFound } from '../errors.ts';
 import { PERMISSIONS as P } from '../roles.ts';
 import { firstName } from './agentInvite.ts';
+import { SCRIPTS, type ScriptItem } from './agentScripts.ts';
 
 type Line = [stage: string, text: string];
 type Book = { code: string; title: string; lines: Line[]; ifSays: Line[]; never: string };
@@ -24,7 +25,7 @@ const BOOK: Book[] = [
     ['Презентация', 'Три факта под его слова: 1 100 м² зала и больше 140 тренажёров без очереди · групповые (йога, пилатес, здоровая спина, зумба, бодипамп) · круглосуточно · сауна, полотенца, вода · бокс и кикбоксинг'],
     ['Повод прийти', '«Приходите на пробную тренировку с тренером — бесплатно. Он посмотрит и подберёт программу под вашу задачу»'],
     ['День и время', '«Вам удобнее в будни или на выходных?» → «Утром или вечером?» → «Тогда {когда} — записываю»'],
-    ['Итог', '«Нижегородская 29–33, БЦ «Нижегородский», чёрный козырёк. Возьмите паспорт — пропускная система. Отправлю адрес и время в мессенджер. Телеграм или Ватсап?»'],
+    ['Итог', '«{адрес}. Возьмите паспорт — пропускная система. Отправлю адрес и время в мессенджер. Телеграм или Ватсап?»'],
   ], ifSays: [
     ['«Только цену»', '«От 2 690 ₽ в месяц, зависит от формата. Но цифра без задачи ничего не значит — на пробной подберём под вас. Давайте {когда}?»'],
     ['«Подумаю»', '«Конечно. Просто посмотрите клуб и попробуйте тренировку — бесплатно, ничего не теряете. В будни или на выходных?»'],
@@ -41,7 +42,7 @@ const BOOK: Book[] = [
     ['Что мешало', '«А что мешало раньше?» → реакция его словами'],
     ['Что изменилось', '«Теперь клуб круглосуточный, есть бесплатная пробная тренировка с тренером, и программу подбирают под задачу»'],
     ['День и время', '«В будни или на выходных? Утром или вечером? Тогда {когда}»'],
-    ['Итог', 'Адрес (Нижегородская 29–33, БЦ «Нижегородский», чёрный козырёк), паспорт, сообщение в мессенджер'],
+    ['Итог', 'Адрес ({адрес}), паспорт, сообщение в мессенджер'],
   ], ifSays: [
     ['«Неинтересно»', '«Уточню одно: совсем не про тренировки или сейчас не время? Если время — подберём другое, если совсем — уберу вас из списка»'],
     ['«Не звоните больше»', '«Извините за беспокойство, отмечу — больше не потревожу» (тег в тот же день)'],
@@ -53,7 +54,7 @@ const BOOK: Book[] = [
   { code: 'confirm', title: 'Подтверждение встречи', lines: [
     ['Контакт', '«{к}, добрый день! Это {я} из Сандов Фитнес. Удобно две минуты?»'],
     ['Напоминание', '«Звоню напомнить: мы встречаемся {когда}, вас ждёт тренер»'],
-    ['Дорога', '«Помощь, как добраться, нужна? Нижегородская 29–33, БЦ «Нижегородский», чёрный козырёк»'],
+    ['Дорога', '«Помощь, как добраться, нужна? {адрес}»'],
     ['Паспорт', '«Возьмите, пожалуйста, паспорт — пропускная система»'],
     ['Финал', '«Тренер уже в клубе, ждёт вас. До встречи!»'],
   ], ifSays: [
@@ -146,7 +147,7 @@ export async function callScript(db: Db, ctx: { userId: string }, type: 'task' |
     if (!o) throw notFound('Сделка не найдена');
     personId = o.person_id;
   } else personId = id;
-  const p = personId ? (await db.query(`select p.id, p.full_name, c.timezone from persons p join clubs c on c.id = p.home_club_id where p.id = $1`, [personId])).rows[0] : null;
+  const p = personId ? (await db.query(`select p.id, p.full_name, c.timezone, c.id as club_id from persons p join clubs c on c.id = p.home_club_id where p.id = $1`, [personId])).rows[0] : null;
   if (personId && !p) throw notFound('Клиент не найден');
   const tz = p?.timezone ?? 'Europe/Moscow';
   const me = (await db.query(`select full_name from users where id = $1`, [ctx.userId])).rows[0]?.full_name as string | undefined;
@@ -172,7 +173,10 @@ export async function callScript(db: Db, ctx: { userId: string }, type: 'task' |
   else if (lead && new Date(lead.created_at).getTime() > Date.now() - 14 * 86_400_000) { code = 'lead'; why = 'заявка свежая — звонок по заявке'; }
   else { why = lead ? 'заявка старше двух недель — звонок по базе' : 'клиент из базы'; }
   if (force && BOOK.some((b) => b.code === force)) { code = force; why = 'тема выбрана вручную'; }
-  const b = BOOK.find((x) => x.code === code)!;
+  // Текст — из скриптов клуба (правит РОП в «Отдел продаж → Скрипты звонков»), иначе стандартный
+  const clubId = (p?.club_id as string | undefined) ?? (await db.query(`select club_id from user_assignments where user_id = $1 and club_id is not null limit 1`, [ctx.userId])).rows[0]?.club_id;
+  const b = clubId ? await clubBook(db, clubId, code) : BOOK.find((x) => x.code === code)!;
+  const addr = clubId ? ((await db.query(`select address from clubs where id = $1`, [clubId])).rows[0]?.address as string | null) : null;
 
   const fromWhere = visited ? 'вы были у нас на гостевом визите' : 'вы оставляли заявку';
   const vars: Record<string, string> = {
@@ -180,18 +184,83 @@ export async function callScript(db: Db, ctx: { userId: string }, type: 'task' |
     '{когда}': meet ? whenOf(new Date(meet.due_at), tz) : suggestWhen(new Date(), tz),
     '{откуда}': fromWhere, '{Откуда}': fromWhere[0].toUpperCase() + fromWhere.slice(1),
     '{до}': memb ? dmy(memb.ends) : '[дата окончания]',
+    '{адрес}': addr || '[адрес клуба]',
   };
   const fill = (s: string) => Object.entries(vars).reduce((a, [k, v]) => a.replaceAll(k, v), s);
   return {
     code, title: b.title, why, client: p?.full_name ?? null,
     lines: b.lines.map(([stage, text]) => ({ stage, text: fill(text) })),
     ifSays: b.ifSays.map(([q2, a]) => ({ q: q2, a: fill(a) })),
-    never: b.never, after: AFTER,
+    never: fill(b.never), after: AFTER,
     others: BOOK.filter((x) => x.code !== code).map((x) => ({ code: x.code, title: x.title })),
   };
 }
 
+/* ---------- скрипты клуба: правка РОПом (проверка CRM 17.11.2026, п. 4) ---------- */
+type Own = { lines?: Line[]; ifSays?: Line[]; never?: string; steps?: ScriptItem[]; neverItems?: ScriptItem[] };
+const CODES = ['lead', 'incoming', 'base', 'confirm', 'renewal', 'repeat'];
+
+async function ownOf(db: Db, clubId: string, code: string) {
+  return (await db.query(`select data, updated_at from club_call_scripts where club_id = $1 and code = $2`, [clubId, code])).rows[0] as { data: Own; updated_at: string } | undefined;
+}
+async function clubBook(db: Db, clubId: string, code: string): Promise<Book> {
+  const base = BOOK.find((x) => x.code === code)!;
+  const own = (await ownOf(db, clubId, code))?.data;
+  return { ...base, lines: own?.lines?.length ? own.lines : base.lines, ifSays: own?.ifSays ?? base.ifSays, never: own?.never ?? base.never };
+}
+
+const cleanLines = (v: unknown): Line[] => (Array.isArray(v) ? v : []).filter((x): x is [unknown, unknown] => Array.isArray(x) && x.length === 2)
+  .map(([a, b]) => [String(a ?? '').trim().slice(0, 80), String(b ?? '').trim().slice(0, 1500)] as Line).filter(([a, b]) => a && b).slice(0, 30);
+const cleanItems = (v: unknown, prefix: string): ScriptItem[] => (Array.isArray(v) ? v : []).map((x, i) => {
+  const o = (x ?? {}) as { id?: unknown; text?: unknown; how?: unknown };
+  const id = typeof o.id === 'string' && /^[a-z0-9_]{1,30}$/.test(o.id) ? o.id : `${prefix}${i + 1}`;
+  return { id, text: String(o.text ?? '').trim().slice(0, 300), how: String(o.how ?? '').trim().slice(0, 1500) };
+}).filter((x) => x.text).slice(0, 20);
+
 export function callScriptRoutes(app: FastifyInstance, pool: pg.Pool) {
+  // Скрипты клуба: смотрят все в отделе продаж, правят РОП, управляющий и собственник
+  app.get('/api/call-scripts', async (req) => {
+    const ctx = requirePerm(req, P.crmWork);
+    const { clubId } = req.query as { clubId?: string };
+    if (!clubId) throw badRequest('Выберите клуб');
+    return withCtx(pool, ctx, async (db) => {
+      const items = [];
+      for (const code of CODES) {
+        const book = BOOK.find((x) => x.code === code)!; const check = SCRIPTS.find((x) => x.code === code)!;
+        const own = await ownOf(db, clubId, code);
+        items.push({ code, title: book.title, custom: !!own, updatedAt: own?.updated_at ?? null,
+          lines: own?.data.lines?.length ? own.data.lines : book.lines, ifSays: own?.data.ifSays ?? book.ifSays, never: own?.data.never ?? book.never,
+          steps: own?.data.steps?.length ? own.data.steps : check.steps, neverItems: own?.data.neverItems?.length ? own.data.neverItems : check.never });
+      }
+      return { items, canEdit: can(ctx, P.planManage) || can(ctx, P.salesManage) };
+    });
+  });
+  app.put('/api/call-scripts', async (req) => {
+    const ctx = requireCtx(req);
+    if (!can(ctx, P.planManage) && !can(ctx, P.salesManage)) throw forbidden('Скрипты меняют РОП и управляющий');
+    const b = (req.body ?? {}) as { clubId?: string; code?: string } & Record<string, unknown>;
+    if (!b.clubId || !CODES.includes(b.code ?? '')) throw badRequest('Выберите клуб и скрипт');
+    const data: Own = { lines: cleanLines(b.lines), ifSays: cleanLines(b.ifSays), never: String(b.never ?? '').trim().slice(0, 500),
+      steps: cleanItems(b.steps, 's'), neverItems: cleanItems(b.neverItems, 'n') };
+    if (!data.lines!.length || !data.steps!.length) throw badRequest('В скрипте должны остаться этапы разговора и пункты проверки');
+    return withCtx(pool, ctx, async (db) => {
+      await db.query(`insert into club_call_scripts(club_id, code, tenant_id, data, updated_by) values ($1,$2,$3,$4,$5)
+        on conflict (club_id, code) do update set data = excluded.data, updated_by = excluded.updated_by, updated_at = now()`, [b.clubId, b.code, ctx.tenantId, JSON.stringify(data), ctx.userId]);
+      await audit(db, ctx, 'call_script.updated', 'club', b.clubId!, null, { code: b.code });
+      return { ok: true };
+    });
+  });
+  app.delete('/api/call-scripts', async (req) => {
+    const ctx = requireCtx(req);
+    if (!can(ctx, P.planManage) && !can(ctx, P.salesManage)) throw forbidden('Скрипты меняют РОП и управляющий');
+    const { clubId, code } = req.query as { clubId?: string; code?: string };
+    return withCtx(pool, ctx, async (db) => {
+      await db.query(`delete from club_call_scripts where club_id = $1 and code = $2`, [clubId, code]);
+      await audit(db, ctx, 'call_script.reset', 'club', clubId ?? '', null, { code });
+      return { ok: true };
+    });
+  });
+
   app.get('/api/agent/call-script/:type/:id', async (req) => {
     const ctx = requirePerm(req, P.crmWork);
     const { type, id } = req.params as { type: string; id: string };

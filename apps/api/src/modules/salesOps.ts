@@ -13,7 +13,7 @@ import type { FastifyInstance } from 'fastify';
 import type pg from 'pg';
 import { can, requireCtx, requirePerm } from '../auth.ts';
 import { audit, withCtx, type Ctx, type Db } from '../db.ts';
-import { badRequest, notFound } from '../errors.ts';
+import { badRequest, forbidden, notFound } from '../errors.ts';
 import { PERMISSIONS as P } from '../roles.ts';
 import { maskPhone } from './crm.ts';
 import { sendTable } from './dash.ts';
@@ -474,10 +474,11 @@ export function salesOpsRoutes(app: FastifyInstance, pool: pg.Pool) {
   app.get('/api/sales-ops/settings', async (req) => {
     const ctx = requirePerm(req, P.crmWork);
     const { clubId } = req.query as { clubId?: string };
-    return withCtx(pool, ctx, async (db) => ({ settings: await opsSettings(db, await club(db, clubId)), canManage: can(ctx, P.planManage) }));
+    return withCtx(pool, ctx, async (db) => ({ settings: await opsSettings(db, await club(db, clubId)), canManage: can(ctx, P.planManage) || can(ctx, P.salesManage) }));
   });
   app.put('/api/sales-ops/settings', async (req) => {
-    const ctx = requirePerm(req, P.planManage);
+    const ctx = requireCtx(req);
+    if (!can(ctx, P.planManage) && !can(ctx, P.salesManage)) throw forbidden('Правила отдела продаж меняют управляющий и РОП');
     const b = (req.body ?? {}) as Partial<OpsSettings> & { clubId?: string };
     const n = (v: unknown, lo: number, hi: number, msg: string) => { const x = Number(v); if (!Number.isInteger(x) || x < lo || x > hi) throw badRequest(msg); return x; };
     return withCtx(pool, ctx, async (db) => {

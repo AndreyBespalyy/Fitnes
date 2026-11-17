@@ -53,6 +53,8 @@ export function LeadsPage({ me, clubs, clubId, openPerson }: { me: Me; clubs: Cl
   const club = useClubChoice(clubs, clubId);
   // С рабочего стола: «лиды ждут первого ответа»
   const [noResp, setNoResp] = useState(() => navParams('leads').filter === 'noresponse');
+  // Форма нового лида — по кнопке «+ Лид», сначала список (проверка CRM 17.11.2026, п. 11)
+  const [adding, setAdding] = useState(false);
   const shownLeads = noResp ? leads.filter((l) => !l.respondedAt) : leads;
   const reload = () => api<Lead[]>('GET', `/api/leads${clubId !== 'all' ? `?clubId=${clubId}` : ''}`).then(setLeads).catch((x) => setErr(errText(x)));
   useEffect(() => { reload(); }, [clubId]);
@@ -63,12 +65,14 @@ export function LeadsPage({ me, clubs, clubId, openPerson }: { me: Me; clubs: Cl
       const r = await api<{ personId: string; duplicate: boolean; otherClub: boolean }>('POST', '/api/leads', { clubId: club, ...form });
       toast(r.duplicate ? (r.otherClub ? 'Клиент уже есть в другом клубе сети: обращение добавлено к его карточке' : 'Клиент уже есть в базе: обращение добавлено к его карточке') : 'Лид создан и назначен менеджеру');
       setForm({ fullName: '', phone: '', sourceId: form.sourceId, comment: '' });
-      reload();
+      setAdding(false); reload();
     } catch (x) { setErr(errText(x)); }
   };
   return (
     <>
-      <form className="card" onSubmit={submit} style={{ display: 'grid', gap: 10 }}>
+      <div className="row between" style={{ flexWrap: 'wrap', gap: 8 }}><h1 style={{ margin: 0 }}>Лиды</h1>
+        {!adding && can(me, 'leads.create') && <button className="btn pri sm" onClick={() => setAdding(true)}>+ Лид</button>}</div>
+      {adding && <form className="card" onSubmit={submit} style={{ display: 'grid', gap: 10 }}>
         <div className="row between"><h2>Новый лид</h2><span className="small">{clubs.find((c) => c.id === club)?.name}</span></div>
         <div className="grid2" style={{ gridTemplateColumns: 'repeat(auto-fit,minmax(170px,1fr))', alignItems: 'end' }}>
           <label className="f">Имя<input value={form.fullName} onChange={(e) => setForm({ ...form, fullName: e.target.value })} placeholder="Анна Иванова" /></label>
@@ -79,7 +83,8 @@ export function LeadsPage({ me, clubs, clubId, openPerson }: { me: Me; clubs: Cl
           <button className="btn pri" disabled={!form.phone || !form.sourceId || !club}>Создать лид</button>
         </div>
         <p className="small" style={{ margin: 0 }}>Если клиент с таким телефоном уже есть в сети, второй клиент не создаётся: обращение добавится к его карточке.</p>
-      </form>
+        <div><button type="button" className="btn sm" onClick={() => setAdding(false)}>Отмена</button></div>
+      </form>}
       {err && <div className="err">{err}</div>}
       <div className="tabs" role="group" aria-label="Какие лиды"><button aria-pressed={!noResp} onClick={() => setNoResp(false)}>Все</button><button aria-pressed={noResp} onClick={() => setNoResp(true)}>Ждут первого ответа ({leads.filter((l) => !l.respondedAt).length})</button></div>
       <div className="card"><div className="tbl"><table>
@@ -171,8 +176,15 @@ export function TasksPage({ me, clubId, openPerson }: { me: Me; clubId: string; 
     ['Позже', only?.today ? [] : tasks.filter((t) => new Date(t.dueAt).getTime() > endOfDay.getTime() && new Date(t.dueAt).getTime() > now)],
   ];
   const whoName = only ? all.find((t) => t.assigneeId === only.user)?.assigneeName : null;
+  const work = can(me, 'crm.work');
+  const [adding, setAdding] = useState(false);
   return (
     <>
+      <div className="row between" style={{ flexWrap: 'wrap', gap: 8 }}>
+        <h1 style={{ margin: 0 }}>{work ? 'Задачи' : 'Мои задачи'}</h1>
+        {!adding && <button className="btn pri sm" onClick={() => setAdding(true)}>+ Задача</button>}
+      </div>
+      {adding && <NewTask me={me} clubId={clubId} onDone={() => { setAdding(false); reload(); }} onCancel={() => setAdding(false)} />}
       {only && <div className="card row between" style={{ alignItems: 'center' }}><b>{whoName ? `Задачи: ${whoName}` : 'Задачи сотрудника'}{only.today ? ' — просроченные и на сегодня' : ''}</b>
         <button className="btn sm" onClick={() => setOnly(null)}>Все задачи</button></div>}
       {can(me, 'crm.view_all') && !only && (
@@ -190,8 +202,8 @@ export function TasksPage({ me, clubId, openPerson }: { me: Me; clubId: string; 
                   {t.personId && <button className="btn sm" onClick={() => openPerson(t.personId!)}>{t.personName}</button>}
                   {t.personId && (t.kind === 'call' || t.kind === 'first_response') && !t.doneAt && <DialButton personId={t.personId} />}
                   {t.callId && <button className="btn sm pri" onClick={() => setCall(t.callId)}>Итог разговора</button>}
-                  <SituationButton type="task" id={t.id} />
-                  {t.personId && ['call', 'first_response', 'meeting'].includes(t.kind) && !t.doneAt && <ScriptButton type="task" id={t.id} />}
+                  {work && <SituationButton type="task" id={t.id} />}
+                  {work && t.personId && ['call', 'first_response', 'meeting'].includes(t.kind) && !t.doneAt && <ScriptButton type="task" id={t.id} />}
                   <button className={`btn sm ${t.callId ? '' : 'pri'}`} onClick={() => setDoing(t)}>Выполнить</button>
                 </div>
               </div>
@@ -199,9 +211,44 @@ export function TasksPage({ me, clubId, openPerson }: { me: Me; clubId: string; 
             </div>))}</div>
         </div>
       ))}
-      {tasks.length === 0 && <div className="card"><p className="muted" style={{ margin: 0 }}>Открытых задач нет.</p></div>}
+      {tasks.length === 0 && <div className="card"><p className="muted" style={{ margin: 0 }}>Открытых задач нет. Новую задачу себе или коллеге — кнопкой «+ Задача».</p></div>}
       {call && <CallDialog id={call} onClose={() => { setCall(null); reload(); }} openPerson={openPerson} />}
     </>
+  );
+}
+
+/** «+ Задача» (проверка CRM 17.11.2026, п. 3): себе или коллеге, по клиенту или без */
+export function NewTask({ me, clubId, personId, personName, onDone, onCancel }: { me: Me; clubId: string | null; personId?: string; personName?: string; onDone: () => void; onCancel: () => void }) {
+  const [clubs, setClubs] = useState<Club[]>([]);
+  const [club, setClub] = useState(clubId && clubId !== 'all' ? clubId : '');
+  const [who, setWho] = useState<{ id: string; name: string; role: string }[]>([]);
+  const [to, setTo] = useState(me.id);
+  const [title, setTitle] = useState(personId ? 'Перезвонить' : '');
+  const [due, setDue] = useState(localInput(24 * 60));
+  const [err, setErr] = useState('');
+  useEffect(() => { if (!club) api<Club[]>('GET', '/api/clubs').then((c) => { setClubs(c); if (c[0]) setClub(c[0].id); }).catch(() => null); }, []);
+  useEffect(() => { if (club) api<{ id: string; name: string; role: string }[]>('GET', `/api/tasks/assignees?clubId=${club}`).then(setWho).catch(() => setWho([])); }, [club]);
+  const submit = async (e: FormEvent) => {
+    e.preventDefault(); setErr('');
+    try {
+      await api('POST', '/api/tasks', { clubId: club, assigneeId: to, personId, title, dueAt: fromLocal(due) });
+      toast(to === me.id ? 'Задача поставлена вам' : `Задача поставлена: ${who.find((w) => w.id === to)?.name ?? 'коллеге'}`); onDone();
+    } catch (x) { setErr(errText(x)); }
+  };
+  return (
+    <form className="card" onSubmit={submit} style={{ display: 'grid', gap: 8 }}>
+      <b>Новая задача{personName ? ` · ${personName}` : ''}</b>
+      <div className="grid2" style={{ gridTemplateColumns: 'repeat(auto-fit,minmax(180px,1fr))' }}>
+        <label className="f">Что сделать<input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="перезвонить, подготовить договор…" autoFocus /></label>
+        <label className="f">Когда<input type="datetime-local" value={due} onChange={(e) => setDue(e.target.value)} /></label>
+        {clubs.length > 1 && <label className="f">Клуб<select value={club} onChange={(e) => setClub(e.target.value)}>{clubs.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}</select></label>}
+        <label className="f">Кому<select value={to} onChange={(e) => setTo(e.target.value)}>
+          {!who.some((w) => w.id === me.id) && <option value={me.id}>Мне</option>}
+          {who.map((w) => <option key={w.id} value={w.id}>{w.id === me.id ? 'Мне' : `${w.name} · ${w.role}`}</option>)}</select></label>
+      </div>
+      {err && <div className="err">{err}</div>}
+      <div className="row"><button className="btn pri sm" disabled={!title.trim() || !club}>Поставить</button><button type="button" className="btn sm" onClick={onCancel}>Отмена</button></div>
+    </form>
   );
 }
 
@@ -245,6 +292,8 @@ export function PersonCard({ me, id, onClose }: { me: Me; id: string; onClose: (
   const [taskTitle, setTaskTitle] = useState('Перезвонить');
   const [taskDue, setTaskDue] = useState(localInput(24 * 60));
   const [meetAt, setMeetAt] = useState(localInput(24 * 60));
+  const [doingTask, setDoingTask] = useState<string | null>(null);
+  const [addTask, setAddTask] = useState(false);
   const reload = () => api<Card>('GET', `/api/persons/${id}`).then(setCard).catch((x) => setErr(errText(x)));
   useEffect(() => { reload(); }, [id]);
   useEffect(() => { const k = (e: KeyboardEvent) => e.key === 'Escape' && onClose(); window.addEventListener('keydown', k); return () => window.removeEventListener('keydown', k); }, []);
@@ -338,12 +387,16 @@ export function PersonCard({ me, id, onClose }: { me: Me; id: string; onClose: (
             </div>)}
 
           {work && <PersonCalls personId={card.person.id} />}
-          {sales && <><div className="card" style={{ display: 'grid', gap: 6 }}><h2>Задачи</h2>
+          {sales && <><div className="card" style={{ display: 'grid', gap: 6 }}><div className="row between"><h2>Задачи</h2>{!addTask && <button className="btn sm" onClick={() => setAddTask(true)}>+ Задача</button>}</div>
+            {addTask && <NewTask me={me} clubId={card.person.homeClubId} personId={card.person.id} personName={card.person.fullName} onDone={() => { setAddTask(false); reload(); }} onCancel={() => setAddTask(false)} />}
             {card.tasks.length === 0 && <p className="muted" style={{ margin: 0 }}>Задач нет.</p>}
             {card.tasks.map((t) => (
               <div key={t.id} className={`item ${t.overdue ? 'over' : ''}`}>
                 <div className="row between"><span><b>{t.title}</b> <span className="chip">{KIND[t.kind] ?? t.kind}</span></span>
-                  <span className="row" style={{ gap: 6 }}><span className="small">{t.doneAt ? `выполнено ${dt(t.doneAt)}` : `до ${dt(t.dueAt)}`}</span>{!t.doneAt && <SituationButton type="task" id={t.id} label="Коротко" />}{!t.doneAt && ['call', 'first_response', 'meeting'].includes(t.kind) && <ScriptButton type="task" id={t.id} label="Скрипт" />}</span></div>
+                  <span className="row" style={{ gap: 6 }}><span className="small">{t.doneAt ? `выполнено ${dt(t.doneAt)}` : `до ${dt(t.dueAt)}`}</span>{work && !t.doneAt && <SituationButton type="task" id={t.id} label="Коротко" />}{work && !t.doneAt && ['call', 'first_response', 'meeting'].includes(t.kind) && <ScriptButton type="task" id={t.id} label="Скрипт" />}
+                    {!t.doneAt && (work || t.assigneeId === me.id) && doingTask !== t.id && <button className="btn sm pri" onClick={() => setDoingTask(t.id)}>Выполнить</button>}</span></div>
+                {t.assigneeName && !t.doneAt && <div className="small muted">Исполнитель: {t.assigneeName}</div>}
+                {doingTask === t.id && <CompleteTask task={t} onDone={() => { setDoingTask(null); reload(); }} onCancel={() => setDoingTask(null)} />}
                 {t.result && <div className="small">Результат: {t.result}</div>}
               </div>))}
           </div>

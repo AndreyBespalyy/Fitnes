@@ -261,7 +261,7 @@ export async function processDigest(db: Db, clubIds: string[]) {
 export function processRoutes(app: FastifyInstance, pool: pg.Pool, yandex: YandexConfig | null) {
   const canEdit = (ctx: Ctx) => can(ctx, P.crmViewAll) || can(ctx, P.configManage);
   app.get('/api/processes/templates', async (req) => {
-    const ctx = requirePerm(req, P.crmWork);
+    const ctx = requireCtx(req); // все роли: свои процессы и шаги (проверка CRM 17.11.2026);
     return withCtx(pool, ctx, async (db) => {
       await ensureBuiltins(db, ctx.tenantId);
       const rows = (await db.query(`select id, name, description, steps, builtin, updated_at as "updatedAt" from process_templates where is_active order by builtin is null, name`)).rows;
@@ -300,7 +300,7 @@ export function processRoutes(app: FastifyInstance, pool: pg.Pool, yandex: Yande
     return processFromText(text, yandex);
   });
   app.get('/api/processes', async (req) => {
-    const ctx = requirePerm(req, P.crmWork);
+    const ctx = requireCtx(req); // все роли: свои процессы и шаги (проверка CRM 17.11.2026);
     const { clubId, status } = req.query as { clubId?: string; status?: string };
     return withCtx(pool, ctx, async (db) => {
       if (clubId) await advanceProcesses(db, ctx, clubId);
@@ -324,7 +324,7 @@ export function processRoutes(app: FastifyInstance, pool: pg.Pool, yandex: Yande
     return withCtx(pool, ctx, async (db) => ({ id: await startProcess(db, ctx, { ...b, clubId: b.clubId! }) }));
   });
   app.post('/api/processes/:id/step-done', async (req) => {
-    const ctx = requirePerm(req, P.crmWork);
+    const ctx = requireCtx(req); // все роли: свои процессы и шаги (проверка CRM 17.11.2026);
     const { id } = req.params as { id: string };
     const result = String((req.body as { result?: string } | null)?.result ?? 'Сделано').slice(0, 1000);
     return withCtx(pool, ctx, async (db) => {

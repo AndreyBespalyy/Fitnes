@@ -159,7 +159,9 @@ function ChangePassword({ me, forced, onDone, onLogout }: { me: Me; forced?: boo
 type Tab = 'dash' | 'hot' | 'calls' | 'leads' | 'board' | 'tasks' | 'home' | 'clubs' | 'tariffs' | 'contracts' | 'site' | 'fiscal' | 'finance' | 'import' | 'chats' | 'access' | 'messaging' | 'pipelines' | 'staff' | 'stafftime' | 'config' | 'reviews' | 'onboarding' | 'privacy' | 'system' | 'help' | 'schedule' | 'retention' | 'shop' | 'corp' | 'trainer' | 'desk' | 'load' | 'cohorts' | 'pnl' | 'usage' | 'intake' | 'sales' | 'processes' | 'weekly' | 'learn' | 'team' | 'notes' | 'profile' | 'problems' | 'payouts' | 'activity' | 'telephony';
 
 function Shell({ me, onLogout }: { me: Me; onLogout: () => void }) {
-  const firstTab: Tab = 'dash';
+  // Главный экран роли (проверка CRM, п. 11): ресепшн начинает с «Ресепшна», тренер — с «Моего дня», остальные — с рабочего стола
+  const only = (code: string) => me.roles.length > 0 && me.roles.every((r) => r.code === code);
+  const firstTab: Tab = only('desk') ? 'desk' : only('trainer') ? 'trainer' : 'dash';
   // Адрес раздела: ?tab=finance&view=debts&person=<id> — ссылки, закладки и кнопка «Назад» в браузере
   const readUrl = () => {
     const q = new URLSearchParams(location.search);
@@ -232,10 +234,11 @@ function Shell({ me, onLogout }: { me: Me; onLogout: () => void }) {
     ['dash', 'Рабочий стол', true],
     ['problems', 'Проблемные моменты', can(me, 'dash.view') || can(me, 'finance.view')],
     ['team', 'Мессенджер', true],
-    ['tasks', 'Задачи', can(me, 'crm.work')],
-    ['processes', 'Бизнес-процессы', can(me, 'crm.work')],
+    // «Мои задачи» — у всех ролей: шаги процессов и задачи из советов приходят и ресепшну, и тренеру, и финансисту
+    ['tasks', can(me, 'crm.work') ? 'Задачи' : 'Мои задачи', true],
+    ['processes', 'Бизнес-процессы', true],
     ['weekly', 'Разбор недели', can(me, 'dash.view') || can(me, 'crm.view_all')],
-    ['learn', 'Чему научился помощник', can(me, 'dash.view') || can(me, 'crm.view_all')],
+    ['learn', 'Чему научился Дядя Витя', can(me, 'dash.view') || can(me, 'crm.view_all')],
     ['hot', 'Кому звонить', can(me, 'crm.work')],
     ['calls', 'Звонки', can(me, 'crm.work')],
     ['sales', 'Отдел продаж', can(me, 'crm.work')],
@@ -244,7 +247,7 @@ function Shell({ me, onLogout }: { me: Me; onLogout: () => void }) {
     ['board', 'Сделки', can(me, 'crm.work')],
     ['chats', 'Переписка', can(me, 'messages.work')],
     ['home', trainerOnly(me) ? 'Мои клиенты' : 'Клиенты', can(me, 'persons.view')],
-    ['access', 'Проходы', can(me, 'acs.work') || can(me, 'acs.manage')],
+    ['access', 'Проходы и турникеты', can(me, 'acs.work') || can(me, 'acs.manage')],
     ['clubs', 'Клубы', can(me, 'clubs.manage')],
     ['tariffs', 'Тарифы', can(me, 'tariffs.manage') || can(me, 'memberships.sell')],
     ['shop', 'Товары', can(me, 'tariffs.manage') || can(me, 'memberships.sell') || can(me, 'shifts.work')],
@@ -258,7 +261,8 @@ function Shell({ me, onLogout }: { me: Me; onLogout: () => void }) {
     ['pnl', 'Прибыль', can(me, 'finance.view')],
     ['finance', 'Финансы', can(me, 'finance.view') || can(me, 'shifts.work') || can(me, 'approvals.decide')],
     ['payouts', 'Выплаты', can(me, 'payroll.manage')],
-    ['fiscal', 'Касса', can(me, 'fiscal.manage') || can(me, 'memberships.manage')],
+    // Ресепшну здесь только журнал чеков — «Касса смены» у него в «Финансах»
+    ['fiscal', can(me, 'fiscal.manage') ? 'Касса и чеки' : 'Чеки', can(me, 'fiscal.manage') || can(me, 'memberships.manage')],
     ['messaging', 'Сообщения', can(me, 'messages.manage')],
     ['import', 'Перенос из 1С', can(me, 'import.manage')],
     ['pipelines', 'Воронки', can(me, 'pipelines.manage')],
@@ -271,7 +275,7 @@ function Shell({ me, onLogout }: { me: Me; onLogout: () => void }) {
     ['telephony', 'Телефония', can(me, 'plan.manage')],
     ['onboarding', 'Подключение клубов', can(me, 'clubs.manage')],
     ['notes', 'Журнал замечаний', can(me, '*')],
-    ['activity', 'Статистика сотрудников', me.allClubs && can(me, '*')],
+    ['activity', 'Статистика сотрудников', (me.allClubs && can(me, '*')) || (!me.allClubs && me.roles.some((r) => r.code === 'gm'))],
     ['usage', 'Использование', me.allClubs && (can(me, '*') || me.roles.some((r) => r.code === 'admin'))],
     ['privacy', 'Защита данных', can(me, 'data.protect')],
     ['system', 'Состояние системы', can(me, 'system.monitor')],
@@ -285,7 +289,13 @@ function Shell({ me, onLogout }: { me: Me; onLogout: () => void }) {
   // Статистика использования: какой раздел открыли (без содержимого экрана)
   useEffect(() => { api('POST', '/api/usage/view', { tab, label: tabLabel }).catch(() => null); }, [tab]);
   // Нижняя панель на телефоне: главные разделы роли под большим пальцем, остальное — в «Ещё»
-  const PRIMARY: Tab[] = ['dash', 'desk', 'trainer', 'hot', 'tasks', 'chats', 'home', 'schedule', 'access', 'problems', 'finance', 'pnl'];
+  // Свой набор для каждой роли (проверка CRM, п. 10); для нескольких ролей или незнакомой роли — общий список
+  const ROLE_BOTTOM: Record<string, Tab[]> = {
+    owner: ['dash', 'problems', 'finance', 'pnl'], gm: ['dash', 'problems', 'tasks', 'finance'], fin: ['dash', 'finance', 'problems', 'pnl'],
+    rop: ['dash', 'sales', 'tasks', 'chats'], manager: ['dash', 'hot', 'tasks', 'chats'], desk: ['desk', 'chats', 'home', 'tasks'],
+    trainer: ['trainer', 'schedule', 'home', 'tasks'], admin: ['dash', 'access', 'staff', 'system'],
+  };
+  const PRIMARY: Tab[] = (me.roles.length === 1 && ROLE_BOTTOM[me.roles[0].code]) || ['dash', 'desk', 'trainer', 'hot', 'tasks', 'chats', 'home', 'schedule', 'access', 'problems', 'finance', 'pnl'];
   const bottom = PRIMARY.filter((k) => visible.some((v) => v[0] === k)).slice(0, 4);
   // Главные разделы роли подгружаем заранее, в свободную минуту: они откроются мгновенно и будут работать без связи
   useEffect(() => {
@@ -297,12 +307,12 @@ function Shell({ me, onLogout }: { me: Me; onLogout: () => void }) {
     const id = w.requestIdleCallback ? w.requestIdleCallback(run) : window.setTimeout(run, 1500);
     return () => { if (!w.requestIdleCallback) clearTimeout(id); };
   }, [bottom.join()]);
-  const short: Partial<Record<Tab, string>> = { dash: 'Главная', trainer: 'Мой день', desk: 'Ресепшн', hot: 'Звонить', tasks: 'Задачи', schedule: 'Занятия', chats: 'Чаты', home: 'Клиенты', access: 'Проходы', finance: 'Финансы', problems: 'Проблемы', pnl: 'Прибыль' };
-  const icon: Partial<Record<Tab, string>> = { dash: '◧', trainer: '◷', desk: '⚑', hot: '☎', tasks: '✓', schedule: '▦', chats: '✉', home: '☺', access: '⇥', finance: '₽', problems: '⚠', pnl: '↗' };
+  const short: Partial<Record<Tab, string>> = { sales: 'Продажи', staff: 'Люди', system: 'Система', dash: 'Главная', trainer: 'Мой день', desk: 'Ресепшн', hot: 'Звонить', tasks: 'Задачи', schedule: 'Занятия', chats: 'Чаты', home: 'Клиенты', access: 'Проходы', finance: 'Финансы', problems: 'Проблемы', pnl: 'Прибыль' };
+  const icon: Partial<Record<Tab, string>> = { sales: '↗', staff: '☺', system: '♥', dash: '◧', trainer: '◷', desk: '⚑', hot: '☎', tasks: '✓', schedule: '▦', chats: '✉', home: '☺', access: '⇥', finance: '₽', problems: '⚠', pnl: '↗' };
   return (
     <>
       <div className="shell">
-      <SideNav items={visible.map(([k, t]) => [k, t])} groupOf={ownerOnly(me) ? { tariffs: 'setup', load: 'money' } : undefined} tab={tab} setTab={(t) => setTab(t as Tab)} open={more}
+      <SideNav items={visible.map(([k, t]) => [k, t])} groupOf={ownerOnly(me) ? { tariffs: 'setup', shop: 'setup', load: 'money' } : undefined} tab={tab} setTab={(t) => setTab(t as Tab)} open={more}
         brand={<div className="brand"><i />Клубная ОС</div>}
         club={clubs.length === 1 && !me.allClubs ? clubPick('club-pick') : null} />
       <div className="main-col">
@@ -316,6 +326,7 @@ function Shell({ me, onLogout }: { me: Me; onLogout: () => void }) {
       <main className="wrap">
         <OfflineBar />
         <UpdateBanner />
+        {!allowed.some((t) => t[0] === tab) ? <NoAccess label={tabLabel} home={() => setTab(firstTab)} /> :
         <Suspense fallback={<p className="muted">Загрузка…</p>}>
         {tab === 'dash' && <DashPage me={me} clubs={clubs} clubId={clubId} openPerson={openPerson} go={go} canGo={(t) => allowed.some((v) => v[0] === t)} pickClub={setClubId} />}
         {tab === 'hot' && <HotPage me={me} clubs={clubs} clubId={clubId} openPerson={openPerson} />}
@@ -365,7 +376,7 @@ function Shell({ me, onLogout }: { me: Me; onLogout: () => void }) {
         {tab === 'reviews' && <ReviewsPage me={me} clubs={clubs} clubId={clubId} openPerson={openPerson} />}
         {tab === 'notes' && <TestNotesPage me={me} />}
         {tab === 'profile' && <ProfilePage me={me} passwordForm={<ChangePassword me={me} onDone={() => { alertOk('Пароль изменён'); setTab(firstTab); }} />} />}
-        </Suspense>
+        </Suspense>}
         {me.isTester && <TestNotesWidget me={me} tab={tab} tabLabel={tabLabel} personOpen={!!personId} clubId={clubId} />}
         <ReportProblem tab={tab} tabLabel={tabLabel} clubId={clubId} openHelp={() => go({ tab: 'help', p: { view: 'support' } })} />
       </main>
@@ -381,6 +392,17 @@ function Shell({ me, onLogout }: { me: Me; onLogout: () => void }) {
   );
 }
 
+
+/** Раздел закрыт для роли (кнопка, ссылка или уведомление привели не туда): понятное сообщение вместо пустой страницы */
+function NoAccess({ label, home }: { label: string; home: () => void }) {
+  return (
+    <div className="card" style={{ display: 'grid', gap: 10, maxWidth: 560 }}>
+      <b>Раздел «{label}» не для вашей роли</b>
+      <p className="small muted" style={{ margin: 0 }}>Его ведут руководители. Всё, что нужно вам, — на главном экране и в разделах меню слева. Если вам сюда действительно нужно, напишите управляющему в мессенджере.</p>
+      <div><button className="btn pri" onClick={home}>На главный экран</button></div>
+    </div>
+  );
+}
 
 function Home({ me, clubs, clubId, openPerson }: { me: Me; clubs: Club[]; clubId: string; openPerson: (id: string) => void }) {
   const [persons, setPersons] = useState<Person[]>([]);

@@ -9,16 +9,19 @@ const ALWAYS = ['dash', 'team', 'help', 'profile'];
 export const ROLE_MENU: Record<string, string[]> = {
   // Собственник: только отчёты — финансы, посещаемость, выплаты, проблемные моменты. Без операционки.
   // Тарифы и настройки клуба — отдельным блоком «Настройки» внизу меню. «Перенос из 1С» — тоже там (17.11.2026).
-  owner: ['problems', 'finance', 'pnl', 'load', 'cohorts', 'payouts', 'weekly', 'learn', 'reviews', 'staff', 'activity', 'tariffs', 'config', 'telephony', 'privacy', 'import', 'system', 'notes', 'usage'],
+  // «Товары» — в «Настройки» рядом с «Тарифами»: товары добавляют собственник и управляющий (проверка CRM 17.11.2026).
+  owner: ['problems', 'finance', 'pnl', 'load', 'cohorts', 'payouts', 'weekly', 'learn', 'reviews', 'staff', 'activity', 'tariffs', 'shop', 'config', 'telephony', 'privacy', 'import', 'system', 'notes', 'usage'],
   // Управляющий: отчёты собственника по своему клубу + управление клубом. Без сетевых разделов и рабочих экранов сотрудников.
-  gm: ['problems', 'finance', 'pnl', 'load', 'cohorts', 'weekly', 'learn', 'reviews', 'staff', 'sales', 'calls', 'tasks', 'processes', 'schedule', 'home',
+  // «Выплаты» и «Статистика сотрудников» — как у собственника, по своему клубу (проверка CRM 17.11.2026).
+  gm: ['problems', 'finance', 'pnl', 'load', 'cohorts', 'payouts', 'weekly', 'learn', 'reviews', 'staff', 'activity', 'sales', 'calls', 'tasks', 'processes', 'schedule', 'home',
     'retention', 'fiscal', 'tariffs', 'shop', 'contracts', 'site', 'messaging', 'stafftime', 'config', 'telephony', 'corp', 'access', 'privacy'],
   rop: ['tasks', 'processes', 'weekly', 'learn', 'hot', 'calls', 'sales', 'schedule', 'leads', 'board', 'chats', 'home', 'tariffs', 'shop', 'corp', 'load', 'cohorts',
     'staff', 'retention', 'reviews', 'stafftime'],
   manager: ['tasks', 'processes', 'hot', 'calls', 'sales', 'schedule', 'leads', 'board', 'chats', 'home', 'tariffs', 'shop', 'corp', 'reviews', 'stafftime'],
-  desk: ['desk', 'schedule', 'leads', 'chats', 'home', 'access', 'tariffs', 'shop', 'finance', 'fiscal', 'stafftime'],
-  fin: ['problems', 'finance', 'pnl', 'cohorts', 'payouts', 'weekly', 'home', 'corp', 'import', 'staff', 'reviews', 'stafftime'],
-  trainer: ['trainer', 'schedule', 'home', 'stafftime'],
+  // «Мои задачи» у ресепшна, финансиста и тренера: им приходят шаги процессов и задачи из советов (проверка CRM 17.11.2026)
+  desk: ['desk', 'tasks', 'schedule', 'leads', 'chats', 'home', 'access', 'tariffs', 'shop', 'finance', 'fiscal', 'stafftime'],
+  fin: ['problems', 'tasks', 'finance', 'pnl', 'cohorts', 'payouts', 'weekly', 'home', 'corp', 'import', 'staff', 'reviews', 'stafftime'],
+  trainer: ['trainer', 'tasks', 'schedule', 'home', 'stafftime'],
   admin: ['clubs', 'onboarding', 'staff', 'stafftime', 'pipelines', 'intake', 'import', 'access', 'usage', 'system'],
 };
 
