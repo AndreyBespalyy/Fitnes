@@ -70,6 +70,7 @@ import { teamRoutes, startTeamPushWorker } from './modules/team.ts';
 import { agentRoutes } from './modules/agent.ts';
 import { agentReminderRoutes, startAgentWorker } from './modules/agentReminders.ts';
 import { agentChatRoutes, handleBotMessage } from './modules/agentChat.ts';
+import { agentLearnRoutes } from './modules/agentLearn.ts';
 import { agentMeetingRoutes } from './modules/agentMeetings.ts';
 import { processRoutes } from './modules/agentProcesses.ts';
 import { weeklyRoutes } from './modules/agentWeekly.ts';
@@ -190,6 +191,7 @@ export async function buildApp(pool: pg.Pool, opts: { webDist?: string; secureCo
   processRoutes(app, pool, yandex);
   weeklyRoutes(app, pool, yandex);
   agentReminderRoutes(app, pool);
+  agentLearnRoutes(app, pool);
   testNoteRoutes(app, pool, storage);
   platformRoutes(app, pool, { ownerUrl: process.env.PLATFORM_DATABASE_URL || process.env.OWNER_DATABASE_URL, secureCookie: !!opts.secureCookie });
   privacyRoutes(app, pool);

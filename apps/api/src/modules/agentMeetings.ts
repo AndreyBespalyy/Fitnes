@@ -319,9 +319,10 @@ async function createMeeting(db: Db, ctx: Ctx, m: MeetingPending, o: Option) {
 /** Сообщение помощника сотруднику в его чат «ИИ-помощник» (с кнопкой, если есть meta) */
 export async function botSay(db: Db, tenantId: string, userId: string, body: string, meta: Record<string, unknown> | null = null, important = true) {
   const { id: chatId, bot } = await ensureBotChat(db, { tenantId, userId });
-  await db.query(`insert into team_messages(tenant_id, chat_id, user_id, body, important, meta) values ($1,$2,$3,$4,$5,$6)`, [tenantId, chatId, bot, body.slice(0, 4000), important, meta ? JSON.stringify(meta) : null]);
+  const id = (await db.query(`insert into team_messages(tenant_id, chat_id, user_id, body, important, meta) values ($1,$2,$3,$4,$5,$6) returning id`, [tenantId, chatId, bot, body.slice(0, 4000), important, meta ? JSON.stringify(meta) : null])).rows[0].id as string;
   await db.query('update team_chats set last_message_at = now() where id = $1', [chatId]);
   await db.query('update team_members set last_read_at = now() where chat_id = $1 and user_id = $2', [chatId, bot]);
+  return id;
 }
 
 /** «Кто подтвердил» — ближайшие собрания, где пользователь организатор или участник */

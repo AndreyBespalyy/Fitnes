@@ -4,10 +4,11 @@
 import { useEffect, useRef, useState, type CSSProperties } from 'react';
 import { api, type Go } from './api.ts';
 import { SituationDialog } from './agent.tsx';
+import { RateButtons } from './team/rate.tsx';
 import { errText, toast } from './ui.ts';
 
 type Note = { id: string; kind: string; title: string; body: string | null; link: Go | null; createdAt: string; readAt: string | null;
-  objectType?: string | null; objectId?: string | null; actions?: string[] | null; acted?: string | null };
+  objectType?: string | null; objectId?: string | null; actions?: string[] | null; acted?: string | null; rating?: number | null };
 
 // Кнопки карточки ИИ-помощника: что можно сделать прямо из уведомления
 const ACTION: Record<string, string> = { brief: 'Коротко о ситуации', open: 'Открыть', chat: 'Открыть переписку', snooze_1h: 'Через час', snooze_tomorrow: 'Завтра',
@@ -90,6 +91,7 @@ export function NotificationsBell({ go, openPerson }: { go: (g: Go) => void; ope
                 {!!n.actions?.length && (
                   <div className="bell-acts">{n.actions.filter((a) => a !== 'brief' || n.objectType === 'task' || n.objectType === 'opportunity').map((a) => (
                     <button key={a} type="button" className={`btn sm ${a === 'brief' ? 'brief-btn' : ''}`} onClick={() => act(n, a)}>{a === 'brief' ? '✦ ' : ''}{ACTION[a] ?? a}</button>))}</div>)}
+                {n.kind.startsWith('agent_') && <div className="bell-rate"><RateButtons compact url={`/api/agent/notifications/${n.id}/rate`} value={n.rating} /></div>}
               </li>
             ))}
           </ul>

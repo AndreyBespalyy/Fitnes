@@ -7,6 +7,7 @@ import { can } from '../auth.ts';
 import { audit, type Ctx, type Db } from '../db.ts';
 import { PERMISSIONS as P } from '../roles.ts';
 import { ygptComplete, ygptJson, type YandexConfig } from '../lib/yandex.ts';
+import { goodExamples } from './agentLearn.ts';
 import { classesText, clientClasses, fmtDate, noContacts, situationBrief } from './agent.ts';
 import { card, leastLoaded, reassignOpenWork } from './agentReminders.ts';
 import { clientsFact, kpi, lightOf, monthInfo, planFact, salesFact, targets } from './dash.ts';
@@ -550,7 +551,7 @@ export async function ownerAnswer(db: Db, ctx: Ctx, text: string, yandex: Yandex
   if (yandex && (want.has('advice') || tipsRule.length)) {
     try {
       const facts = noContacts(sections.map((s) => `${s.title}\n${s.lines.join('\n')}`).join('\n\n')).slice(0, 6000);
-      const llm = (await ygptComplete(yandex, ADVICE_PROMPT, `Вопрос: ${noContacts(text)}\n\n${facts}`, { temperature: 0.3, maxTokens: 900 })).trim();
+      const llm = (await ygptComplete(yandex, ADVICE_PROMPT + (await goodExamples(db, ['chat:owner', 'chat:weekly'])), `Вопрос: ${noContacts(text)}\n\n${facts}`, { temperature: 0.3, maxTokens: 900 })).trim();
       if (llm) advice = llm;
     } catch { /* советы по правилам */ }
   }

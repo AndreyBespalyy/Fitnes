@@ -13,7 +13,8 @@ import { fmtDate, situationBrief } from './agent.ts';
 import { processDigest, processFromText } from './agentProcesses.ts';
 import { ROLE_NAME } from './agentProcesses.ts';
 import { WEEKLY_RE, weeklyChatAnswer } from './agentWeekly.ts';
-import { HINTS_RE, hintsChatAnswer } from './agentMorning.ts';
+import { HINTS_RE, hintsChatAnswer, roleOf } from './agentMorning.ts';
+import { recordSuggestion } from './agentLearn.ts';
 import { MEETING_RE, MEETING_STATUS_RE, meetingPendingReply, meetingStatus, proposeMeeting } from './agentMeetings.ts';
 import { OWNER_HELP, isLeader, ownerAnswer, ownerPendingReply } from './agentOwner.ts';
 
@@ -48,11 +49,27 @@ export async function ensureBotChat(db: Db, ctx: Pick<Ctx, 'tenantId' | 'userId'
   return { id, bot };
 }
 
-async function say(db: Db, tenantId: string, chatId: string, bot: string, text: string) {
-  await db.query(`insert into team_messages(tenant_id, chat_id, user_id, body) values ($1,$2,$3,$4)`, [tenantId, chatId, bot, text.slice(0, 4000)]);
+async function say(db: Db, tenantId: string, chatId: string, bot: string, text: string, meta: Record<string, unknown> | null = null) {
+  const id = (await db.query(`insert into team_messages(tenant_id, chat_id, user_id, body, meta) values ($1,$2,$3,$4,$5) returning id`, [tenantId, chatId, bot, text.slice(0, 4000), meta ? JSON.stringify(meta) : null])).rows[0].id as string;
   await db.query('update team_chats set last_message_at = now() where id = $1', [chatId]);
   await db.query('update team_members set last_read_at = now() where chat_id = $1 and user_id = $2', [chatId, bot]);
+  return id;
 }
+
+/** Тип ответа помощника — для учёта, какие ответы полезны */
+export function chatKind(text: string, leader: boolean) {
+  const t = text.trim();
+  if (MEETING_STATUS_RE.test(t) || MEETING_RE.test(t)) return 'chat:meeting';
+  if (WEEKLY_RE.test(t)) return 'chat:weekly';
+  if (/процесс/i.test(t)) return 'chat:process';
+  const k = ruleIntent(t).kind;
+  if (k === 'list' || k === 'overdue' || k === 'snooze' || k === 'create') return 'chat:tasks';
+  if (k === 'brief') return 'chat:brief';
+  if (leader) return 'chat:owner';
+  return 'chat:other';
+}
+/** Короткие служебные ответы («Поставил задачу», «Не понял») не оцениваем — только содержательные */
+const rateable = (reply: string) => reply.length >= 120 && !/^(Не понял|Не нашёл|Не вижу|Нашёл несколько)/.test(reply);
 
 /** Чат сотрудника с помощником? Тогда возвращает id помощника */
 export async function botPeer(db: Db, chatId: string, userId: string) {
@@ -175,11 +192,16 @@ kind — list (показать задачи), overdue (просроченные
 ref — номер задачи из списка или имя клиента, как написал сотрудник; when — когда, словами по-русски («завтра в 12», «через 2 часа»); title — текст новой задачи;
 reply — если kind=unknown: короткий дружелюбный ответ по делу (без выдумок о данных CRM).`;
 
-export async function botReply(db: Db, ctx: Ctx, text: string, yandex: YandexConfig | null): Promise<string> {
+export async function botReply(db: Db, ctx: Ctx, text: string, yandex: YandexConfig | null, out?: { meta?: Record<string, unknown>; sids?: string[] }): Promise<string> {
   const leader = isLeader(ctx);
   // Руководитель: сначала — ответ на уточняющий вопрос помощника и команды «напомни Марии» / «передай задачи Марии Ксении»
   if (MEETING_STATUS_RE.test(text)) return meetingStatus(db, ctx);
-  if (HINTS_RE.test(text.trim())) return hintsChatAnswer(db, ctx);
+  if (HINTS_RE.test(text.trim())) {
+    const h = await hintsChatAnswer(db, ctx);
+    if (typeof h === 'string') return h;
+    if (out) { out.meta = h.meta; out.sids = h.sids; }
+    return h.text;
+  }
   if (leader) {
     const mp = await meetingPendingReply(db, ctx, text);
     if (mp) return mp;
@@ -254,8 +276,22 @@ export async function handleBotMessage(pool: pg.Pool, ctx: Ctx, chatId: string, 
       const bot = await botPeer(db, chatId, ctx.userId);
       if (!bot) return;
       await db.query('update team_members set last_read_at = now() where chat_id = $1 and user_id = $2', [chatId, bot]);
-      const reply = await botReply(db, ctx, text, yandex);
-      await say(db, ctx.tenantId, chatId, bot, reply);
+      const out: { meta?: Record<string, unknown>; sids?: string[] } = {};
+      const reply = await botReply(db, ctx, text, yandex, out);
+      if (out.sids?.length) {
+        // «Подсказки на сегодня» — каждую подсказку можно оценить отдельно
+        const msgId = await say(db, ctx.tenantId, chatId, bot, reply, out.meta);
+        await db.query(`update agent_suggestions set message_id = $1 where id = any($2)`, [msgId, out.sids]);
+        return;
+      }
+      const msgId = await say(db, ctx.tenantId, chatId, bot, reply);
+      // Ответ помощника тоже учится: его можно оценить, удачные ответы становятся образцами для нейросети
+      if (rateable(reply)) {
+        const role = await roleOf(db, ctx.userId, null);
+        const clubId = (await clubOf(db, ctx.userId))?.id ?? null;
+        const sid = await recordSuggestion(db, { clubId, userId: ctx.userId, role, source: 'chat', kind: chatKind(text, isLeader(ctx)), body: reply, question: text, messageId: msgId });
+        await db.query(`update team_messages set meta = $2 where id = $1`, [msgId, JSON.stringify({ kind: 'agent_answer', sid })]);
+      }
     });
   } catch (e) { console.error('ИИ-помощник в мессенджере:', (e as Error).message); }
 }
