@@ -27,7 +27,9 @@ test('собственник видит по ролям: входы, разде�
   assert.equal((await req('POST', '/api/shifts/open', 'd.lis', { clubId: centr, openingCashKop: 500000 })).statusCode, 200);
   assert.equal((await req('POST', '/api/test-notes', 'a.kim', { pageKey: 'schedule', pageLabel: 'Расписание', kind: 'idea', body: 'Хочу видеть свободные окна' })).statusCode, 201);
 
-  assert.equal((await req('GET', '/api/activity', 'o.smirnov')).statusCode, 403, 'управляющему нельзя');
+  const gm = await req('GET', '/api/activity', 'o.smirnov'); // управляющему — только сотрудники своих клубов (проверка CRM 17.11.2026)
+  assert.equal(gm.statusCode, 200, gm.body);
+  assert.ok(!JSON.stringify(gm.json()).includes('Беспалый'), 'сетевых руководителей управляющий не видит');
   assert.equal((await req('GET', '/api/activity', 'd.lis')).statusCode, 403);
   const r = await req('GET', '/api/activity?hours=24', 'a.bespalyy');
   assert.equal(r.statusCode, 200, r.body);

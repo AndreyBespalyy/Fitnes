@@ -51,7 +51,10 @@ test('план клуба и менеджеров: права, проверки,
   const zuev = await uid('i.zuev');
   const body = { clubId: c1, month: m, club: { new: { amountKop: 10_000_000, avgCheckKop: 650_000 } }, managers: { [volkova]: { new: { amountKop: 7_000_000 } } } };
   assert.equal((await req('PUT', '/api/plans', 'm.volkova', body)).statusCode, 403);
-  assert.equal((await req('PUT', '/api/plans', 'o.astafeva', body)).statusCode, 403);
+  // РОП правит только план менеджеров: план клуба из его запроса не сохраняется (проверка CRM 17.11.2026)
+  const clubBefore = (await req('GET', `/api/plans?clubId=${c1}&month=${m}`, 'o.astafeva')).json().club?.new?.amountKop ?? null;
+  assert.equal((await req('PUT', '/api/plans', 'o.astafeva', body)).statusCode, 200);
+  assert.equal((await req('GET', `/api/plans?clubId=${c1}&month=${m}`, 'o.astafeva')).json().club?.new?.amountKop ?? null, clubBefore);
   assert.equal((await req('PUT', '/api/plans', 'o.smirnov', { ...body, managers: { [zuev]: { new: { amountKop: 1 } } } })).statusCode, 400);
   assert.equal((await req('PUT', '/api/plans', 'o.smirnov', { ...body, club: { new: { amountKop: -5 } } })).statusCode, 400);
   assert.equal((await req('PUT', '/api/plans', 's.pavlov', body)).statusCode, 400); // чужой клуб не виден
@@ -116,7 +119,7 @@ test('конверсия лид → контакт → встреча → пок
   assert.ok(src.rows.find((r: { name: string }) => r.name === 'Telegram').bought >= 1);
   assert.equal(src.total.leads, src.rows.reduce((a: number, r: { leads: number }) => a + r.leads, 0));
   // KPI Зуева: встречи и продажа видны, норма задаётся клубом
-  assert.equal((await req('PUT', '/api/kpi-norms', 'o.astafeva', { clubId: c2, norms: { calls: 10 } })).statusCode, 403);
+  assert.equal((await req('PUT', '/api/kpi-norms', 'm.volkova', { clubId: c2, norms: { calls: 10 } })).statusCode, 403);
   assert.equal((await req('PUT', '/api/kpi-norms', 's.pavlov', { clubId: c2, norms: { calls: -1 } })).statusCode, 400);
   assert.equal((await req('PUT', '/api/kpi-norms', 's.pavlov', { clubId: c2, norms: { meetings_set: 1, sales: 1 } })).statusCode, 200);
   const k = (await req('GET', '/api/dash/widget/my_kpi', 'i.zuev')).json();

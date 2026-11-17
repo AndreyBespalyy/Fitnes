@@ -41,18 +41,19 @@ test('разбор просьбы словами: типовые фразы', ()
 
 test('AT08: ИИ предлагает изменение — рабочие настройки не меняются, пока человек не утвердил и не опубликовал', async () => {
   const before = await live();
-  const r = await req('POST', '/api/config/assistant', 'o.astafeva', { clubId: centr, text: 'срок первого ответа 12 минут, норма звонков 55' });
+  assert.equal((await req('POST', '/api/config/assistant', 'o.astafeva', { clubId: centr, text: 'норма звонков 55' })).statusCode, 403);
+  const r = await req('POST', '/api/config/assistant', 'o.smirnov', { clubId: centr, text: 'срок первого ответа 12 минут, норма звонков 55' });
   assert.equal(r.statusCode, 201, r.body);
   const a = r.json();
   assert.equal(a.understood, true);
   assert.deepEqual(a.diff.map((d: { path: string }) => d.path).sort(), ['club.firstResponseMinutes', 'kpi.norms.calls']);
   assert.deepEqual(await live(), before);
   assert.equal((await sql('select first_response_minutes from clubs where id = $1', [centr]))[0].first_response_minutes, before.club.firstResponseMinutes);
-  // РОП может предложить, но не утвердить; без проверки утвердить нельзя даже управляющему
+  // РОП больше не правит общие настройки (проверка CRM 17.11.2026: у него право sales.manage); без проверки утвердить нельзя даже управляющему
   assert.equal((await req('POST', `/api/config/versions/${a.versionId}/approve`, 'o.astafeva')).statusCode, 403);
   assert.equal((await req('POST', `/api/config/versions/${a.versionId}/approve`, 'o.smirnov')).json().error, 'check_required');
   assert.equal((await req('POST', `/api/config/versions/${a.versionId}/publish`, 'o.smirnov')).json().error, 'approval_required');
-  const ch = (await req('POST', `/api/config/versions/${a.versionId}/check`, 'o.astafeva')).json();
+  const ch = (await req('POST', `/api/config/versions/${a.versionId}/check`, 'o.smirnov')).json();
   assert.equal(ch.ok, true, JSON.stringify(ch));
   assert.ok(ch.history.some((h: { path: string }) => h.path === 'club.firstResponseMinutes'));
   assert.equal((await req('POST', `/api/config/versions/${a.versionId}/approve`, 'o.smirnov')).statusCode, 200);
@@ -68,7 +69,7 @@ test('AT09: после утверждения ИИ поменял чернови
   const d = (await req('POST', '/api/config/versions', 'o.smirnov', { clubId: centr, changes: [{ path: 'membership.renewalReminderDays', value: 21 }] })).json();
   await req('POST', `/api/config/versions/${d.id}/check`, 'o.smirnov');
   assert.equal((await req('POST', `/api/config/versions/${d.id}/approve`, 'o.smirnov')).statusCode, 200);
-  const r = (await req('POST', '/api/config/assistant', 'o.astafeva', { clubId: centr, versionId: d.id, text: 'и рассрочку до 6 платежей' })).json();
+  const r = (await req('POST', '/api/config/assistant', 'o.smirnov', { clubId: centr, versionId: d.id, text: 'и рассрочку до 6 платежей' })).json();
   assert.equal(r.status, 'draft');
   const p = await req('POST', `/api/config/versions/${d.id}/publish`, 'o.smirnov');
   assert.equal(p.json().error, 'approval_required');
@@ -111,13 +112,13 @@ test('AT10: новая версия ломает проверку — публи
 });
 
 test('AT39: новое правило сначала проверяется на истории, результат виден до включения', async () => {
-  const r = (await req('POST', '/api/config/backtest', 'o.astafeva', { clubId: centr, changes: [{ path: 'messaging.triggers.inactive.enabled', value: true }, { path: 'messaging.triggers.inactive.days', value: 10 }] })).json();
+  const r = (await req('POST', '/api/config/backtest', 'o.smirnov', { clubId: centr, changes: [{ path: 'messaging.triggers.inactive.enabled', value: true }, { path: 'messaging.triggers.inactive.days', value: 10 }] })).json();
   const bt = r.find((x: { path: string }) => x.path === 'messaging.triggers.inactive');
   assert.ok(bt, JSON.stringify(r));
   assert.match(bt.summary, /последние 30 дней: \d+ сообщ\. \d+ клиентам/);
   // Проверка черновика включает тот же расчёт, и без него утверждение невозможно
-  const d = (await req('POST', '/api/config/versions', 'o.astafeva', { clubId: centr, changes: [{ path: 'messaging.triggers.inactive.enabled', value: true }] })).json();
-  const ch = (await req('POST', `/api/config/versions/${d.id}/check`, 'o.astafeva')).json();
+  const d = (await req('POST', '/api/config/versions', 'o.smirnov', { clubId: centr, changes: [{ path: 'messaging.triggers.inactive.enabled', value: true }] })).json();
+  const ch = (await req('POST', `/api/config/versions/${d.id}/check`, 'o.smirnov')).json();
   assert.ok(ch.history.some((h: { path: string; summary: string }) => h.path === 'messaging.triggers.inactive' && /30 дней/.test(h.summary)));
   assert.equal((await sql(`select enabled from msg_triggers where club_id = $1 and event = 'inactive'`, [centr]))[0].enabled, false);
 });
