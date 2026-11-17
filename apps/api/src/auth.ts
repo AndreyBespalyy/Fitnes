@@ -15,6 +15,12 @@ export const IP_ALERT_LOGINS = 5;
 const MOBILE_ROLES = new Set(['manager', 'desk', 'trainer']);
 const HOURS = 3600_000;
 
+// Логины латиницей; кириллические двойники (а, е, о, р, с, у, х…) после случайного переключения раскладки
+// выглядят так же, но не совпадают. Заменяем их на латиницу и убираем невидимые символы.
+const LOOKALIKE: Record<string, string> = { а: 'a', в: 'b', е: 'e', ё: 'e', к: 'k', м: 'm', н: 'h', о: 'o', р: 'p', с: 'c', т: 't', у: 'y', х: 'x', і: 'i' };
+export const normLogin = (s: string) => s.normalize('NFKC').replace(/[\u200b-\u200d\u2060\ufeff\u00a0\s]/g, '').toLowerCase()
+  .replace(/[авеёкмнорстухі]/g, (c) => LOOKALIKE[c] ?? c);
+
 const sha256 = (s: string) => createHash('sha256').update(s).digest('hex');
 
 declare module 'fastify' {
@@ -88,18 +94,19 @@ export async function me(pool: pg.Pool, ctx: Ctx, mustChange: boolean) {
 
 export function authRoutes(app: FastifyInstance, pool: pg.Pool, opts: { secureCookie: boolean }) {
   app.post('/api/auth/login', async (req, reply) => {
-    const { login, password } = (req.body ?? {}) as { login?: string; password?: string };
+    let { login, password } = (req.body ?? {}) as { login?: string; password?: string };
     if (!login || !password) throw badRequest('Введите логин и пароль');
+    login = normLogin(login);
     const ip = req.ip;
     const ipf = (await pool.query('select * from auth_ip_fails($1, $2)', [ip, IP_WINDOW_MIN])).rows[0];
     if (ipf.fails >= IP_MAX_FAILS) {
       const wait = Math.max(1, Math.ceil((new Date(ipf.first_at).getTime() + IP_WINDOW_MIN * 60_000 - Date.now()) / 60_000));
       throw new HttpError(429, `Слишком много неудачных попыток входа с этого адреса. Попробуйте через ${wait} мин.`, 'ip_limited');
     }
-    const u = (await pool.query('select * from auth_find_user($1)', [login.trim()])).rows[0];
+    const u = (await pool.query('select * from auth_find_user($1)', [login])).rows[0];
     const invalid = new HttpError(401, 'Неверный логин или пароль', 'invalid_credentials');
     const failed = async (tenantId: string | null) => {
-      await pool.query('select auth_note_attempt($1, $2, $3, false)', [ip, login.trim(), tenantId]);
+      await pool.query('select auth_note_attempt($1, $2, $3, false)', [ip, login, tenantId]);
       await ipAlert(pool, ip).catch(() => null);
     };
     if (!u) { await failed(null); throw invalid; }
@@ -131,7 +138,7 @@ export function authRoutes(app: FastifyInstance, pool: pg.Pool, opts: { secureCo
     const result = await withCtx(pool, tctx, async (db) => {
       await db.query('update users set failed_attempts = 0, locked_until = null where id = $1', [u.id]);
       // Личные пароли обязательны: общий, простой или ни разу не сменённый пароль — сразу на смену
-      if (u.require_personal && !u.must_change_password && (!u.password_changed_at || checkPasswordPolicy(password, login.trim()))) {
+      if (u.require_personal && !u.must_change_password && (!u.password_changed_at || checkPasswordPolicy(password, login))) {
         await db.query('update users set must_change_password = true where id = $1', [u.id]);
         await audit(db, actx, 'auth.must_change_forced', 'user', u.id, null, null);
       }
@@ -144,7 +151,7 @@ export function authRoutes(app: FastifyInstance, pool: pg.Pool, opts: { secureCo
       await audit(db, actx, 'auth.login', 'user', u.id, null, null);
       return ttl;
     });
-    await pool.query('select auth_note_attempt($1, $2, $3, true)', [ip, login.trim(), u.tenant_id]);
+    await pool.query('select auth_note_attempt($1, $2, $3, true)', [ip, login, u.tenant_id]);
     reply.setCookie(COOKIE, token, { path: '/', httpOnly: true, sameSite: 'lax', secure: opts.secureCookie, maxAge: result / 1000 });
     const loaded = await loadCtx(pool, token, req.ip);
     return me(pool, loaded!.ctx, loaded!.mustChange);
