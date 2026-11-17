@@ -6,22 +6,42 @@ import { api, can, navParams, type Club, type Me } from './api.ts';
 import { dt, errText, toast } from './ui.ts';
 import { TeamChat } from './team/chat.tsx';
 import './team/team.css';
+import { InstallWizard } from './installWizard.tsx';
 
 export function TeamPage({ me, clubs, clubId }: { me: Me; clubs: Club[]; clubId: string }) {
   const [view, setView] = useState<'chats' | 'invite'>(() => (navParams('team').view === 'invite' ? 'invite' : 'chats'));
   const [chat] = useState(() => navParams('team').chat ?? new URLSearchParams(location.search).get('chat'));
   const canInvite = can(me, 'staff.manage');
+  const [install, setInstall] = useState(() => navParams('team').view === 'install');
+  // undefined — ещё не знаем, null — приложение не установлено, иначе — на каком устройстве стоит
+  const [phone, setPhone] = useState<string | null | undefined>(undefined);
+  useEffect(() => { api<{ platform: string | null }>('GET', '/api/team/installed').then((r) => setPhone(r.platform)).catch(() => setPhone(null)); }, []);
   return (
     <>
       <div className="row between">
         <div><div className="lbl">Рабочая связь внутри CRM</div><h1>Мессенджер</h1></div>
-        {canInvite && (
-          <div className="tabs" role="group" aria-label="Мессенджер">
-            <button aria-pressed={view === 'chats'} onClick={() => setView('chats')}>Чаты</button>
-            <button aria-pressed={view === 'invite'} onClick={() => setView('invite')}>Приложение для сотрудников</button>
-          </div>
-        )}
+        <div className="row" style={{ gap: 8, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+          {phone === null ? <button className="btn pri" onClick={() => setInstall(true)}><span aria-hidden="true">📲</span> Установить мессенджер на телефон</button>
+            : phone && <button className="btn sm" onClick={() => setInstall(true)} title="Инструкция по установке">✓ Мессенджер установлен ({PLATFORM[phone] ?? phone}) · как поставить ещё</button>}
+          {canInvite && (
+            <div className="tabs" role="group" aria-label="Мессенджер">
+              <button aria-pressed={view === 'chats'} onClick={() => setView('chats')}>Чаты</button>
+              <button aria-pressed={view === 'invite'} onClick={() => setView('invite')}>Приложение для сотрудников</button>
+            </div>
+          )}
+        </div>
       </div>
+      {install && (
+        <div className="modal-bg" onClick={(e) => e.target === e.currentTarget && setInstall(false)}>
+          <div className="modal card" role="dialog" aria-modal="true" aria-label="Установить мессенджер на телефон" style={{ maxWidth: 640, display: 'grid', gap: 10 }}>
+            <div className="row between" style={{ alignItems: 'flex-start', gap: 8 }}>
+              <div><h2 style={{ margin: 0 }}>Установить мессенджер на телефон</h2><div className="small muted">Без App Store и Google Play. Логин и пароль — те же, что для CRM.</div></div>
+              <button className="btn sm" onClick={() => setInstall(false)} aria-label="Закрыть">✕</button>
+            </div>
+            <InstallWizard app="team" />
+          </div>
+        </div>
+      )}
       {view === 'chats' ? <TeamChat meId={me.id} initialChat={chat} /> : <Invites me={me} clubs={clubs} clubId={clubId} />}
     </>
   );

@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from 'react';
 import { api, can, clearFailed, onNet, netState, flushQueue, type Me, type NetState } from './api.ts';
 import { dt, errText, toast } from './ui.ts';
 import { StaffBotBlock, TelegramBlock } from './telegram.tsx';
+import { InstallWizard } from './installWizard.tsx';
 
 /* ---------- служебный файл приложения ---------- */
 export function registerServiceWorker(onOpen: (url: string) => void) {
@@ -145,20 +146,11 @@ function DevicesBlock() {
 }
 
 function InstallBlock() {
-  const [prompt, setPrompt] = useState<(Event & { prompt: () => Promise<void> }) | null>(null);
-  useEffect(() => {
-    const h = (e: Event) => { e.preventDefault(); setPrompt(e as Event & { prompt: () => Promise<void> }); };
-    window.addEventListener('beforeinstallprompt', h);
-    return () => window.removeEventListener('beforeinstallprompt', h);
-  }, []);
-  if (standalone()) return <div className="card"><h2 style={{ margin: 0 }}>Приложение на телефоне</h2><p className="small" style={{ margin: '6px 0 0' }}>Вы работаете в установленном приложении.</p></div>;
   return (
     <div className="card" style={{ display: 'grid', gap: 8 }}>
       <h2 style={{ margin: 0 }}>Установить на телефон</h2>
-      {prompt && <div><button className="btn pri" onClick={() => prompt.prompt().then(() => setPrompt(null))}>Установить приложение</button></div>}
-      <div className="small"><b>iPhone (Safari):</b> кнопка «Поделиться» внизу экрана → «На экран „Домой“» → «Добавить». Затем откройте «Клубная ОС» с экрана «Домой» и включите уведомления.</div>
-      <div className="small"><b>Android (Chrome или Яндекс Браузер):</b> меню ⋮ → «Установить приложение» или «Добавить на главный экран».</div>
-      <div className="small muted">Магазины приложений не нужны: обновления приходят сами при следующем открытии.</div>
+      <p className="small muted" style={{ margin: 0 }}>Магазины приложений не нужны: значок ставится из браузера за минуту, обновления приходят сами.</p>
+      <InstallWizard app="crm" />
     </div>
   );
 }

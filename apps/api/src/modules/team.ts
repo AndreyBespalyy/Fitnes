@@ -492,6 +492,15 @@ export function teamRoutes(app: FastifyInstance, pool: pg.Pool, storage: string,
   });
 
   /* ----- Приложение-мессенджер на телефоне ----- */
+  // Стоит ли у сотрудника приложение-мессенджер: кнопку «Установить мессенджер на телефон» показываем тем, у кого его нет
+  app.get('/api/team/installed', async (req) => {
+    const ctx = requireCtx(req);
+    return withCtx(pool, ctx, async (db) => {
+      const r = (await db.query(`select platform, last_at as "lastAt" from team_app_installs where user_id = $1`, [ctx.userId])).rows[0];
+      return { platform: (r?.platform as string | undefined) ?? null, lastAt: r?.lastAt ?? null };
+    });
+  });
+
   app.post('/api/team/installed', async (req) => {
     const ctx = requireCtx(req);
     const p = ((req.body ?? {}) as { platform?: string }).platform;

@@ -9,6 +9,7 @@ import { NotificationsBell } from './notifications.tsx';
 import { IncomingCall, PbxSettings } from './telephony.tsx';
 import { AiButton, TeamButton } from './team/button.tsx';
 import { TestNotesWidget } from './testNotes.tsx';
+import { InstallWizard } from './installWizard.tsx';
 import { inRoleMenu, ownerOnly, trainerOnly } from './roleMenu.ts';
 
 // Разделы грузятся по мере открытия: первый вход быстрее, особенно на планшете ресепшна
@@ -78,11 +79,28 @@ export function App() {
   const [noNet, setNoNet] = useState(false);
   const loadMe = () => { setNoNet(false); api<Me>('GET', '/api/auth/me').then(setMe).catch((x) => (x instanceof ApiError && x.code === 'offline' ? setNoNet(true) : setMe(null))); };
   useEffect(loadMe, []);
+  // Ссылка «открыть на телефоне» из профиля: сначала пошаговая установка, потом вход
+  const [install, setInstall] = useState(() => new URLSearchParams(location.search).has('install'));
+  if (install) return <InstallPage onDone={() => { setInstall(false); const u = new URL(location.href); u.searchParams.delete('install'); history.replaceState(null, '', u.toString()); }} />;
   if (noNet) return <div className="login"><div className="card" style={{ display: 'grid', gap: 10 }}><b>Нет связи с сервером</b><span className="small muted">Проверьте интернет на телефоне и попробуйте снова.</span><button className="btn pri" onClick={loadMe}>Повторить</button></div></div>;
   if (me === undefined) return <div className="login"><span className="muted">Загрузка…</span></div>;
   if (me === null) return <Login onDone={setMe} />;
   if (me.mustChangePassword) return <ChangePassword me={me} forced onDone={() => setMe({ ...me, mustChangePassword: false })} onLogout={() => setMe(null)} />;
   return <Shell me={me} onLogout={() => setMe(null)} />;
+}
+
+function InstallPage({ onDone }: { onDone: () => void }) {
+  return (
+    <div className="login" style={{ placeItems: 'start center' }}>
+      <div className="card" style={{ display: 'grid', gap: 10, width: 'min(640px, 100%)' }}>
+        <div className="lbl">Клубная ОС</div>
+        <h1 style={{ margin: 0 }}>Установите CRM на телефон</h1>
+        <p className="small muted" style={{ margin: 0 }}>Без App Store и Google Play — значок ставится из браузера за минуту. Логин и пароль — те же, что на компьютере.</p>
+        <InstallWizard app="crm" />
+        <button className="btn" onClick={onDone}>Открыть CRM без установки</button>
+      </div>
+    </div>
+  );
 }
 
 function Login({ onDone }: { onDone: (m: Me) => void }) {
