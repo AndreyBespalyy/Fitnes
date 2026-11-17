@@ -6,7 +6,7 @@ import { RateButtons } from './rate.tsx';
 export type ChatItem = {
   id: string; kind: 'direct' | 'group' | 'club' | 'dept'; title: string; clubId: string | null; dept: string | null; onlyAdminsPost: boolean; isAdmin: boolean; muted: boolean;
   at: string; unread: number; members: number; lastBody: string | null; lastFile: boolean | null; lastAuthor: string | null; lastMine: boolean | null; lastSystem: boolean | null;
-  peerId: string | null; peerName: string | null; peerApp: string | null;
+  peerId: string | null; peerName: string | null; peerApp: string | null; advice?: number;
 };
 type Member = { id: string; fullName: string; isAdmin: boolean; auto: boolean; lastReadAt: string; roles: string | null; app: string | null };
 type ChatInfo = { id: string; kind: ChatItem['kind']; title: string; onlyAdminsPost: boolean; isAdmin: boolean; muted: boolean; canAnnounce: boolean; canPost: boolean; canManage: boolean; members: Member[] };
@@ -89,6 +89,7 @@ export function TeamChat({ meId, initialChat, onUnread, emptyHint, header }: { m
   const [active, setActive] = useState<string | null>(initialChat ?? null);
   const [q, setQ] = useState('');
   const [creating, setCreating] = useState(false);
+  const [draft, setDraft] = useState<{ chat: string; text: string } | null>(null);
   const loadList = () => api<ChatItem[]>('GET', '/api/team/chats').then((l) => { setList(l); setListErr(''); }).catch((x) => setListErr(err(x)));
   useEffect(() => {
     loadList();
@@ -112,7 +113,9 @@ export function TeamChat({ meId, initialChat, onUnread, emptyHint, header }: { m
     return (list ?? []).filter((c) => !s || c.title.toLowerCase().includes(s));
   }, [list, q]);
   const activeItem = list?.find((c) => c.id === active);
-  const openAi = async () => { try { const r = await api<{ id: string }>('POST', '/api/agent/chat'); await loadList(); open(r.id); } catch (x) { setListErr(err(x)); } };
+  const openAi = async (text?: string) => {
+    try { const r = await api<{ id: string }>('POST', '/api/agent/chat'); if (text) setDraft({ chat: r.id, text }); await loadList(); open(r.id); } catch (x) { setListErr(err(x)); }
+  };
 
   return (
     <div className={`tm ${active ? 'has-active' : ''}`}>
@@ -122,7 +125,7 @@ export function TeamChat({ meId, initialChat, onUnread, emptyHint, header }: { m
           <h2>Чаты</h2>
           <button className="tm-icon-btn pri" onClick={() => setCreating(true)} aria-label="Новый чат" title="Новый чат"><Ico d={I.plus} /></button>
         </div>
-        <button className="tm-ai" onClick={openAi} title="Спросите о задачах, перенесите срок, узнайте суть ситуации по клиенту">
+        <button className="tm-ai" onClick={() => void openAi()} title="Спросите о задачах, перенесите срок, узнайте суть ситуации по клиенту">
           <span className="tm-ai-ico" aria-hidden="true">✦</span><span><b>ИИ-помощник</b><small>«мои задачи», «перенеси Анну на завтра»</small></span></button>
         <label className="tm-search"><Ico d={I.search} s={16} /><input type="search" value={q} onChange={(e) => setQ(e.target.value)} placeholder="Найти чат" aria-label="Найти чат" /></label>
         {listErr && <div className="tm-err">{listErr}</div>}
@@ -139,6 +142,7 @@ export function TeamChat({ meId, initialChat, onUnread, emptyHint, header }: { m
                       {c.lastBody === null && !c.lastFile ? <i>{c.kind === 'direct' ? 'Напишите первым' : `${c.members} участн.`}</i>
                         : <>{c.lastSystem ? '' : c.lastMine ? 'Вы: ' : c.kind !== 'direct' && c.lastAuthor ? `${c.lastAuthor.split(' ')[0]}: ` : ''}{c.lastBody?.replace(/\*\*/g, '') || (c.lastFile ? '📎 Файл' : '')}</>}
                     </span>
+                    {!!c.advice && <span className="tm-adv-dot" title="ИИ-помощник подсказывает, что сделать по этой переписке">✦</span>}
                     {c.muted && <span className="tm-muted-ico" title="Без уведомлений"><Ico d={I.mute} s={14} /></span>}
                     {c.unread > 0 && <span className={`tm-badge ${c.muted ? 'grey' : ''}`}>{c.unread > 99 ? '99+' : c.unread}</span>}
                   </span>
@@ -150,7 +154,8 @@ export function TeamChat({ meId, initialChat, onUnread, emptyHint, header }: { m
         {list && list.length === 0 && <p className="tm-muted tm-pad">Чатов пока нет. Нажмите «+», чтобы написать коллеге или создать группу.</p>}
       </aside>
       <section className="tm-conv">
-        {active ? <Conversation key={active} id={active} meId={meId} item={activeItem} onBack={() => open(null)} onChanged={loadList} onLeft={() => { open(null); loadList(); }} />
+        {active ? <Conversation key={active} id={active} meId={meId} item={activeItem} onBack={() => open(null)} onChanged={loadList} onLeft={() => { open(null); loadList(); }}
+          initialText={draft?.chat === active ? draft.text : undefined} onAssistant={(text) => void openAi(text)} />
           : <div className="tm-empty">{emptyHint ?? <><Ico d={I.group} s={40} /><p>Выберите чат слева или начните новый</p></>}</div>}
       </section>
       {creating && <NewChat onClose={() => setCreating(false)} onOpen={(id) => { setCreating(false); loadList(); open(id); }} />}
@@ -159,13 +164,14 @@ export function TeamChat({ meId, initialChat, onUnread, emptyHint, header }: { m
 }
 
 /* ======================================================================= */
-function Conversation({ id, meId, item, onBack, onChanged, onLeft }: { id: string; meId: string; item?: ChatItem; onBack: () => void; onChanged: () => void; onLeft: () => void }) {
+function Conversation({ id, meId, item, onBack, onChanged, onLeft, initialText, onAssistant }: { id: string; meId: string; item?: ChatItem; onBack: () => void; onChanged: () => void; onLeft: () => void;
+  initialText?: string; onAssistant: (text: string) => void }) {
   const [info, setInfo] = useState<ChatInfo | null>(null);
   const [msgs, setMsgs] = useState<Msg[]>([]);
   const [reads, setReads] = useState<{ userId: string; lastReadAt: string }[]>([]);
   const [more, setMore] = useState(false);
   const [loadErr, setLoadErr] = useState('');
-  const [text, setText] = useState('');
+  const [text, setText] = useState(initialText ?? '');
   const [important, setImportant] = useState(false);
   const [reply, setReply] = useState<Msg | null>(null);
   const [edit, setEdit] = useState<Msg | null>(null);
@@ -275,6 +281,7 @@ function Conversation({ id, meId, item, onBack, onChanged, onLeft }: { id: strin
         {info && <button className="tm-icon-btn" onClick={toggleMute} aria-label={info.muted ? 'Включить уведомления' : 'Без уведомлений'} title={info.muted ? 'Уведомления выключены' : 'Уведомления включены'}><Ico d={info.muted ? I.mute : I.bell} /></button>}
         <button className="tm-icon-btn" onClick={() => setShowInfo(true)} aria-label="Участники и настройки"><Ico d={I.info} /></button>
       </header>
+      {info && !isBotChat(info, meId) ? <AdvicePanel chatId={id} onAssistant={onAssistant} onChanged={onChanged} /> : null}
       <div className="tm-msgs" ref={box} onScroll={onScroll} onClick={(e) => { if (e.target === e.currentTarget) setSel(null); }}>
         {loadErr && <div className="tm-err">{loadErr}</div>}
         {more && <button className="tm-older" onClick={loadOlder}>Показать раньше</button>}
@@ -508,5 +515,87 @@ function HintsWithRates({ body, sids, rated }: { body: string; sids: string[]; r
         </div>
       ))}
     </div>
+  );
+}
+
+/* ---------- Советы ИИ-помощника по переписке (видит только сам сотрудник) ---------- */
+type Advice = { topic: string | null; topicName: string | null; summary: string | null; engine: string | null; analyzedAt: string | null; pending: boolean;
+  items: { id: string; body: string; status: 'new' | 'started'; actionType: 'process' | 'task' | 'assistant'; actionLabel: string; result: { kind: string; id?: string; tab?: string; label: string; prompt?: string } | null }[] };
+const isBotChat = (info: ChatInfo | null, meId: string) => !!info && info.kind === 'direct' && info.members.some((m) => m.id !== meId && m.fullName === 'ИИ-помощник');
+/** Перейти в раздел CRM; из отдельного приложения-мессенджера — открыть CRM в новой вкладке */
+function goTab(tab: string) {
+  if (location.pathname.startsWith('/team')) window.open(`/?tab=${encodeURIComponent(tab)}`, '_blank');
+  else window.dispatchEvent(new CustomEvent('crm-go', { detail: `/?tab=${encodeURIComponent(tab)}` }));
+}
+
+function AdvicePanel({ chatId, onAssistant, onChanged }: { chatId: string; onAssistant: (text: string) => void; onChanged: () => void }) {
+  const [a, setA] = useState<Advice | null>(null);
+  const [open, setOpen] = useState(true);
+  const [busy, setBusy] = useState<string | null>(null);
+  const [e, setE] = useState('');
+  const load = () => api<Advice>('GET', `/api/team/chats/${chatId}/advice`).then(setA).catch(() => {});
+  useEffect(() => {
+    load();
+    const t = setInterval(() => { if (document.visibilityState === 'visible') load(); }, 20_000);
+    return () => clearInterval(t);
+  }, [chatId]);
+  // ИИ дочитывает переписку в фоне — проверяем чаще, пока не закончит
+  useEffect(() => { if (!a?.pending) return; const t = setTimeout(load, 5000); return () => clearTimeout(t); }, [a]);
+  const refresh = async () => { setBusy('refresh'); setE(''); try { setA(await api<Advice>('POST', `/api/team/chats/${chatId}/advice/refresh`)); setOpen(true); } catch (x) { setE(err(x)); } finally { setBusy(null); } };
+  const start = async (id: string) => {
+    setBusy(id); setE('');
+    try {
+      const r = await api<NonNullable<Advice['items'][number]['result']>>('POST', `/api/team/advice/${id}/start`);
+      setA((cur) => cur && { ...cur, items: cur.items.map((x) => (x.id === id ? { ...x, status: 'started', result: r } : x)) });
+      onChanged();
+      if (r.kind === 'assistant' && r.prompt) onAssistant(r.prompt);
+    } catch (x) { setE(err(x)); } finally { setBusy(null); }
+  };
+  const dismiss = async (id: string) => { try { await api('POST', `/api/team/advice/${id}/dismiss`); setA((cur) => cur && { ...cur, items: cur.items.filter((x) => x.id !== id) }); onChanged(); } catch (x) { setE(err(x)); } };
+
+  const fresh = a?.items.filter((x) => x.status === 'new').length ?? 0;
+  const hasTopic = !!a?.topic && a.topic !== 'other';
+  if (!a) return null;
+  if (!hasTopic && !a.items.length) {
+    return (
+      <div className="tm-adv tm-adv-min">
+        <button type="button" className="tm-adv-ask" onClick={refresh} disabled={!!busy} title="ИИ-помощник прочитает переписку, определит тему и подскажет, что сделать. Подсказки видите только вы">
+          ✦ {busy ? 'Читаю переписку…' : a.topic === 'other' ? 'Рабочей темы не нашёл · проверить ещё раз' : 'Что сделать по этой переписке?'}
+        </button>
+        {e && <small className="tm-adv-err">{e}</small>}
+      </div>
+    );
+  }
+  return (
+    <section className={`tm-adv ${open ? '' : 'closed'}`} aria-label="Советы ИИ-помощника по переписке">
+      <div className="tm-adv-head">
+        <button type="button" className="tm-adv-toggle" onClick={() => setOpen(!open)} aria-expanded={open}>
+          <span className="tm-adv-star" aria-hidden="true">✦</span>
+          <span>Тема: <b>{a.topicName}</b>{!open && fresh ? ` · ${fresh} ${fresh === 1 ? 'совет' : 'совета'}` : ''}</span>
+        </button>
+        {a.pending && <span className="tm-adv-pend">уточняю через ИИ…</span>}
+        <button type="button" className="tm-adv-ico" onClick={refresh} disabled={!!busy} title="Разобрать переписку заново" aria-label="Разобрать переписку заново">↻</button>
+        <button type="button" className="tm-adv-ico" onClick={() => setOpen(!open)} aria-label={open ? 'Свернуть' : 'Развернуть'}>{open ? '˄' : '˅'}</button>
+      </div>
+      {open && <>
+        {a.summary && <p className="tm-adv-sum">{a.summary}</p>}
+        <ul className="tm-adv-list">
+          {a.items.map((x) => (
+            <li key={x.id} className={x.status}>
+              <span className="tm-adv-body">{x.body}<small>{x.actionLabel}</small></span>
+              {x.status === 'new' ? <span className="tm-adv-btns">
+                <button type="button" className="tm-adv-go" disabled={!!busy} onClick={() => void start(x.id)}>{busy === x.id ? '…' : 'Начать'}</button>
+                <button type="button" className="tm-adv-x" onClick={() => void dismiss(x.id)} title="Не нужно" aria-label="Скрыть совет">✕</button>
+              </span> : <span className="tm-adv-done">✓ {x.result?.label}
+                {x.result?.tab && <button type="button" onClick={() => goTab(x.result!.tab!)}>Открыть</button>}
+                {x.result?.kind === 'assistant' && x.result.prompt && <button type="button" onClick={() => onAssistant(x.result!.prompt!)}>Открыть</button>}</span>}
+            </li>
+          ))}
+          {!a.items.length && <li className="tm-adv-none">По этой теме вам делать ничего не нужно.</li>}
+        </ul>
+        <small className="tm-adv-note">Видите только вы{a.engine === 'rules' ? ' · разобрано по ключевым словам' : ''}</small>
+      </>}
+      {e && <small className="tm-adv-err">{e}</small>}
+    </section>
   );
 }

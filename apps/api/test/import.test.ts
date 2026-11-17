@@ -71,6 +71,14 @@ test('чтение таблиц и разбор значений', () => {
   assert.equal(detectReport(['Клиент', 'Вид абонемента', 'Дата начала', 'Дата окончания', 'Стоимость'], 'файл3.xlsx').type, 'memberships');
   assert.equal(detectReport(['Клиент', 'Дата посещения', 'Зона'], 'файл4.xlsx').type, 'visits');
   assert.equal(detectReport(['Клиент', 'Задолженность', 'Аванс'], 'файл5.xlsx').type, 'balances');
+  // Список «Членства, пакеты услуг» из 1С:Фитнес клуб КОРП 4.0
+  const korp = detectReport(['Статус', 'Клиент', 'Клиент.Код', 'По порядку', 'Number', 'Номенклатура', 'Продано', 'Активирован', 'Действует до', 'Продлено'], 'Членства_Клуб.xlsx');
+  assert.equal(korp.type, 'memberships');
+  assert.equal(korp.mapping.ext_id?.col, 4);
+  assert.equal(korp.mapping.client_ext?.col, 2);
+  assert.equal(korp.mapping.contract_date?.col, 6);
+  assert.equal(korp.mapping.starts_on?.col, 7);
+  assert.equal(korp.mapping.ends_on?.col, 8);
   assert.ok(xlsx([['a']]).length > 0 && csv1251([['б']]).length > 0);
 });
 

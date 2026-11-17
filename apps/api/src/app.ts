@@ -67,6 +67,7 @@ import { platformRoutes } from './modules/platform.ts';
 import { salesOpsRoutes, startSalesOpsWorker } from './modules/salesOps.ts';
 import { testNoteRoutes } from './modules/testNotes.ts';
 import { teamRoutes, startTeamPushWorker } from './modules/team.ts';
+import { startTeamAdviceWorker, teamAdviceRoutes } from './modules/teamAdvice.ts';
 import { agentRoutes } from './modules/agent.ts';
 import { agentReminderRoutes, startAgentWorker } from './modules/agentReminders.ts';
 import { agentChatRoutes, handleBotMessage } from './modules/agentChat.ts';
@@ -187,6 +188,8 @@ export async function buildApp(pool: pg.Pool, opts: { webDist?: string; secureCo
   teamRoutes(app, pool, storage, (ctx, chatId, text) => handleBotMessage(pool, ctx, chatId, text, yandex));
   agentRoutes(app, pool, yandex);
   agentChatRoutes(app, pool);
+  // Советы по переписке в мессенджере: тему определяет свой ИИ-сервер (или YandexGPT), без них — ключевые слова
+  teamAdviceRoutes(app, pool, { ai, yandex });
   agentMeetingRoutes(app, pool);
   processRoutes(app, pool, yandex);
   weeklyRoutes(app, pool, yandex);
@@ -206,6 +209,7 @@ export async function buildApp(pool: pg.Pool, opts: { webDist?: string; secureCo
   if (opts.scheduleWorker) { const stop = startScheduleWorker(pool, opts.fetch ?? fetch); app.addHook('onClose', async () => stop()); }
   if (opts.staffBotWorker) { const stop = startStaffBotWorker(pool, opts.fetch ?? fetch); app.addHook('onClose', async () => stop()); }
   if (opts.agentWorker) { const stop = startAgentWorker(pool); app.addHook('onClose', async () => stop()); }
+  if (opts.agentWorker) { const stop = startTeamAdviceWorker(pool, { ai, yandex }); app.addHook('onClose', async () => stop()); }
   if (opts.salesOpsWorker) { const stop = startSalesOpsWorker(pool); app.addHook('onClose', async () => stop()); }
   if (opts.surveyWorker) { const stop = startSurveyWorker(pool, opts.fetch ?? fetch); app.addHook('onClose', async () => stop()); }
   if (opts.retentionWorker) { const stop = startRetentionWorker(pool, opts.fetch ?? fetch); app.addHook('onClose', async () => stop()); }

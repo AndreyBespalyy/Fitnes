@@ -138,6 +138,23 @@ class ServiceTest(unittest.TestCase):
         self.assertEqual(b["changes"], [{"path": "freeze.maxDays", "value": 30}, {"path": "late.text", "value": "Напомнить"}])
         self.assertEqual(b["unknown"], ["скидка на кофе"])
 
+    def test_chat_topic(self):
+        app.state.llm = FakeLLM({"topic": "complaint", "summary": "Клиентка жалуется на холодный душ, карта 4276 1234 5678 9012", "client": "Анна Петрова", "confidence": 0.9})
+        r = self.c.post("/v1/chat-topic", json={"messages": [
+            {"author": "Дарья Лис", "text": "Анна Петрова жалуется, что в душе холодная вода. Карта 4276 1234 5678 9012"},
+            {"author": "Олег Смирнов", "text": "Разберусь сегодня"},
+        ]}, headers=self.h)
+        self.assertEqual(r.status_code, 200, r.text)
+        b = r.json()
+        self.assertEqual(b["topic"], "complaint")
+        self.assertEqual(b["client"], "Анна Петрова")
+        self.assertNotIn("4276", app.state.llm.seen)
+        self.assertNotIn("4276", b["summary"])
+        app.state.llm = FakeLLM({"topic": "чепуха", "summary": "", "client": "", "confidence": "x"})
+        b = self.c.post("/v1/chat-topic", json={"messages": [{"author": "А", "text": "привет"}]}, headers=self.h).json()
+        self.assertEqual((b["topic"], b["confidence"]), ("other", 0.0))
+        self.assertEqual(self.c.post("/v1/chat-topic", json={"messages": []}).status_code, 401)
+
     def test_wer(self):
         self.assertEqual(wer("я хочу абонемент", "я хочу абонемент"), 0)
         self.assertAlmostEqual(wer("я хочу годовой абонемент", "я хочу абонемент"), 0.25)

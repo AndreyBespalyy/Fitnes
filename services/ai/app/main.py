@@ -117,3 +117,16 @@ def config_suggest(body: ConfigSuggestIn, llm=Depends(get_llm)):
         return engines.config_suggest(llm, body.text, body.fields)
     except (ValueError, KeyError) as e:
         raise HTTPException(502, f"Языковая модель вернула неверный ответ: {e}") from e
+
+
+class ChatTopicIn(BaseModel):
+    messages: list[dict]
+
+
+@app.post("/v1/chat-topic", dependencies=[Depends(auth)])
+def chat_topic(body: ChatTopicIn, llm=Depends(get_llm)):
+    """Тема рабочей переписки сотрудников (мессенджер CRM). Переписка не покидает сервер."""
+    try:
+        return engines.chat_topic(llm, body.messages)
+    except (ValueError, KeyError) as e:
+        raise HTTPException(502, f"Языковая модель вернула неверный ответ: {e}") from e
