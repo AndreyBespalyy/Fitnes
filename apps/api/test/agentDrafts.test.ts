@@ -86,7 +86,7 @@ test('тренер: «кто не пришёл на последнюю трен�
 
   // Приглашение на ближайшее занятие с датой, временем и описанием
   const d = (await req('POST', '/api/agent/invite-draft', 'a.kim', { kind: 'noshow', personIds: [p1, other] })).json();
-  assert.match(d.text, /^\{имя\}, здравствуйте! Это .+, ваш тренер\. Вчера не увиделись на занятии — всё в порядке\? Приглашаю на следующее: «.+», (сегодня|завтра|.. \d\d\.\d\d) в \d\d:\d\d\./);
+  assert.match(d.text, /^\{имя\}, здравствуйте! Это .+, ваш тренер\. Не увиделись на прошлом занятии — всё в порядке\? Приглашаю на следующее: «.+», (сегодня|завтра|.. \d\d\.\d\d) в \d\d:\d\d\./);
   assert.deepEqual(d.people.map((p: { id: string }) => p.id), [p1]); // чужого клиента в списке нет
   const r = (await req('POST', '/api/agent/invite-send', 'a.kim', { personIds: [p1, other], text: d.text })).json();
   assert.ok(r.failed.some((f: { name: string; reason: string }) => f.name === 'Чужой Клиент' && f.reason === 'не ваш клиент'));

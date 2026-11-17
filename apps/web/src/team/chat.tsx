@@ -592,8 +592,8 @@ function WriteSheet({ write, onClose }: { write: NonNullable<Act['write']>; onCl
           {d.session && <small>✦ Приглашение на ближайшее занятие: «{d.session.name}», {d.session.when}</small>}
           <label>Текст<textarea rows={6} value={text} onChange={(e) => setText(e.target.value)} /><small>{'{имя}'} — подставится имя каждого клиента</small></label>
           <div className="tm-draft-who">{d.people.map((p) => (
-            <label key={p.id} className="tm-check"><input type="checkbox" disabled={!p.ok} checked={pick.includes(p.id)}
-              onChange={(e) => setPick((cur) => (e.target.checked ? [...cur, p.id] : cur.filter((x) => x !== p.id)))} /> {p.name} <small>— {p.note}</small></label>))}</div>
+            <label key={p.id} className="tm-who-row"><input type="checkbox" disabled={!p.ok} checked={pick.includes(p.id)}
+              onChange={(e) => setPick((cur) => (e.target.checked ? [...cur, p.id] : cur.filter((x) => x !== p.id)))} /><span>{p.name} <small>— {p.note}</small></span></label>))}</div>
           <div className="tm-draft-btns">
             <button type="button" className="tm-btn" onClick={onClose}>Отмена</button>
             <button type="button" className="tm-btn pri" disabled={busy || !pick.length || text.trim().length < 5} onClick={() => void send()}>{busy ? 'Отправляю…' : `Отправить (${pick.length})`}</button>

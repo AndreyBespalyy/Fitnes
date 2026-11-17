@@ -45,9 +45,9 @@ async function nextSession(db: Db, trainerId: string, kind: Kind, personId: stri
 function inviteText(kind: Kind, me: string, s: { name: string; when: string; about: string } | null) {
   const intro = `{имя}, здравствуйте! Это ${me}, ваш тренер.`;
   const about = s?.about ? ` ${s.about}` : '';
-  if (!s) return kind === 'noshow' ? `${intro} Вчера не увиделись на занятии — всё в порядке? Подскажите, когда вам удобно прийти, запишу.` : `${intro} Давно вас не видно — всё в порядке? Подскажите, когда удобно прийти, запишу.`;
+  if (!s) return kind === 'noshow' ? `${intro} Не увиделись на прошлом занятии — всё в порядке? Подскажите, когда вам удобно прийти, запишу.` : `${intro} Давно вас не видно — всё в порядке? Подскажите, когда удобно прийти, запишу.`;
   if (kind === 'newbie') return `${intro} Жду вас ${s.when} на «${s.name}».${about} Приходите за 10 минут — познакомимся и покажу зал.`;
-  if (kind === 'noshow') return `${intro} Вчера не увиделись на занятии — всё в порядке? Приглашаю на следующее: «${s.name}», ${s.when}.${about} Записать вас?`;
+  if (kind === 'noshow') return `${intro} Не увиделись на прошлом занятии — всё в порядке? Приглашаю на следующее: «${s.name}», ${s.when}.${about} Записать вас?`;
   return `${intro} Давно вас не видно — соскучились! Ближайшее занятие: «${s.name}», ${s.when}.${about} Записать вас?`;
 }
 

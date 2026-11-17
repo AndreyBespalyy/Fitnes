@@ -206,11 +206,12 @@
 .tm-acts button.done{border-color:#3fb950;color:#3fb950}
 .tm-draft{display:grid;gap:12px}
 .tm-draft label{display:grid;gap:6px;font-weight:600;font-size:14px}
-.tm-draft select,.tm-draft textarea,.tm-draft input{font:inherit;font-weight:400;background:var(--surface-2);color:var(--ink);border:1px solid var(--line);border-radius:10px;padding:9px 11px}
+.tm-draft select,.tm-draft textarea,.tm-draft input:not([type=checkbox]){font:inherit;font-weight:400;background:var(--surface-2);color:var(--ink);border:1px solid var(--line);border-radius:10px;padding:9px 11px}
 .tm-draft small{font-weight:400;color:var(--muted, #9aa4b2)}
 .tm-draft-btns{display:flex;gap:8px;justify-content:flex-end}
 .tm-acts button.act{border-color:var(--accent)}
 .tm-acts-note{flex-basis:100%;color:var(--muted, #9aa4b2)}
 .tm-draft-who{display:grid;gap:8px}
-.tm-check{display:flex !important;align-items:center;gap:8px;font-weight:400 !important}
-.tm-check input{width:18px;height:18px}
+.tm-draft .tm-who-row{display:flex;align-items:center;gap:8px;font-weight:400;width:100%}
+.tm-draft .tm-who-row input{width:18px;height:18px;flex:none;margin:0}
+.tm-who-row span{flex:1;min-width:0}
