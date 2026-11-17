@@ -38,6 +38,11 @@ export const KIND_NAME: Record<string, string> = {
   'card:agent_nudge': 'Карточка: руководитель просит разобрать задачи', 'card:agent_reassign': 'Карточка: задачи переданы', 'card:agent_weekly': 'Карточка: разбор недели',
   'chat:hints': 'Ответ: подсказки на сегодня', 'chat:tasks': 'Ответ: мои задачи', 'chat:brief': 'Ответ: коротко о ситуации', 'chat:owner': 'Ответ руководителю',
   'chat:weekly': 'Ответ: разбор недели', 'chat:meeting': 'Ответ: собрания', 'chat:process': 'Ответ: бизнес-процессы', 'chat:other': 'Ответ на другой вопрос',
+  // Советы по переписке в мессенджере (teamAdvice.ts): msg_<тема>
+  msg_complaint: 'Совет по переписке: жалоба клиента', msg_new_client: 'Совет по переписке: новый клиент', msg_renewal: 'Совет по переписке: продление',
+  msg_return: 'Совет по переписке: возврат клиента', msg_new_staff: 'Совет по переписке: новый сотрудник', msg_meeting: 'Совет по переписке: собрание',
+  msg_equipment: 'Совет по переписке: поломка и ремонт', msg_schedule: 'Совет по переписке: расписание и замены', msg_payment: 'Совет по переписке: оплата и касса',
+  msg_cleaning: 'Совет по переписке: чистота и порядок', msg_task: 'Совет по переписке: поручение',
 };
 export const kindName = (k: string) => KIND_NAME[k] ?? (k.startsWith('msg_') ? `Совет по переписке: ${k.slice(4).replace(/_/g, ' ')}` : k.startsWith('tip') ? KIND_NAME.tip : k);
 

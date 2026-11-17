@@ -89,6 +89,13 @@ test('жалоба в личном чате: советы обоим участ�
   assert.equal((await req('POST', `/api/team/advice/${gm.items[0].id}/dismiss`, 'd.lis')).statusCode, 404);
   assert.equal((await req('POST', `/api/team/advice/${gm.items[0].id}/dismiss`, 'o.smirnov')).statusCode, 200);
   assert.equal((await req('GET', `/api/team/chats/${chat}/advice`, 'o.smirnov')).json().items.length, 0);
+
+  // Обучение на отзывах: «Начать» — сделано, «Скрыть» — «Не то»
+  const sg = await sql(`select s.user_id, s.kind, s.source, s.outcome, s.rating, s.reason from team_advice a join agent_suggestions s on s.id = a.suggestion_id where a.chat_id = $1 order by s.user_id`, [chat]);
+  assert.equal(sg.length, 2);
+  const lis = sg.find((x) => x.user_id === uid['d.lis']); const gmS = sg.find((x) => x.user_id === uid['o.smirnov']);
+  assert.deepEqual([lis.kind, lis.source, lis.outcome], ['msg_complaint', 'advice', 'done']);
+  assert.deepEqual([gmS.rating, gmS.reason], [-1, 'not_relevant']);
 });
 
 test('поломка в группе через свой ИИ-сервер: менеджер ставит задачу управляющему, телефоны в ИИ не уходят', async () => {
