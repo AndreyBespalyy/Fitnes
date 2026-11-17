@@ -610,7 +610,7 @@ export async function managersPlanAnswer(db: Db, text: string): Promise<{ text: 
   withPlan.forEach((r, i) => lines.push(`${i + 1}. **${r.name}** — ${r.lag! > 0 ? `отстаёт от графика на **${r.lag} %**` : r.lag! < 0 ? `опережает график на ${-r.lag!} %` : 'идёт точно по графику'}: ${rub(r.fact)} из ${rub(r.plan!)} (${r.percent} % плана, к сегодняшнему дню нужно ${rub(r.expected!)})`));
   if (!withPlan.length) lines.push('Личные планы менеджерам на этот месяц не заданы — задайте их в «Отделе продаж» → «План продаж».');
   if (noPlan.length) lines.push(`Без личного плана: ${noPlan.map((r) => `${r.name} (${rub(r.fact)})`).join(', ')}.`);
-  if (withPlan[0]?.lag && withPlan[0].lag > 15) lines.push(`\nНачните с первого в списке (${withPlan[0].name}): откройте его задачи на сегодня — есть ли звонки по горячим и продлениям.`);
+  if (withPlan[0]?.lag && withPlan[0].lag > 15) lines.push(`\nНачните с первого в списке (${withPlan[0].name}): откройте задачи на сегодня — есть ли звонки по горячим и продлениям.`);
   const surname = (n: string) => n.split(' ').slice(-1)[0];
   const actions = [...withPlan, ...noPlan].slice(0, 4).map((r) => ({ label: `Задачи на сегодня: ${surname(r.name)}`, url: `/?tab=tasks&scope=all&user=${r.id}&day=today` }));
   return { text: lines.join('\n'), actions };
