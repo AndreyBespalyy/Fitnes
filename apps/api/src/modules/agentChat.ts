@@ -192,7 +192,8 @@ kind — list (показать задачи), overdue (просроченные
 ref — номер задачи из списка или имя клиента, как написал сотрудник; when — когда, словами по-русски («завтра в 12», «через 2 часа»); title — текст новой задачи;
 reply — если kind=unknown: короткий дружелюбный ответ по делу (без выдумок о данных CRM).`;
 
-export async function botReply(db: Db, ctx: Ctx, text: string, yandex: YandexConfig | null, out?: { meta?: Record<string, unknown>; sids?: string[] }): Promise<string> {
+type BotOut = { meta?: Record<string, unknown>; sids?: string[]; actions?: { label: string }[] };
+export async function botReply(db: Db, ctx: Ctx, text: string, yandex: YandexConfig | null, out?: BotOut): Promise<string> {
   const leader = isLeader(ctx);
   // Руководитель: сначала — ответ на уточняющий вопрос помощника и команды «напомни Марии» / «передай задачи Марии Ксении»
   if (MEETING_STATUS_RE.test(text)) return meetingStatus(db, ctx);
@@ -212,16 +213,16 @@ export async function botReply(db: Db, ctx: Ctx, text: string, yandex: YandexCon
     const p = await ownerPendingReply(db, ctx, text, yandex);
     if (p) return p;
     if (/^(напомни|поторопи|пни|передай|передать|переназначь)\s+(?!мне\b)/i.test(text.trim())) {
-      const a = await ownerAnswer(db, ctx, text, yandex);
+      const a = await ownerAnswer(db, ctx, text, yandex, {}, out);
       if (!/^Не понял, о каком сотруднике/.test(a) || /^(передай|передать|переназначь)/i.test(text.trim())) return a;
     }
   }
   let it = ruleIntent(text);
   if (leader && it.kind === 'brief') {
     const t = await findTask(db, ctx, it.ref ?? '');
-    if (!t || t === 'many') return ownerAnswer(db, ctx, text, yandex);
+    if (!t || t === 'many') return ownerAnswer(db, ctx, text, yandex, {}, out);
   }
-  if (leader && (it.kind === 'digest' || it.kind === 'unknown')) return ownerAnswer(db, ctx, text, yandex);
+  if (leader && (it.kind === 'digest' || it.kind === 'unknown')) return ownerAnswer(db, ctx, text, yandex, {}, out);
   let llmReply = '';
   if (it.kind === 'unknown' && yandex) {
     try {
@@ -276,7 +277,7 @@ export async function handleBotMessage(pool: pg.Pool, ctx: Ctx, chatId: string, 
       const bot = await botPeer(db, chatId, ctx.userId);
       if (!bot) return;
       await db.query('update team_members set last_read_at = now() where chat_id = $1 and user_id = $2', [chatId, bot]);
-      const out: { meta?: Record<string, unknown>; sids?: string[] } = {};
+      const out: BotOut = {};
       const reply = await botReply(db, ctx, text, yandex, out);
       if (out.sids?.length) {
         // «Подсказки на сегодня» — каждую подсказку можно оценить отдельно
@@ -285,7 +286,7 @@ export async function handleBotMessage(pool: pg.Pool, ctx: Ctx, chatId: string, 
         return;
       }
       // Кнопки под ответом — следующий шаг по той же ветке разговора
-      const actions = followUps(text, isLeader(ctx));
+      const actions = [...(out.actions ?? []), ...followUps(text, isLeader(ctx))];
       const msgId = await say(db, ctx.tenantId, chatId, bot, reply, actions.length ? { actions } : null);
       // Ответ помощника тоже учится: его можно оценить, удачные ответы становятся образцами для нейросети
       if (rateable(reply)) {

@@ -8,6 +8,7 @@ import { audit, type Ctx, type Db } from '../db.ts';
 import { PERMISSIONS as P } from '../roles.ts';
 import { ygptComplete, ygptJson, type YandexConfig } from '../lib/yandex.ts';
 import { goodExamples } from './agentLearn.ts';
+import { callsGoal, draftButton, draftTask, type TaskDraft } from './agentDrafts.ts';
 import { classesText, clientClasses, fmtDate, noContacts, situationBrief } from './agent.ts';
 import { card, leastLoaded, reassignOpenWork } from './agentReminders.ts';
 import { clientsFact, kpi, lightOf, monthInfo, planFact, salesFact, targets } from './dash.ts';
@@ -42,7 +43,8 @@ export type Period = { from: string; to: string; label: string; month?: string }
 export type Club = { id: string; name: string; timezone: string };
 export type Who = { type: 'employee' | 'client'; id: string; label: string; role?: string };
 export type Pending = { kind: 'topic' | 'who' | 'meeting' | 'meeting_club'; data?: unknown; text: string; options?: Who[] };
-type Section = { title: string; lines: string[]; tips: string[] };
+/** buttons — готовые задачи по советам: кнопка «Поставить задачу» под ответом */
+type Section = { title: string; lines: string[]; tips: string[]; buttons?: { label: string; task: TaskDraft }[] };
 
 const rub = (kop: number) => `${Math.round(kop / 100).toLocaleString('ru-RU').replace(/[ ,]/g, ' ')} ₽`;
 const pctOf = (a: number, b: number) => (b > 0 ? Math.round((a * 100) / b) : 0);
@@ -177,13 +179,29 @@ async function salesSection(db: Db, clubs: Club[], per: Period, today: string): 
     for (const r of pf.rows) lines.push(`• ${r.name}: ${rub(r.factKop)}${r.planKop ? ` из ${rub(r.planKop)} (${r.percent} %)${r.light === 'red' ? ' 🔴' : r.light === 'yellow' ? ' 🟡' : ' 🟢'}` : ''}`);
     if (mi.current && t.planKop && t.dayPlanKop) lines.push(`Чтобы выйти на план, нужно продавать **${rub(t.dayPlanKop)} в день** до конца месяца (осталось ${mi.left} дн.).`);
     const red = pf.rows.filter((r) => r.light === 'red');
-    if (red.length) tips.push(`Отстаёт: ${red.map((r) => r.name.toLowerCase()).join(', ')}. Откройте «Кому звонить» по этим категориям и поставьте менеджерам дневную цель на звонки.`);
+    // По каждому клубу, где направление отстаёт, — готовая задача «дневная цель на звонки» самому свободному менеджеру
+    const buttons: NonNullable<Section['buttons']> = [];
+    if (mi.current) {
+      for (const c of clubs) {
+        const cpf = clubs.length > 1 ? planFact(mi, tg.filter((x) => x.clubId === c.id), sf.filter((x) => x.clubId === c.id), cf.filter((x) => x.clubId === c.id), {}) : pf;
+        const cred = cpf.rows.filter((r) => r.light === 'red');
+        if (!cred.length) continue;
+        const n = callsGoal(cred.length);
+        const cats = cred.map((r) => `${r.name.toLowerCase()} (${r.percent ?? 0} % плана)`).join(', ');
+        const d = await draftTask(db, c, `Дневная цель: ${n} звонков за день по отстающим направлениям — ${cats}. Списки — в «Кому звонить». Итог: сколько дозвонились и сколько договорились о покупке.`);
+        if (d) buttons.push(draftButton(d, 'цель на звонки', clubs.length > 1));
+      }
+    }
+    if (red.length) tips.push(buttons.length
+      ? `Отстаёт: ${red.map((r) => r.name.toLowerCase()).join(', ')}. Нужна дневная цель на звонки — задача уже подготовлена, проверьте и поставьте кнопкой ниже.`
+      : `Отстаёт: ${red.map((r) => r.name.toLowerCase()).join(', ')}. Откройте «Кому звонить» по этим категориям и поставьте менеджерам дневную цель на звонки.`);
     if (clubs.length > 1) {
       for (const c of clubs) {
         const cpf = planFact(mi, tg.filter((x) => x.clubId === c.id), sf.filter((x) => x.clubId === c.id), cf.filter((x) => x.clubId === c.id), {});
         lines.push(`• ${c.name}: ${rub(cpf.total.factKop)}${cpf.total.planKop ? ` — ${cpf.total.percent} % плана` : ''}`);
       }
     }
+    if (buttons.length) return { title: 'Продажи', lines, tips, buttons };
   } else {
     const len = daysBetween(per.from, per.to) + 1;
     const cur = await sum(per.from, per.to); const prev = await sum(addDays(per.from, -len), addDays(per.from, -1));
@@ -475,7 +493,7 @@ export async function ownerPendingReply(db: Db, ctx: Ctx, text: string, yandex: 
 }
 
 /** Главный ответ помощника руководителю */
-export async function ownerAnswer(db: Db, ctx: Ctx, text: string, yandex: YandexConfig | null, force: { topics?: Topic[]; who?: Who } = {}): Promise<string> {
+export async function ownerAnswer(db: Db, ctx: Ctx, text: string, yandex: YandexConfig | null, force: { topics?: Topic[]; who?: Who } = {}, out?: { actions?: { label: string; task?: TaskDraft }[] }): Promise<string> {
   const all = await visibleClubs(db);
   if (!all.length) return 'Не вижу ни одного клуба, к которому у вас есть доступ.';
   const clubs = pickClubs(text, all);
@@ -546,6 +564,8 @@ export async function ownerAnswer(db: Db, ctx: Ctx, text: string, yandex: Yandex
   if (want.has('problems')) sections.push(await problemsSection(db, clubs, today));
 
   const tipsRule = [...new Set(sections.flatMap((s) => s.tips))].slice(0, 5);
+  const buttons = sections.flatMap((s) => s.buttons ?? []);
+  if (out && buttons.length) out.actions = [...buttons, ...(out.actions ?? [])];
   const body = sections.filter((s) => !onlyAdvice || s.tips.length).map((s) => `**${s.title}**\n${s.lines.join('\n')}`);
   let advice = tipsRule.map((x) => `• ${x}`).join('\n');
   if (yandex && (want.has('advice') || tipsRule.length)) {
