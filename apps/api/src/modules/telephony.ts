@@ -244,6 +244,27 @@ export async function pbxForDial(db: Db, ctx: Ctx, personId: string) {
   return { conn: { id: r.id, tenant_id: r.tenant_id, club_id: r.club_id, kind: r.kind, domain: r.domain, secret: r.secret_enc ? decrypt(r.secret_enc) : null, status: r.status } as PbxConn, ext: r.ext as string };
 }
 
+/** Внутренние номера по именам: сотрудник клуба без номера ↔ пользователь АТС с теми же именем и фамилией */
+export async function autoMatch(db: Db, c: PbxConn, pbxUsers: { ext: string; name: string }[]) {
+  if (!pbxUsers.length) return 0;
+  const words = (v: string) => v.toLowerCase().replace(/ё/g, 'е').split(/[^\p{L}]+/u).filter((w) => w.length > 1);
+  const taken = new Set((await db.query(`select ext from pbx_extensions where club_id = $1`, [c.club_id])).rows.map((r) => r.ext as string));
+  const staff = (await db.query(
+    `select distinct u.id, u.full_name from user_assignments a join users u on u.id = a.user_id
+     where a.club_id = $1 and u.status = 'active' and (a.active_to is null or a.active_to >= current_date)
+       and not exists (select 1 from pbx_extensions x where x.club_id = a.club_id and x.user_id = u.id)`, [c.club_id])).rows;
+  let n = 0;
+  for (const u of staff) {
+    const mine = words(u.full_name);
+    if (mine.length < 2) continue;
+    const hits = pbxUsers.filter((p) => !taken.has(p.ext) && mine.slice(0, 2).every((w) => words(p.name).includes(w)));
+    if (hits.length !== 1) continue; // нет совпадения или их несколько — оставляем ручную настройку
+    await db.query(`insert into pbx_extensions(tenant_id, club_id, ext, user_id) values ($1,$2,$3,$4) on conflict do nothing`, [c.tenant_id, c.club_id, hits[0].ext, u.id]);
+    taken.add(hits[0].ext); n++;
+  }
+  return n;
+}
+
 /* ---------- маршруты ---------- */
 const CONN_SELECT = `select id, club_id as "clubId", kind, domain, secret_enc is not null as "hasKey", status, last_error as "lastError", last_ok_at as "lastOkAt",
   last_event_at as "lastEventAt", webhook_token as "webhookToken" from pbx_connections`;
@@ -309,7 +330,10 @@ export function telephonyRoutes(app: FastifyInstance, pool: pg.Pool, opts: { fet
       try {
         const r = await pbxTest(f, c);
         await db.query(`update pbx_connections set last_ok_at = now(), last_error = null where id = $1`, [id]);
-        return { ok: true, info: c.kind === 'test' ? 'Тестовая АТС подключена' : `АТС на связи${r.users.length ? `, сотрудников в АТС: ${r.users.length}` : ''}`, users: r.users };
+        const matched = await autoMatch(db, c, r.users);
+        if (matched) await audit(db, ctx, 'pbx.extensions_auto', 'pbx_connection', id, null, { matched });
+        return { ok: true, info: c.kind === 'test' ? 'Тестовая АТС подключена'
+          : `АТС на связи${r.users.length ? `, сотрудников в АТС: ${r.users.length}` : ''}${matched ? `, внутренние номера расставлены по именам: ${matched}` : ''}`, users: r.users, matched };
       } catch (e) {
         const msg = e instanceof PbxError ? e.message : 'Нет связи с АТС';
         await db.query(`update pbx_connections set last_error = $2 where id = $1`, [id, msg]);

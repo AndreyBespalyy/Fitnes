@@ -17,7 +17,7 @@ const fakeFetch = (async (url: string | URL, init?: RequestInit) => {
       return new URLSearchParams(String(init?.body)).get('auth_key') === 'good-key'
         ? json({ status: '1', data: { key_id: 'kid', key: 'kkk' } }) : json({ status: '0', comment: 'Неверный ключ' });
     }
-    if (u.pathname.endsWith('/user/get.json')) return json({ status: '1', data: [{ num: '101', name: 'Мария' }, { num: '102', name: 'Ольга' }, { num: '5200', name: 'Очередь' }] });
+    if (u.pathname.endsWith('/user/get.json')) return json({ status: '1', data: [{ num: '101', name: 'Мария Волкова' }, { num: '102', name: 'Ольга' }, { num: '5200', name: 'Очередь' }] });
     if (u.pathname.endsWith('/call/now.json')) return json({ status: '1', data: { uuid: 'orig-1' } });
     if (u.pathname.endsWith('/mongo_history/search.json')) return json({ status: '1', data: 'https://records.onpbx.ru/fresh/rec.mp3' });
   }
@@ -72,7 +72,10 @@ test('подключение: ключ API обязателен, ключ про
   await req('PUT', '/api/pbx', 'a.bespalyy', { clubId: c1, kind: 'onlinepbx', domain: 'pbx1.onpbx.ru', apiKey: 'good-key' });
   const ok = (await req('POST', `/api/pbx/${connId}/test`, 'a.bespalyy')).json();
   assert.equal(ok.ok, true);
-  assert.deepEqual(ok.users, [{ ext: '101', name: 'Мария' }, { ext: '102', name: 'Ольга' }]);
+  assert.deepEqual(ok.users, [{ ext: '101', name: 'Мария Волкова' }, { ext: '102', name: 'Ольга' }]);
+  // Номер расставлен по имени и фамилии; «Ольга» без фамилии — не угадываем
+  assert.equal(ok.matched, 1);
+  assert.deepEqual(await sql(`select ext from pbx_extensions x join users u on u.id = x.user_id where u.login = 'm.volkova'`), [{ ext: '101' }]);
   const [row] = await sql(`select secret_enc, domain from pbx_connections where id = $1`, [connId]);
   assert.equal(row.domain, 'pbx1.onpbx.ru');
   assert.ok(!String(row.secret_enc).includes('good-key'));
