@@ -4,6 +4,7 @@ import { useEffect, useState, type FormEvent } from 'react';
 import { api, can, type Club, type Me, type Staff } from './api.ts';
 import { dt, errText, toast } from './ui.ts';
 import { ExportButton } from './privacy.tsx';
+import { PbxSettings } from './telephony.tsx';
 
 type CallRow = {
   id: string; clubId: string; startedAt: string; direction: 'in' | 'out'; durationSec: number | null; phone: string | null; personId: string | null; personName: string | null;
@@ -67,7 +68,7 @@ export function CallsPage({ me, clubs, clubId, openPerson }: { me: Me; clubs: Cl
       {(tab === 'review' || tab === 'all') && <CallList key={`${tab}${ver}`} me={me} clubId={clubId} scope={tab} onOpen={setOpen} openPerson={openPerson} />}
       {tab === 'upload' && <UploadCalls me={me} clubs={clubs} clubId={clubId} onOpen={setOpen} />}
       {tab === 'quality' && <Quality clubs={clubs} clubId={clubId} />}
-      {tab === 'settings' && <AiSettings clubs={clubs} clubId={clubId} />}
+      {tab === 'settings' && <><PbxSettings clubs={clubs} clubId={clubId} /><AiSettings clubs={clubs} clubId={clubId} /></>}
       {open && <CallDialog id={open} onClose={() => { setOpen(null); setVer((v) => v + 1); }} openPerson={openPerson} />}
     </>
   );

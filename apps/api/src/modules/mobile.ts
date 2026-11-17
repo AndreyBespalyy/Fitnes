@@ -6,6 +6,7 @@ import { audit, withCtx, type Db } from '../db.ts';
 import { badRequest, notFound } from '../errors.ts';
 import { PERMISSIONS as P } from '../roles.ts';
 import { guardReveal } from './privacy.ts';
+import { PbxError, pbxForDial, pbxOriginate } from './telephony.ts';
 import { loadVapid, sendPush, type PushPayload, type Vapid } from '../lib/webpush.ts';
 
 // Отправлять уведомления можно только в службы доставки браузеров и телефонов, а не на произвольный адрес
@@ -219,7 +220,7 @@ export function mobileRoutes(app: FastifyInstance, pool: pg.Pool, opts: { fetch?
     });
   });
 
-  // Звонок в один клик: полный номер отдаётся только для звонка и записывается в журнал. С телефонией здесь будет звонок через АТС клуба.
+  // Звонок в один клик: полный номер отдаётся только для звонка и записывается в журнал. Если у клуба подключена АТС — звонок идёт через неё.
   app.post('/api/persons/:id/dial', async (req) => {
     const ctx = requirePerm(req, P.personsView);
     if (!can(ctx, P.crmWork) && !can(ctx, P.messagesWork) && !can(ctx, P.acsWork)) throw badRequest('Звонки клиентам недоступны для вашей роли');
@@ -230,6 +231,19 @@ export function mobileRoutes(app: FastifyInstance, pool: pg.Pool, opts: { fetch?
       if (!p) throw notFound('Клиент не найден');
       const ph = (await db.query(`select normalized_value from person_contacts where person_id = $1 and type = 'phone' order by is_primary desc limit 1`, [id])).rows[0];
       if (!ph?.normalized_value) throw badRequest('У клиента нет телефона', 'no_phone');
+      // Есть АТС клуба и внутренний номер сотрудника → звонок через АТС (с записью разговора)
+      const pbx = await pbxForDial(db, ctx, id);
+      if (pbx) {
+        try {
+          const r = await pbxOriginate(fetchFn, pbx.conn, pbx.ext, ph.normalized_value);
+          await audit(db, ctx, 'person.dial', 'person', id, null, { via: 'pbx', ext: pbx.ext, uuid: r.uuid });
+          return { phone: ph.normalized_value as string, mode: 'pbx', ext: pbx.ext };
+        } catch (e) {
+          // АТС не ответила — звоним с телефона, чтобы не потерять клиента
+          await audit(db, ctx, 'person.dial', 'person', id, null, { via: 'device', pbxError: (e as Error).message.slice(0, 200) });
+          return { phone: ph.normalized_value as string, mode: 'device', pbxError: e instanceof PbxError ? e.message : 'АТС не ответила' };
+        }
+      }
       await audit(db, ctx, 'person.dial', 'person', id, null, { via: 'device' });
       return { phone: ph.normalized_value as string, mode: 'device' };
     });

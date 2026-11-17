@@ -24,6 +24,7 @@ import { bankRoutes } from './modules/bank.ts';
 import { dashRoutes } from './modules/dash.ts';
 import { problemRoutes } from './modules/problems.ts';
 import { aiRoutes, startAiWorker } from './modules/ai.ts';
+import { startPbxWorker, telephonyRoutes } from './modules/telephony.ts';
 import { aiSalesRoutes, startScoringWorker } from './modules/aiSales.ts';
 import { staffTimeRoutes } from './modules/staffTime.ts';
 import { configRoutes } from './modules/config.ts';
@@ -146,6 +147,7 @@ export async function buildApp(pool: pg.Pool, opts: { webDist?: string; secureCo
   // ИИ-сервер (свой, внутренний): AI_URL и AI_TOKEN. Без него записи ждут, итог можно написать вручную
   const ai = opts.ai !== undefined ? opts.ai : aiConfigFromEnv(opts.fetch ?? fetch);
   aiRoutes(app, pool, storage, ai);
+  telephonyRoutes(app, pool, { fetch: opts.fetch });
   aiSalesRoutes(app, pool);
   mobileRoutes(app, pool, { fetch: opts.fetch });
   staffTimeRoutes(app, pool);
@@ -209,6 +211,8 @@ export async function buildApp(pool: pg.Pool, opts: { webDist?: string; secureCo
   if (opts.pushWorker) { const stop = startPushWorker(pool, opts.fetch ?? fetch); app.addHook('onClose', async () => stop()); }
   if (opts.scoringWorker) { const stop = startScoringWorker(pool); app.addHook('onClose', async () => stop()); }
   if (opts.aiWorker) { const stop = startAiWorker(pool, ai, storage); app.addHook('onClose', async () => stop()); }
+  // Записи разговоров из АТС забираются вместе с работой ИИ (тот же флаг фоновой работы)
+  if (opts.aiWorker) { const stop = startPbxWorker(pool, storage, opts.fetch ?? fetch, !!ai); app.addHook('onClose', async () => stop()); }
   if (opts.insightsWorker) { const stop = startInsightsWorker(pool, ai); app.addHook('onClose', async () => stop()); }
   if (opts.fiscalWorker) { const stop = startFiscalWorker(pool); app.addHook('onClose', async () => stop()); }
 

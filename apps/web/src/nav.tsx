@@ -14,7 +14,7 @@ const GROUP: Record<string, string> = {
   schedule: 'club', access: 'club', load: 'club', shop: 'club', tariffs: 'club', contracts: 'club',
   finance: 'money', payouts: 'money', fiscal: 'money', pnl: 'money', cohorts: 'money',
   team: 'today', staff: 'team', stafftime: 'team', activity: 'team',
-  clubs: 'setup', config: 'setup', pipelines: 'setup', intake: 'setup', messaging: 'setup', site: 'setup', import: 'setup', onboarding: 'setup', usage: 'setup', notes: 'setup', privacy: 'setup', system: 'setup',
+  clubs: 'setup', config: 'setup', telephony: 'setup', pipelines: 'setup', intake: 'setup', messaging: 'setup', site: 'setup', import: 'setup', onboarding: 'setup', usage: 'setup', notes: 'setup', privacy: 'setup', system: 'setup',
   help: 'foot', profile: 'foot',
 };
 
@@ -27,6 +27,7 @@ const P: Record<string, string> = {
   tasks: 'M9 11l3 3 8-8M20 12v7a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h9',
   hot: 'M12 3c1 4 5 5 5 10a5 5 0 0 1-10 0c0-3 2-4 2-7 2 1 3 3 3 3',
   calls: 'M5 4h4l2 5-2.5 1.5a11 11 0 0 0 5 5L15 13l5 2v4a2 2 0 0 1-2 2A16 16 0 0 1 3 6a2 2 0 0 1 2-2',
+  telephony: 'M5 4h4l2 5-2.5 1.5a11 11 0 0 0 5 5L15 13l5 2v4a2 2 0 0 1-2 2A16 16 0 0 1 3 6a2 2 0 0 1 2-2',
   desk: 'M14 12v.01M5 21h14M6 21V4a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v17',
   trainer: 'M6 9v6M18 9v6M3 11v2M21 11v2M6 12h12',
   leads: 'M12 5v14M5 12h14',
