@@ -35,11 +35,11 @@ async function uploadAll(batchId: string, cookies = gm) {
   }
   return out;
 }
-async function confirmAll(batchId: string) {
-  const b = (await api('GET', `/api/import/batches/${batchId}`, gm)).json();
+async function confirmAll(batchId: string, cookies = gm) {
+  const b = (await api('GET', `/api/import/batches/${batchId}`, cookies)).json();
   for (const f of b.files) {
     const mapping = Object.fromEntries(Object.entries(f.mapping as Record<string, { col: number } | null>).map(([k, v]) => [k, v ? v.col : null]));
-    const r = await api('PUT', `/api/import/files/${f.id}`, gm, { reportType: f.reportType, mapping });
+    const r = await api('PUT', `/api/import/files/${f.id}`, cookies, { reportType: f.reportType, mapping });
     assert.equal(r.statusCode, 200, r.body);
   }
 }
@@ -269,4 +269,21 @@ test('ручная карта полей: обязательные поля и �
   assert.equal((await api('PUT', `/api/import/files/${f.id}`, gm, { reportType: 'payments', mapping: { client_name: 0, date: 1, amount: 1 } })).statusCode, 400);
   assert.equal((await api('PUT', `/api/import/files/${f.id}`, gm, { reportType: 'payments', mapping: { client_name: 0, date: 1, amount: 2 } })).statusCode, 200);
   assert.equal((await api('DELETE', `/api/import/files/${f.id}`, gm)).statusCode, 200);
+});
+
+test('все конфликты пакета решаются одним действием', async () => {
+  const b = (await api('POST', '/api/import/batches', owner, { clubId: c2 })).json();
+  await uploadAll(b.id, owner);
+  await confirmAll(b.id, owner);
+  let rep = (await api('POST', `/api/import/batches/${b.id}/check`, owner)).json();
+  const before = rep.counts.clients.conflict;
+  assert.ok(before >= 1, 'в образцах есть общий телефон');
+  assert.equal((await api('POST', `/api/import/batches/${b.id}/resolve-conflicts`, owner, { resolution: 'merge' })).statusCode, 400);
+  const r = (await api('POST', `/api/import/batches/${b.id}/resolve-conflicts`, owner, { resolution: 'new' })).json();
+  assert.equal(r.resolved, before);
+  rep = (await api('POST', `/api/import/batches/${b.id}/check`, owner)).json();
+  assert.equal(rep.counts.clients.conflict, 0);
+  assert.ok(!rep.blockers.some((x: string) => x.startsWith('Не решены конфликты')));
+  // Повтор ничего не меняет
+  assert.equal((await api('POST', `/api/import/batches/${b.id}/resolve-conflicts`, owner, { resolution: 'new' })).json().resolved, 0);
 });

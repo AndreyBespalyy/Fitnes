@@ -270,18 +270,30 @@ function ReportView({ r }: { r: Report }) {
 function Conflicts({ batchId, reload }: { batchId: string; reload: () => void }) {
   const [rows, setRows] = useState<IRow[]>([]);
   const [err, setErr] = useState('');
-  const load = () => api<IRow[]>('GET', `/api/import/batches/${batchId}/rows?status=conflict`).then(setRows).catch((e) => setErr(errText(e)));
+  const load = () => api<IRow[]>('GET', `/api/import/batches/${batchId}/rows?status=conflict&limit=1000`).then(setRows).catch((e) => setErr(errText(e)));
   useEffect(() => { load(); }, [batchId]);
   if (!rows.length) return null;
   const resolve = async (id: string, resolution: string) => {
     try { await api('POST', `/api/import/rows/${id}/resolve`, { resolution }); await load(); reload(); } catch (e) { setErr(errText(e)); }
   };
   const LBL: Record<string, string> = { merge: 'объединить', new: 'отдельный клиент', skip: 'не переносить' };
+  const open = rows.filter((r) => !r.resolution).length;
+  const resolveAll = async (resolution: 'new' | 'skip') => {
+    const what = resolution === 'new' ? 'создать отдельными клиентами' : 'не переносить';
+    if (!window.confirm(`Все нерешённые конфликты (${open}) — ${what}? Решение по отдельной строке потом можно поменять.`)) return;
+    try { await api('POST', `/api/import/batches/${batchId}/resolve-conflicts`, { resolution }); await load(); reload(); } catch (e) { setErr(errText(e)); }
+  };
   return (
     <div className="card" style={{ display: 'grid', gap: 8 }}>
       <h2>Конфликты: решите по каждой строке</h2>
       <p className="small">Исходная строка не удаляется: решение сохраняется вместе с ней. После решений запустите пробный перенос ещё раз.</p>
       {err && <div className="err">{err}</div>}
+      {open > 1 && (
+        <div className="row" style={{ alignItems: 'center' }}>
+          <span className="small">Не решено: {open}. Чаще всего это члены одной семьи с общим телефоном.</span>
+          <button className="btn sm pri" onClick={() => resolveAll('new')}>Всех создать отдельными клиентами</button>
+          <button className="btn sm" onClick={() => resolveAll('skip')}>Всех не переносить</button>
+        </div>)}
       {rows.map((r) => (
         <div key={r.id} className="item" style={{ display: 'grid', gap: 6 }}>
           <div className="small">{r.fileName}, строка {r.rowNo}</div>

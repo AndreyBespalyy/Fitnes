@@ -738,6 +738,24 @@ export function importRoutes(app: FastifyInstance, pool: pg.Pool) {
       order by f.uploaded_at, r.row_no limit $4`, [id, status || null, type || null, Math.min(Number(limit) || 200, 1000)])).rows);
   });
 
+  // Одно решение сразу для всех нерешённых конфликтов пакета: например, общий телефон у членов семьи
+  app.post('/api/import/batches/:id/resolve-conflicts', async (req) => {
+    const ctx = requirePerm(req, P.importManage);
+    const { id } = req.params as { id: string };
+    const { resolution } = (req.body ?? {}) as { resolution?: string };
+    if (!['new', 'skip'].includes(resolution ?? '')) throw badRequest('Выберите решение: создать отдельно или не переносить');
+    return withCtx(pool, ctx, async (db) => {
+      editable(await loadBatch(db, id));
+      const n = (await db.query(`update import_rows set resolution = $2, resolved_by = $3, resolved_at = now()
+        where batch_id = $1 and conflict_with is not null and resolution is null`, [id, resolution, ctx.userId])).rowCount ?? 0;
+      if (n) {
+        await db.query(`update import_batches set status = 'draft' where id = $1`, [id]);
+        await audit(db, ctx, 'import.conflicts_resolved_bulk', 'import_batch', id, null, { resolution, rows: n });
+      }
+      return { resolved: n };
+    });
+  });
+
   app.post('/api/import/rows/:id/resolve', async (req) => {
     const ctx = requirePerm(req, P.importManage);
     const { id } = req.params as { id: string };
