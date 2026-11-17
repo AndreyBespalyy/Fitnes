@@ -640,3 +640,13 @@ input[type="checkbox"],input[type="radio"]{accent-color:var(--accent)}
 .mr-hist i.good{background:#3fb950}.mr-hist i.mid{background:#d29922}.mr-hist i.bad{background:var(--bad, #f85149)}
 .mr-hist small{font-size:9px;color:var(--muted)}
 @media (max-width:600px){.mr-part{grid-template-columns:100px 1fr 50px}}
+/* Скрипт звонка (17.11.2026) */
+.cs-lines{margin:0;padding-left:22px;display:grid;gap:8px}
+.cs-lines li b{display:block;font-size:13px;color:var(--accent-strong)}
+.cs-lines li span{display:block;line-height:1.45}
+.cs-if{display:grid;gap:6px}
+.cs-if div{display:grid;grid-template-columns:minmax(120px,190px) 1fr;gap:10px;padding:6px 0;border-top:1px solid var(--line)}
+.cs-if div b{font-weight:600}
+@media (max-width:560px){.cs-if div{grid-template-columns:1fr;gap:2px}}
+.cs-never{padding:8px 10px;border-radius:8px;background:color-mix(in srgb,var(--bad, #e5484d) 12%,transparent)}
+.modal.cs{max-height:90vh;overflow:auto}

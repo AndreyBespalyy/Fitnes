@@ -86,8 +86,8 @@ test('«Дядя Витя»: разбор звонка менеджеру, с т
   assert.equal(await withCtx(t.pool, sys(), (db) => scriptCheckCalls(db, tenant, ai)), 1);
   assert.ok(!sent.some((b) => b.includes('777-00-11')), 'телефон ушёл в ИИ');
   const w = (await sql(`select m.body, m.meta from team_messages m where m.meta->>'kind' = 'script_check' and m.meta->>'callId' = $1`, [c1]))[0];
-  assert.match(w.body, /^\*\*Разбор звонка с Скриптов Игорь, .+\*\* — скрипт «Звонок по заявке»\nКоротко: Клиент спросил цену/);
-  assert.match(w.body, /Что упущено:\n1\. Спросил, чего клиент ждёт от занятий .+ Как по скрипту: «А чего вы ждёте от занятий/);
+  assert.match(w.body, /^\*\*Разбор звонка: Скриптов Игорь, .+\*\* — скрипт «Звонок по заявке»\nКоротко: Клиент спросил цену/);
+  assert.match(w.body, /Что упущено:\n1\. Пропущен этап «Ожидания»\. Как по скрипту: «А чего вы ждёте от занятий/);
   assert.match(w.body, /Прозвучало то, что нельзя: «вам актуально\?»/);
   assert.deepEqual(w.meta.actions, [{ label: 'Открыть разговор', url: `/?tab=calls&call=${c1}` }]);
   assert.equal((await sql(`select 1 from team_messages where meta->>'kind' = 'script_rop'`)).length, 0);
@@ -112,4 +112,28 @@ test('«Дядя Витя»: разбор звонка менеджеру, с т
   assert.equal(r.facts.scriptMisses, 3);
   assert.ok(r.parts.script < 15);
   assert.match(r.note, /отходит от скрипта: 3 из 3 разобранных разговоров/);
+});
+
+test('«Показать скрипт звонка»: тема по данным CRM, имя клиента и менеджера, дата встречи подставлены', async () => {
+  const lead = (await req('POST', '/api/leads', 'm.volkova', { clubId: centr, fullName: 'Заявкин Сергей', phone: '+79007770021', sourceCode: 'walk_in' })).json().personId;
+  const s1 = (await req('GET', `/api/agent/call-script/person/${lead}`, 'm.volkova')).json();
+  assert.equal(s1.code, 'lead', JSON.stringify(s1));
+  assert.equal(s1.title, 'Звонок по заявке');
+  assert.equal(s1.lines[0].text, '«Сергей, добрый день! Это Мария из Сандов Фитнес. Вы оставляли заявку — спасибо. Удобно две минуты?»');
+  assert.match(s1.lines.find((l: { stage: string }) => l.stage === 'День и время').text, /Тогда (в|во) \S+ в 19:00 — записываю/);
+  assert.ok(s1.ifSays.some((x: { q: string }) => x.q === '«Дорого»'));
+  assert.match(s1.never, /вам актуально/);
+
+  // Назначена встреча — подтверждение с её датой и временем
+  const due = (await sql(`select (date_trunc('day', now() at time zone $1) + interval '2 days 18 hours 30 minutes') at time zone $1 as d`, [tz]))[0].d;
+  await sql(`insert into tasks(tenant_id, club_id, assignee_id, person_id, kind, title, due_at) values ($1,$2,$3,$4,'meeting','Пробная тренировка',$5)`, [tenant, centr, uid['m.volkova'], lead, due]);
+  const s2 = (await req('GET', `/api/agent/call-script/person/${lead}`, 'm.volkova')).json();
+  assert.equal(s2.code, 'confirm');
+  assert.match(s2.lines[1].text, /^«Звоню напомнить: мы встречаемся (в|во) \S+, \d+ \S+, в 18:30, вас ждёт тренер»$/);
+  // Задача о продлении — скрипт продления; тему можно сменить вручную
+  const task = (await sql(`insert into tasks(tenant_id, club_id, assignee_id, person_id, kind, title, due_at) values ($1,$2,$3,$4,'call','Позвонить по продлению абонемента', now()) returning id`, [tenant, centr, uid['m.volkova'], lead]))[0].id;
+  assert.equal((await req('GET', `/api/agent/call-script/task/${task}`, 'm.volkova')).json().code, 'renewal');
+  const s3 = (await req('GET', `/api/agent/call-script/task/${task}?as=base`, 'm.volkova')).json();
+  assert.equal(s3.code, 'base');
+  assert.match(s3.lines[0].text, /мы с вами раньше общались — вы оставляли заявку\./);
 });

@@ -75,6 +75,7 @@ import { agentChatRoutes, handleBotMessage } from './modules/agentChat.ts';
 import { agentDraftRoutes } from './modules/agentDrafts.ts';
 import { agentInviteRoutes } from './modules/agentInvite.ts';
 import { salesTeamRoutes } from './modules/agentSalesTeam.ts';
+import { callScriptRoutes } from './modules/agentCallScript.ts';
 import { agentLearnRoutes } from './modules/agentLearn.ts';
 import { agentMeetingRoutes } from './modules/agentMeetings.ts';
 import { processRoutes } from './modules/agentProcesses.ts';
@@ -196,6 +197,7 @@ export async function buildApp(pool: pg.Pool, opts: { webDist?: string; secureCo
   agentDraftRoutes(app, pool);
   agentInviteRoutes(app, pool);
   salesTeamRoutes(app, pool);
+  callScriptRoutes(app, pool);
   // Советы по переписке в мессенджере: тему определяет свой ИИ-сервер (или YandexGPT), без них — ключевые слова
   teamAdviceRoutes(app, pool, { ai, yandex });
   agentMeetingRoutes(app, pool);

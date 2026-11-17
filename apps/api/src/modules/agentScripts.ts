@@ -97,6 +97,10 @@ const maskPii = (s: string) => s.replace(/[\w.+-]+@[\w-]+\.[\w.]+/g, '[почт�
 type Item = ScriptItem & { kind: 'step' | 'never'; ok: boolean | null; quote?: string };
 type Tr = { text: string; segments?: { speaker: string | null; start: number; end: number; text: string }[] };
 
+const STAGE: Record<string, string> = { contact: 'Контакт', road: 'Дорога', expect: 'Ожидания', block: 'Что мешало', react: 'Реакция его словами', present: 'Презентация',
+  trial: 'Повод прийти', time: 'День и время', final: 'Итог', price: 'Вопрос о цене', exp: 'Опыт и критерий', reason: 'Повод звонка', now: 'Тренируется ли сейчас',
+  changed: 'Что изменилось', remind: 'Напоминание', passport: 'Паспорт', why: 'Зачем звоню', feedback: 'Обратная связь', early: 'Раннее продление', close: 'Закрытие',
+  clarify: 'Уточнение при отказе', next: 'Следующий шаг с датой' };
 const fmt = (d: Date, tz: string) => new Intl.DateTimeFormat('ru-RU', { timeZone: tz, day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }).format(d).replace(',', ' в');
 const surname = (n: string) => n.split(' ')[0];
 export const callUrl = (id: string) => `/?tab=calls&call=${id}`;
@@ -140,13 +144,13 @@ export async function scriptCheckCalls(db: Db, tenantId: string, ai: AiConfig, l
 }
 
 async function warn(db: Db, tenantId: string, c: Record<string, any>, sc: Script, items: Item[], missed: Item[], summary: string | null) {
-  const who = c.person_name ?? 'клиентом';
+  const who = c.person_name ?? 'клиент';
   const when = fmt(new Date(c.started_at), c.timezone);
-  const good = items.filter((i) => i.ok && i.kind === 'step').map((i) => i.text.split(':')[0]);
-  const lines = [`**Разбор звонка с ${who}, ${when}** — скрипт «${sc.title}»`];
+  const good = items.filter((i) => i.ok && i.kind === 'step').map((i) => STAGE[i.id] ?? i.text);
+  const lines = [`**Разбор звонка: ${who}, ${when}** — скрипт «${sc.title}»`];
   if (summary) lines.push(`Коротко: ${summary}`);
   lines.push('Что упущено:');
-  missed.slice(0, 5).forEach((m, i) => lines.push(`${i + 1}. ${m.kind === 'never' ? `Прозвучало то, что нельзя${m.quote ? `: «${m.quote}»` : ''}` : m.text}. Как по скрипту: ${m.how}`));
+  missed.slice(0, 5).forEach((m, i) => lines.push(`${i + 1}. ${m.kind === 'never' ? `Прозвучало то, что нельзя${m.quote ? `: «${m.quote}»` : ''}` : `Пропущен этап «${STAGE[m.id] ?? m.text}»`}. Как по скрипту: ${m.how}`));
   if (good.length) lines.push(`Получилось: ${good.slice(0, 4).join(', ')}.`);
   await botSay(db, tenantId, c.user_id, lines.join('\n'), { kind: 'script_check', callId: c.id, actions: [{ label: 'Открыть разговор', url: callUrl(c.id) }] }, false);
   await db.query(`update call_script_checks set warned_at = now() where call_id = $1`, [c.id]);
@@ -164,15 +168,15 @@ async function warn(db: Db, tenantId: string, c: Record<string, any>, sc: Script
   if (!to.length) return;
   const often = new Map<string, number>();
   for (const k of (await db.query(`select items from call_script_checks where club_id = $1 and user_id = $2 and warned_at is not null and created_at > now() - interval '30 days'`, [c.club_id, c.user_id])).rows)
-    for (const i of k.items as Item[]) if (i.ok === false) often.set(i.text, (often.get(i.text) ?? 0) + 1);
+    for (const i of k.items as Item[]) if (i.ok === false) { const key = i.kind === 'never' ? i.text.replace(/^Не прозвучало: /, 'прозвучало ') : `пропущен этап «${STAGE[i.id] ?? i.text}»`; often.set(key, (often.get(key) ?? 0) + 1); }
   const top = [...often.entries()].sort((a, b) => b[1] - a[1]).slice(0, 3);
   const text = [`**${c.user_name} снова отходит от скрипта продаж** — ${prev.length}-й разбор за 30 дней, два сообщения с разбором менеджеру уже отправлены.`,
     `Последний: ${who}, ${when}, скрипт «${sc.title}», упущено пунктов: ${missed.length}.`,
-    top.length ? `Чаще всего: ${top.map(([t, k]) => `${t.replace(/^Не прозвучало: /, 'прозвучало ')} (${k})`).join('; ')}.` : '',
+    top.length ? `Чаще всего: ${top.map(([t, k]) => `${t} (${k})`).join('; ')}.` : '',
     'Разговоры — по кнопкам ниже. Это учтено в рейтинге менеджера.'].filter(Boolean).join('\n');
   const actions = [
     ...prev.slice(0, 5).map((p) => ({ label: `Разговор ${fmt(new Date(p.started_at), c.timezone)} — ${p.person_name ? surname(p.person_name) : 'клиент'}`, url: callUrl(p.call_id) })),
-    { label: `Чат с менеджером: ${c.user_name.split(' ').slice(-1)[0]}`, chat: { userId: c.user_id, text: `Отклонения от скрипта продаж: ${prev.length} разговоров за 30 дней${top.length ? `, чаще всего — ${top[0][0].replace(/^Не прозвучало: /, 'прозвучало ').toLowerCase()}` : ''}. Давайте разберём один разговор вместе и потренируем этот этап.` } },
+    { label: `Чат с менеджером: ${c.user_name.split(' ').slice(-1)[0]}`, chat: { userId: c.user_id, text: `Отклонения от скрипта продаж: ${prev.length} разговоров за 30 дней${top.length ? `, чаще всего — ${top[0][0]}` : ''}. Давайте разберём один разговор вместе и потренируем этот этап.` } },
   ];
   for (const u of to) await botSay(db, tenantId, u, text, { kind: 'script_rop', userId: c.user_id, callId: c.id, actions }, true);
   await db.query(`update call_script_checks set rop_sent_at = now() where call_id = $1`, [c.id]);

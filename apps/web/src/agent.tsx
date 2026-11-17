@@ -178,3 +178,41 @@ export function AgentSettingsCard({ clubId }: { clubId: string }) {
     </div>
   );
 }
+
+/* ---------- «Показать скрипт звонка» (17.11.2026): тема звонка определена заранее, данные клиента подставлены ---------- */
+type CallScriptT = { code: string; title: string; why: string; client: string | null; lines: { stage: string; text: string }[];
+  ifSays: { q: string; a: string }[]; never: string; after: string[]; others: { code: string; title: string }[] };
+export function ScriptButton({ type, id, small = true, label = 'Показать скрипт звонка' }: { type: 'task' | 'opportunity' | 'person'; id: string; small?: boolean; label?: string }) {
+  const [open, setOpen] = useState(false);
+  return (<>
+    <button className={`btn ${small ? 'sm' : ''} brief-btn`} onClick={(e) => { e.stopPropagation(); setOpen(true); }} title="Скрипт на тему этого звонка с именем клиента и нужными данными">
+      <span aria-hidden="true">📞</span> {label}</button>
+    {open && <ScriptDialog type={type} id={id} onClose={() => setOpen(false)} />}
+  </>);
+}
+export function ScriptDialog({ type, id, onClose }: { type: 'task' | 'opportunity' | 'person'; id: string; onClose: () => void }) {
+  const [s, setS] = useState<CallScriptT | null>(null);
+  const [err, setErr] = useState('');
+  const [as, setAs] = useState('');
+  useEffect(() => { setErr(''); api<CallScriptT>('GET', `/api/agent/call-script/${type}/${id}${as ? `?as=${as}` : ''}`).then(setS).catch((x) => setErr(errText(x))); }, [type, id, as]);
+  useEffect(() => { const k = (e: KeyboardEvent) => { if (e.key === 'Escape') { e.stopPropagation(); onClose(); } }; window.addEventListener('keydown', k, true); return () => window.removeEventListener('keydown', k, true); }, []);
+  return createPortal(
+    <div className="modal-bg brief-bg" role="dialog" aria-modal="true" aria-label="Скрипт звонка" onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+      <div className="card modal cs" style={{ display: 'grid', gap: 10, maxWidth: 760 }}>
+        <div className="row between"><h2 style={{ margin: 0 }}>📞 {s ? s.title : 'Скрипт звонка'}</h2><button className="btn sm" onClick={onClose} aria-label="Закрыть">×</button></div>
+        {err && <div className="err">{err}</div>}
+        {!s && !err && <p className="muted">Подбираю скрипт под этот звонок…</p>}
+        {s && <>
+          <div className="small muted">{s.client ? `${s.client} · ` : ''}Почему этот скрипт: {s.why}</div>
+          <ol className="cs-lines">{s.lines.map((l, i) => <li key={i}><b>{l.stage}</b><span>{l.text}</span></li>)}</ol>
+          {!!s.ifSays.length && <><h3 className="brief-h">Если скажет</h3>
+            <div className="cs-if">{s.ifSays.map((x, i) => <div key={i}><b>{x.q}</b><span>{x.a}</span></div>)}</div></>}
+          <div className="cs-never"><b>Нельзя:</b> {s.never}</div>
+          <details className="small"><summary>Что проверить у себя после звонка</summary><ol>{s.after.map((a) => <li key={a}>{a}</li>)}</ol></details>
+          <div className="row" style={{ flexWrap: 'wrap', gap: 6 }}><span className="small muted">Другая тема:</span>
+            {s.others.map((o) => <button key={o.code} className="btn sm" onClick={() => setAs(o.code)}>{o.title}</button>)}</div>
+        </>}
+        <div className="row"><button className="btn sm pri" onClick={onClose}>Понятно</button></div>
+      </div>
+    </div>, document.body);
+}
