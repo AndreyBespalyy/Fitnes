@@ -3,10 +3,12 @@
 import { createHash } from 'node:crypto';
 import { normalizePhone } from './crm.ts';
 
-export type ReportType = 'clients' | 'memberships' | 'payments' | 'visits' | 'balances';
-export const REPORT_TYPES: ReportType[] = ['clients', 'memberships', 'payments', 'visits', 'balances'];
+export type ReportType = 'clients' | 'memberships' | 'payments' | 'visits' | 'balances' | 'tasks';
+export const REPORT_TYPES: ReportType[] = ['clients', 'memberships', 'payments', 'visits', 'balances', 'tasks'];
+/** Без этих отчётов перенос не начинается; «Задачи» — по желанию. */
+export const REQUIRED_REPORTS: ReportType[] = ['clients', 'memberships', 'payments', 'visits', 'balances'];
 export const REPORT_NAMES: Record<ReportType, string> = {
-  clients: 'Клиенты', memberships: 'Абонементы и договоры', payments: 'Платежи', visits: 'Посещения', balances: 'Остатки и долги',
+  clients: 'Клиенты', memberships: 'Абонементы и договоры', payments: 'Платежи', visits: 'Посещения', balances: 'Остатки и долги', tasks: 'Задачи и звонки',
 };
 
 type Kind = 'text' | 'date' | 'datetime' | 'money' | 'int' | 'phone' | 'email';
@@ -73,6 +75,19 @@ export const FIELDS: Record<ReportType, FieldDef[]> = {
     { key: 'advance', label: 'Аванс (деньги клиента)', kind: 'money', weight: 3, syn: ['аванс', 'остаток денег', 'депозит', 'баланс', 'на счете', 'предоплата', 'остаток средств', 'остаток на счете', 'лицевой счет'] },
     { key: 'due_on', label: 'Оплатить до', kind: 'date', weight: 1, syn: ['срок оплаты', 'оплатить до', 'дата долга', 'дата платежа', 'дата'] },
   ],
+  // Задачи и взаимодействия CRM 1С: открытые становятся задачами, выполненные — историей в карточке клиента
+  tasks: [
+    { key: 'ext_id', label: 'Номер задачи', kind: 'text', weight: 0.5, syn: ['код задачи', 'номер задачи', 'задача номер', 'взаимодействие номер', 'номер'] },
+    ...CLIENT_LINK,
+    { key: 'kind', label: 'Вид (звонок, встреча…)', kind: 'text', weight: 2, syn: ['вид задачи', 'тип задачи', 'вид взаимодействия', 'тип взаимодействия', 'вид', 'тип', 'вид события', 'способ связи'] },
+    { key: 'title', label: 'Тема', kind: 'text', weight: 2, syn: ['тема', 'задача', 'наименование', 'заголовок', 'предмет', 'взаимодействие'] },
+    { key: 'description', label: 'Описание', kind: 'text', weight: 1, syn: ['описание', 'содержание', 'текст', 'комментарий', 'описание задачи', 'примечание'] },
+    { key: 'due_at', label: 'Срок (дата и время)', kind: 'datetime', required: true, weight: 3, syn: ['срок', 'срок выполнения', 'крайний срок', 'дата задачи', 'запланировано на', 'дата начала', 'начало', 'дата и время', 'дата', 'план'] },
+    { key: 'done_at', label: 'Дата выполнения', kind: 'datetime', weight: 3, syn: ['дата выполнения', 'выполнено', 'дата завершения', 'завершено', 'дата закрытия', 'факт', 'фактическая дата'] },
+    { key: 'status', label: 'Статус', kind: 'text', weight: 2, syn: ['статус', 'состояние', 'статус задачи', 'выполнена'] },
+    { key: 'result', label: 'Результат', kind: 'text', weight: 2, syn: ['результат', 'итог', 'результат выполнения', 'результат взаимодействия', 'исход'] },
+    { key: 'assignee', label: 'Ответственный', kind: 'text', weight: 2, syn: ['ответственный', 'исполнитель', 'сотрудник', 'менеджер', 'ответственный сотрудник'] },
+  ],
 };
 
 const FILE_HINTS: [ReportType, RegExp][] = [
@@ -81,6 +96,7 @@ const FILE_HINTS: [ReportType, RegExp][] = [
   ['payments', /оплат|платеж|платёж|касс|поступлен|payment/i],
   ['visits', /посещ|визит|проход|visit/i],
   ['balances', /долг|остат|задолж|баланс|balance|debt/i],
+  ['tasks', /задач|взаимодейств|звонк|task/i],
 ];
 
 export const normHeader = (s: string) => s.toLowerCase().replace(/ё/g, 'е').replace(/[^a-zа-я0-9]+/g, ' ').trim();
@@ -226,5 +242,14 @@ export function productFromPresentation(raw: string): string {
 
 /** Строка документа продажи в отчёте по членствам КОРП — это не членство. */
 export const isSaleDocRow = (raw: string) => /^Продажа\s+\d+\s+от\s/.test(raw.trim());
+
+/** Вид задачи из 1С → вид задачи в системе. */
+export function taskKindOf(raw: string): 'call' | 'meeting' | 'message' | 'other' {
+  const s = raw.toLowerCase().replace(/ё/g, 'е');
+  if (/звон|телефон|прозвон|обзвон/.test(s)) return 'call';
+  if (/встреч|визит|экскурс|пробн|консультац/.test(s)) return 'meeting';
+  if (/сообщ|смс|sms|письм|почт|whatsapp|telegram|мессендж|рассыл/.test(s)) return 'message';
+  return 'other';
+}
 
 export const isFooter = (cells: string[]) => /^(итог|всего)/i.test(cells.find((c) => c !== '') ?? '');
