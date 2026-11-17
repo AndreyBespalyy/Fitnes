@@ -13,7 +13,7 @@ import { fmtDate, situationBrief } from './agent.ts';
 import { processDigest, processFromText } from './agentProcesses.ts';
 import { ROLE_NAME } from './agentProcesses.ts';
 import { WEEKLY_RE, weeklyChatAnswer } from './agentWeekly.ts';
-import { HINTS_RE, hintsChatAnswer, roleOf } from './agentMorning.ts';
+import { HINTS_RE, followUps, hintsChatAnswer, roleOf } from './agentMorning.ts';
 import { recordSuggestion } from './agentLearn.ts';
 import { MEETING_RE, MEETING_STATUS_RE, meetingPendingReply, meetingStatus, proposeMeeting } from './agentMeetings.ts';
 import { OWNER_HELP, isLeader, ownerAnswer, ownerPendingReply } from './agentOwner.ts';
@@ -284,13 +284,15 @@ export async function handleBotMessage(pool: pg.Pool, ctx: Ctx, chatId: string, 
         await db.query(`update agent_suggestions set message_id = $1 where id = any($2)`, [msgId, out.sids]);
         return;
       }
-      const msgId = await say(db, ctx.tenantId, chatId, bot, reply);
+      // Кнопки под ответом — следующий шаг по той же ветке разговора
+      const actions = followUps(text, isLeader(ctx));
+      const msgId = await say(db, ctx.tenantId, chatId, bot, reply, actions.length ? { actions } : null);
       // Ответ помощника тоже учится: его можно оценить, удачные ответы становятся образцами для нейросети
       if (rateable(reply)) {
         const role = await roleOf(db, ctx.userId, null);
         const clubId = (await clubOf(db, ctx.userId))?.id ?? null;
         const sid = await recordSuggestion(db, { clubId, userId: ctx.userId, role, source: 'chat', kind: chatKind(text, isLeader(ctx)), body: reply, question: text, messageId: msgId });
-        await db.query(`update team_messages set meta = $2 where id = $1`, [msgId, JSON.stringify({ kind: 'agent_answer', sid })]);
+        await db.query(`update team_messages set meta = $2 where id = $1`, [msgId, JSON.stringify({ kind: 'agent_answer', sid, ...(actions.length ? { actions } : {}) })]);
       }
     });
   } catch (e) { console.error('ИИ-помощник в мессенджере:', (e as Error).message); }

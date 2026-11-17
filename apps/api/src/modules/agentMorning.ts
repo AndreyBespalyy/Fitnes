@@ -195,6 +195,61 @@ export function hintsText(name: string, hints: MorningHint[]) {
   return [`**Доброе утро, ${name.split(' ')[0]}! 3 подсказки на сегодня:**`, ...hints.map((h, i) => `${i + 1}. ${h.text}`)].join('\n');
 }
 
+/* ---------- кнопки под подсказками: сразу в нужную ветку диалога или в нужный раздел CRM ---------- */
+/** ask — кнопка отправляет помощнику эту фразу; url — открывает раздел CRM (/?tab=…&person=…) */
+export type HintAction = { label: string; ask?: string; url?: string };
+
+const ACTIONS: Record<string, HintAction[]> = {
+  overdue_tasks: [{ label: 'Показать просроченные', ask: 'что просрочено' }, { label: 'Открыть задачи', url: '/?tab=tasks' }],
+  today_tasks: [{ label: 'Мои задачи', ask: 'мои задачи' }, { label: 'Открыть задачи', url: '/?tab=tasks' }],
+  process_step: [{ label: 'Открыть задачи', url: '/?tab=tasks' }],
+  leads_reply: [{ label: 'Открыть заявки без ответа', url: '/?tab=leads&filter=noresponse' }],
+  rop_leads: [{ label: 'Открыть заявки без ответа', url: '/?tab=leads&filter=noresponse' }],
+  owner_leads: [{ label: 'Что горит', ask: 'что горит' }, { label: 'Открыть заявки', url: '/?tab=leads&filter=noresponse' }],
+  msg_reply: [{ label: 'Открыть переписку', url: '/?tab=chats' }],
+  rop_msgs: [{ label: 'Открыть переписку', url: '/?tab=chats' }],
+  desk_msgs: [{ label: 'Открыть переписку', url: '/?tab=chats' }],
+  rop_help: [{ label: 'Что горит', ask: 'что горит' }],
+  hot_calls: [{ label: 'Кому звонить', url: '/?tab=hot' }],
+  stuck_deals: [{ label: 'Открыть сделки', url: '/?tab=board' }],
+  desk_classes: [{ label: 'Расписание', url: '/?tab=schedule' }],
+  desk_missed: [{ label: 'Открыть звонки', url: '/?tab=calls' }],
+  trainer_classes: [{ label: 'Моё расписание', url: '/?tab=schedule&mine=1' }],
+  plan_red: [{ label: 'Выполним план?', ask: 'выполним план?' }, { label: 'Что горит', ask: 'что горит' }],
+  plan_status: [{ label: 'Выполним план?', ask: 'выполним план?' }],
+  sales_yesterday: [{ label: 'Выполним план?', ask: 'выполним план?' }],
+  proc_late: [{ label: 'На ком застряли', ask: 'процессы' }, { label: 'Открыть процессы', url: '/?tab=processes' }],
+  escalations: [{ label: 'Что горит', ask: 'что горит' }, { label: 'Просроченные', ask: 'что просрочено' }],
+  weekly_tip: [{ label: 'Разбор недели', url: '/?tab=weekly' }],
+};
+/** Подсказки про конкретных клиентов: кнопка на карточку каждого (до трёх) */
+const PERSON_KINDS = new Set(['desk_renew', 'trainer_noshow', 'trainer_idle', 'hot_calls']);
+
+export async function hintActions(db: Db, h: MorningHint): Promise<HintAction[]> {
+  const out = [...(ACTIONS[h.kind] ?? [])];
+  const ids = (h.targets?.personIds ?? []).slice(0, 3);
+  if (PERSON_KINDS.has(h.kind) && ids.length) {
+    const rows = (await db.query(`select id, full_name from persons where id = any($1)`, [ids])).rows as { id: string; full_name: string }[];
+    for (const id of ids) {
+      const r = rows.find((x) => x.id === id);
+      if (r) out.push({ label: r.full_name.split(' ').slice(0, 2).join(' '), url: `/?person=${id}` });
+    }
+  }
+  return out.slice(0, 4);
+}
+export const actionsFor = (db: Db, hints: MorningHint[]) => Promise.all(hints.map((h) => hintActions(db, h)));
+
+/** Кнопки под ответом помощника — следующий шаг по той же ветке */
+export function followUps(question: string, leader: boolean): HintAction[] {
+  const t = question.trim().toLowerCase().replace(/ё/g, 'е');
+  if (/выполним план|прогноз/.test(t)) return [{ label: 'Что горит', ask: 'что горит' }, { label: 'Открыть продажи', url: '/?tab=sales' }];
+  if (/что горит|сводк/.test(t)) return leader ? [{ label: 'Выполним план?', ask: 'выполним план?' }, { label: 'Процессы', ask: 'процессы' }, { label: 'Открыть задачи', url: '/?tab=tasks&scope=all' }] : [];
+  if (/просроч/.test(t)) return [{ label: 'Открыть задачи', url: '/?tab=tasks' }, { label: 'Мои задачи', ask: 'мои задачи' }];
+  if (/^(мои )?задачи/.test(t)) return [{ label: 'Что просрочено', ask: 'что просрочено' }, { label: 'Открыть задачи', url: '/?tab=tasks' }];
+  if (/^(процессы|как идут процессы|бизнес[- ]?процессы|что с процессами)/.test(t)) return [{ label: 'Открыть процессы', url: '/?tab=processes' }];
+  return [];
+}
+
 /** Записывает подсказки для обучения и возвращает их номера (по ним кнопки «Полезно» / «Не то» под каждой подсказкой) */
 export async function recordHints(db: Db, u: Person, clubId: string | null, hints: MorningHint[], source: 'morning' | 'chat') {
   const ids: string[] = [];
@@ -230,7 +285,8 @@ export async function processMorningHints(db: Db, actor: Actor, clubId: string) 
     const person = { id: s.id, name: s.name, role };
     const hints = await morningHints(db, person, clubs.length ? clubs : [clubId]);
     const sids = await recordHints(db, person, clubId, hints, 'morning');
-    const msgId = await botSay(db, actor.tenantId, s.id, hintsText(s.name, hints), { kind: 'morning_hints', userId: s.id, day: t.today, sids }, false);
+    const acts = await actionsFor(db, hints);
+    const msgId = await botSay(db, actor.tenantId, s.id, hintsText(s.name, hints), { kind: 'morning_hints', userId: s.id, day: t.today, sids, acts }, false);
     if (msgId) await db.query(`update agent_suggestions set message_id = $1 where id = any($2)`, [msgId, sids]);
     sent++;
   }
@@ -252,5 +308,6 @@ export async function hintsChatAnswer(db: Db, ctx: Ctx): Promise<string | { text
   const person = { id: ctx.userId, name: me?.full_name ?? '', role };
   const hints = await morningHints(db, person, clubs);
   const sids = await recordHints(db, person, clubs[0], hints, 'chat');
-  return { text: [`**3 подсказки на сегодня:**`, ...hints.map((h, i) => `${i + 1}. ${h.text}`)].join('\n'), meta: { kind: 'morning_hints', sids }, sids };
+  const acts = await actionsFor(db, hints);
+  return { text: [`**3 подсказки на сегодня:**`, ...hints.map((h, i) => `${i + 1}. ${h.text}`)].join('\n'), meta: { kind: 'morning_hints', sids, acts }, sids };
 }
