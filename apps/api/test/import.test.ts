@@ -4,7 +4,7 @@ import pg from 'pg';
 import { setupTestApp, login, PASSWORD } from './helpers.ts';
 import { samples, xlsx, csv1251 } from '../db/scripts/importSamples.ts';
 import { readTable } from '../src/lib/tables.ts';
-import { detectReport, findHeaderRow, parseMoney, parseDate } from '../src/modules/importMap.ts';
+import { detectReport, findHeaderRow, isSaleDocRow, linkNumber, parseMoney, parseDate, productFromPresentation } from '../src/modules/importMap.ts';
 
 let t: Awaited<ReturnType<typeof setupTestApp>>;
 let owner: Record<string, string>;
@@ -35,11 +35,11 @@ async function uploadAll(batchId: string, cookies = gm) {
   }
   return out;
 }
-async function confirmAll(batchId: string) {
-  const b = (await api('GET', `/api/import/batches/${batchId}`, gm)).json();
+async function confirmAll(batchId: string, cookies = gm) {
+  const b = (await api('GET', `/api/import/batches/${batchId}`, cookies)).json();
   for (const f of b.files) {
     const mapping = Object.fromEntries(Object.entries(f.mapping as Record<string, { col: number } | null>).map(([k, v]) => [k, v ? v.col : null]));
-    const r = await api('PUT', `/api/import/files/${f.id}`, gm, { reportType: f.reportType, mapping });
+    const r = await api('PUT', `/api/import/files/${f.id}`, cookies, { reportType: f.reportType, mapping });
     assert.equal(r.statusCode, 200, r.body);
   }
 }
@@ -79,6 +79,26 @@ test('чтение таблиц и разбор значений', () => {
   assert.equal(korp.mapping.contract_date?.col, 6);
   assert.equal(korp.mapping.starts_on?.col, 7);
   assert.equal(korp.mapping.ends_on?.col, 8);
+  // Отчёты КОРП 4.0 с полями через точку
+  const kv = detectReport(['Клиент', '', 'Посещение', 'Клиент.Код', 'Посещение.Дата прихода', 'Посещение.Дата ухода', 'Посещение.Основание посещения', 'Номер', 'Посещение.Помещение'], 'Посещения.xlsx');
+  assert.equal(kv.type, 'visits');
+  assert.equal(kv.mapping.visited_at?.col, 4);
+  assert.equal(kv.mapping.left_at?.col, 5);
+  assert.equal(kv.mapping.membership_ext?.col, 7);
+  assert.equal(kv.mapping.zone?.col, 8);
+  const kp = detectReport(['Клиент', 'Документ движения', 'Клиент.Код', 'Документ движения.Вид операции', 'Документ движения.Дата', 'Документ движения.Номер', 'Тип денежных средств', 'Членство пакет услуг', 'Сумма'], 'Оплаты.xlsx');
+  assert.equal(kp.type, 'payments');
+  assert.equal(kp.mapping.ext_id?.col, 5);
+  assert.equal(kp.mapping.date?.col, 4);
+  assert.equal(kp.mapping.method?.col, 6);
+  assert.equal(kp.mapping.operation?.col, 3);
+  assert.equal(linkNumber('00000006729'), '6729');
+  assert.equal(linkNumber('Членство "Sandow Platinum 2022" 6729 от 30.10.2022 00:00'), '6729');
+  assert.equal(linkNumber('Д-15'), 'Д-15');
+  assert.equal(productFromPresentation('Членство "Членство "Бронзовое". 3этап" 5339 от 01.12.2017 00:00'), 'Членство "Бронзовое". 3этап');
+  assert.equal(productFromPresentation('Пакет услуг "Sandow Silver (II)" 9172 от 05.09.2023 21:44'), 'Sandow Silver (II)');
+  assert.ok(isSaleDocRow('Продажа 5339 от 15.07.2023 11:00'));
+  assert.ok(!isSaleDocRow('Членство "Gold" 1 от 01.01.2024 00:00'));
   assert.ok(xlsx([['a']]).length > 0 && csv1251([['б']]).length > 0);
 });
 
@@ -249,4 +269,64 @@ test('ручная карта полей: обязательные поля и �
   assert.equal((await api('PUT', `/api/import/files/${f.id}`, gm, { reportType: 'payments', mapping: { client_name: 0, date: 1, amount: 1 } })).statusCode, 400);
   assert.equal((await api('PUT', `/api/import/files/${f.id}`, gm, { reportType: 'payments', mapping: { client_name: 0, date: 1, amount: 2 } })).statusCode, 200);
   assert.equal((await api('DELETE', `/api/import/files/${f.id}`, gm)).statusCode, 200);
+});
+
+test('все конфликты пакета решаются одним действием', async () => {
+  const b = (await api('POST', '/api/import/batches', owner, { clubId: c2 })).json();
+  await uploadAll(b.id, owner);
+  await confirmAll(b.id, owner);
+  let rep = (await api('POST', `/api/import/batches/${b.id}/check`, owner)).json();
+  const before = rep.counts.clients.conflict;
+  assert.ok(before >= 1, 'в образцах есть общий телефон');
+  assert.equal((await api('POST', `/api/import/batches/${b.id}/resolve-conflicts`, owner, { resolution: 'merge' })).statusCode, 400);
+  const r = (await api('POST', `/api/import/batches/${b.id}/resolve-conflicts`, owner, { resolution: 'new' })).json();
+  assert.equal(r.resolved, before);
+  rep = (await api('POST', `/api/import/batches/${b.id}/check`, owner)).json();
+  assert.equal(rep.counts.clients.conflict, 0);
+  assert.ok(!rep.blockers.some((x: string) => x.startsWith('Не решены конфликты')));
+  // Повтор ничего не меняет
+  assert.equal((await api('POST', `/api/import/batches/${b.id}/resolve-conflicts`, owner, { resolution: 'new' })).json().resolved, 0);
+});
+
+test('шестой отчёт «Задачи»: открытые — в работу, выполненные — в историю, отмена удаляет', async () => {
+  const mgr = await owner$(async (c) => (await c.query(`select u.id, u.full_name from users u join user_assignments a on a.user_id = u.id
+    where a.club_id = $1 and a.role_code in ('manager', 'rop') and u.status = 'active' order by u.full_name limit 1`, [c2])).rows[0]);
+  const gmC2 = await owner$(async (c) => (await c.query(`select u.id from users u join user_assignments a on a.user_id = u.id
+    where a.club_id = $1 and a.role_code = 'gm' and u.status = 'active' limit 1`, [c2])).rows[0]?.id ?? null);
+  const b = (await api('POST', '/api/import/batches', owner, { clubId: c2 })).json();
+  await uploadAll(b.id, owner);
+  const tasksFile = xlsx([
+    ['Задачи CRM'],
+    ['Номер', 'Клиент.Код', 'Клиент', 'Вид', 'Тема', 'Описание', 'Срок', 'Дата выполнения', 'Статус', 'Результат', 'Ответственный'],
+    ['00000000101', 'К-0001', 'Иванова Мария Сергеевна', 'Исходящий звонок', 'Продление', 'Предложить 12 месяцев', '25.12.2030 15:00', '', 'Запланирована', '', mgr.full_name],
+    ['00000000102', 'К-0002', 'Петров Илья Андреевич', 'Встреча', 'Пробная тренировка', '', '26.12.2030 10:00', '', 'В работе', '', 'Неизвестный Сотрудник'],
+    ['00000000103', 'К-0001', 'Иванова Мария Сергеевна', 'Звонок', 'Знакомство', 'Рассказали про клуб', '01.03.2024 12:00', '01.03.2024 12:10', 'Выполнена', 'Записалась на пробную', mgr.full_name],
+    ['00000000104', 'К-0099', 'Чужой Клиент', 'Звонок', 'Тест', '', '01.03.2024 12:00', '', '', '', ''],
+  ]);
+  const up = await api('POST', `/api/import/batches/${b.id}/files`, owner, { fileName: 'Задачи.xlsx', dataBase64: tasksFile.toString('base64') });
+  assert.equal(up.statusCode, 201, up.body);
+  assert.equal(up.json().reportType, 'tasks');
+  await confirmAll(b.id, owner);
+  await api('POST', `/api/import/batches/${b.id}/check`, owner);
+  await api('POST', `/api/import/batches/${b.id}/resolve-conflicts`, owner, { resolution: 'new' });
+  const rep = (await api('POST', `/api/import/batches/${b.id}/check`, owner)).json();
+  assert.equal(rep.canApply, true, JSON.stringify(rep.blockers));
+  assert.equal(rep.counts.tasks.load, 3);
+  assert.equal(rep.counts.tasks.excluded, 1, 'клиента К-0099 нет в отчёте клиентов');
+  assert.equal(rep.completeness.tasksOpen, 2);
+  assert.equal(rep.completeness.tasksHistory, 1);
+  const ap = await api('POST', `/api/import/batches/${b.id}/apply`, owner, { password: PASSWORD });
+  assert.equal(ap.statusCode, 200, ap.body);
+  assert.equal(ap.json().applied.tasks, 2);
+  const rows = await owner$(async (c) => (await c.query(`select t.kind, t.title, t.assignee_id, t.done_at, t.result, p.full_name from tasks t left join persons p on p.id = t.person_id
+    where t.import_batch_id = $1 order by t.due_at`, [b.id])).rows);
+  assert.equal(rows.length, 3);
+  const [hist, call, meet] = rows;
+  assert.equal(hist.kind, 'call'); assert.ok(hist.done_at); assert.match(hist.result, /Записалась на пробную/);
+  assert.equal(call.kind, 'call'); assert.equal(call.done_at, null); assert.equal(call.assignee_id, mgr.id); assert.equal(call.full_name, 'Иванова Мария Сергеевна');
+  assert.match(call.title, /Продление: Предложить 12 месяцев/);
+  assert.equal(meet.kind, 'meeting'); assert.equal(meet.assignee_id, gmC2, 'неизвестный сотрудник → управляющий клуба');
+  // Отмена переноса удаляет и задачи
+  assert.equal((await api('POST', `/api/import/batches/${b.id}/rollback`, owner, { password: PASSWORD })).statusCode, 200);
+  assert.equal(await owner$(async (c) => Number((await c.query('select count(*) from tasks where import_batch_id = $1', [b.id])).rows[0].count)), 0);
 });

@@ -11,7 +11,8 @@ import { badRequest, notFound } from '../errors.ts';
 import { PERMISSIONS as P } from '../roles.ts';
 import { staffOf } from './salesOps.ts';
 import { processWeeklyReview } from './agentWeekly.ts';
-import { processMorningHints } from './agentMorning.ts';
+import { processMorningHints, roleOf } from './agentMorning.ts';
+import { processOutcomes, recordSuggestion, type Targets } from './agentLearn.ts';
 
 type Actor = { tenantId: string; userId: string | null };
 export type AgentSettings = { enabled: boolean; taskRopMinutes: number; taskGmMinutes: number; taskOwnerMinutes: number; replyWaitMinutes: number;
@@ -35,11 +36,23 @@ type Card = { kind: string; title: string; body: string; objectType: 'task' | 'o
 
 /** Карточка-уведомление с кнопками */
 export async function card(db: Db, clubId: string, userIds: string[], c: Card) {
-  const ids = [...new Set(userIds)].filter(Boolean);
+  let ids = [...new Set(userIds)].filter(Boolean);
   if (!ids.length) return 0;
-  await db.query(`insert into staff_notifications(tenant_id, club_id, user_id, kind, title, body, link, object_type, object_id, actions)
-    select app_tenant(), $1, u, $3, $4, $5, $6, $7, $8, $9 from unnest($2::uuid[]) u`,
-  [clubId, ids, c.kind, c.title.slice(0, 200), c.body.slice(0, 1000), c.link ? JSON.stringify(c.link) : null, c.objectType, c.objectId, JSON.stringify(c.actions)]);
+  // Обучение: роль каждого получателя; карточки, которые руководитель выключил для роли («Не показывать»), не шлём
+  const kind = `card:${c.kind}`;
+  const roles = new Map<string, string>();
+  for (const u of ids) roles.set(u, await roleOf(db, u, clubId));
+  const off = new Set((await db.query(`select role from agent_kind_rules where club_id = $1 and kind = $2 and mode = 'off'`, [clubId, kind])).rows.map((r) => r.role as string));
+  if (off.size) ids = ids.filter((u) => !off.has(roles.get(u)!));
+  if (!ids.length) return 0;
+  const notes = (await db.query(`insert into staff_notifications(tenant_id, club_id, user_id, kind, title, body, link, object_type, object_id, actions)
+    select app_tenant(), $1, u, $3, $4, $5, $6, $7, $8, $9 from unnest($2::uuid[]) u returning id, user_id`,
+  [clubId, ids, c.kind, c.title.slice(0, 200), c.body.slice(0, 1000), c.link ? JSON.stringify(c.link) : null, c.objectType, c.objectId, JSON.stringify(c.actions)])).rows;
+  const targets: Targets = !c.objectId ? {} : c.objectType === 'task' ? { taskIds: [c.objectId] } : c.objectType === 'opportunity' ? { opportunityIds: [c.objectId] }
+    : c.objectType === 'lead' ? { leadIds: [c.objectId] } : c.objectType === 'conversation' ? { conversationIds: [c.objectId] } : {};
+  for (const n of notes) {
+    await recordSuggestion(db, { clubId, userId: n.user_id, role: roles.get(n.user_id), source: 'card', kind, body: `${c.title}${c.body ? `. ${c.body}` : ''}`, targets, notificationId: n.id });
+  }
   return ids.length;
 }
 
@@ -176,6 +189,7 @@ export async function processLeadReassign(db: Db, actor: Actor, clubId: string, 
 export async function processAgentClub(db: Db, actor: Actor, c: { id: string; h: number }) {
   await processMeetingReminders(db, c.id); // собрания — всегда, даже в тихие часы: напоминание за час до начала
   await advanceProcesses(db, actor, c.id); // бизнес-процессы: выполненный шаг → следующий
+  await processOutcomes(db, c.id); // обучение: чем кончились подсказки (сделали, продажа или проигнорировали)
   const s = await agentSettings(db, c.id);
   if (!s.enabled) return { tasks: 0, replies: 0, reassigned: 0 };
   await processWeeklyReview(db, actor, c.id); // понедельник утром — разбор прошлой недели
@@ -241,6 +255,11 @@ export async function doAction(db: Db, ctx: Ctx, noteId: string, action: Action)
     }
   }
   await db.query(`update staff_notifications set acted_at = now(), acted = $2, read_at = coalesce(read_at, now()) where id = $1`, [noteId, action]);
+  // Обучение: руководитель отреагировал на карточку (напомнил, передал) — карточка сработала
+  if (action === 'nudge' || action === 'reassign') {
+    await db.query(`update agent_suggestions set outcome = 'done', outcome_note = $2, outcome_at = now() where notification_id = $1 and outcome is null`,
+      [noteId, action === 'nudge' ? 'напомнили исполнителю' : 'передали другому']);
+  }
   return { ok: true, message };
 }
 

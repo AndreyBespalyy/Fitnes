@@ -12,8 +12,8 @@ import { PERMISSIONS as P } from '../roles.ts';
 import { readTable, TableError } from '../lib/tables.ts';
 import { clubToday, daysBetween } from './memberships.ts';
 import {
-  detectReport, FIELDS, findHeaderRow, headerSignature, isFooter, mapColumns, methodOf, normEmail, normName, normalizePhone,
-  parseDate, parseInt10, parseMoney, REPORT_NAMES, REPORT_TYPES, type Mapping, type ReportType,
+  detectReport, FIELDS, findHeaderRow, headerSignature, isFooter, isSaleDocRow, linkNumber, mapColumns, productFromPresentation, methodOf, normEmail, normName, normalizePhone,
+  parseDate, parseInt10, parseMoney, REPORT_NAMES, REPORT_TYPES, REQUIRED_REPORTS, taskKindOf, type Mapping, type ReportType,
 } from './importMap.ts';
 
 const SOURCE = '1c';
@@ -36,6 +36,7 @@ type PMembership = { row: Row; key: string; client: ClientRef; productName: stri
 type PPayment = { row: Row; key: string; client: ClientRef | null; membershipKey: string | null; at: string; month: string; dir: 'in' | 'out'; amount: number; method: string };
 type PVisit = { row: Row; key: string; client: ClientRef; membershipKey: string | null; at: string };
 type PDebt = { row: Row; key: string; client: ClientRef; membershipKey: string | null; amount: number; dueOn: string };
+type PTask = { row: Row; key: string; client: ClientRef | null; kind: string; title: string; dueAt: string; doneAt: string | null; result: string | null; assigneeId: string | null };
 
 /* ======================= анализ (пробный перенос) ======================= */
 async function analyze(db: Db, batch: { id: string; club_id: string }) {
@@ -155,20 +156,30 @@ async function analyze(db: Db, batch: { id: string; club_id: string }) {
     const g = getter(f);
     for (const r of byFile.get(f.id) ?? []) {
       if (isFooter(r.cells)) { const s = parseMoney(g(r, 'amount')); if (s !== null) footers.memberships = (footers.memberships ?? 0) + s; mark(r, 'skipped', 'Строка итогов отчёта'); continue; }
-      const productName = g(r, 'product_name');
-      const starts = parseDate(g(r, 'starts_on'))?.date;
+      const rawProduct = g(r, 'product_name');
+      // Отчёт по членствам 1С:Фитнес клуб КОРП перемежает членства строками документов продажи и строкой-подзаголовком
+      if (isSaleDocRow(rawProduct)) { mark(r, 'skipped', 'Строка продажи, не членство'); continue; }
+      if (!rawProduct && !g(r, 'client_ext') && !g(r, 'client_name') && !g(r, 'starts_on')) { mark(r, 'skipped', 'Пустая строка или подзаголовок'); continue; }
+      const productName = productFromPresentation(rawProduct);
+      const rawStarts = parseDate(g(r, 'starts_on'))?.date;
       const rawEnds = g(r, 'ends_on'); const ends = rawEnds ? parseDate(rawEnds)?.date ?? null : null;
-      const contractNumber = g(r, 'contract_number') || null;
-      const key = g(r, 'ext_id') || contractNumber || `h:${sha(JSON.stringify(r.cells)).slice(0, 24)}`;
+      const contractNumber = g(r, 'contract_number') ? linkNumber(g(r, 'contract_number')) : null;
+      const key = (g(r, 'ext_id') ? linkNumber(g(r, 'ext_id')) : '') || contractNumber || `h:${sha(JSON.stringify(r.cells)).slice(0, 24)}`;
       const prev = mSeen.get(key);
       if (prev) {
+        const same = (k: string) => getter(f)(prev, k) === g(r, k);
         if (prev.checksum === r.checksum) mark(r, 'skipped', 'Повтор строки', `Повтор строки ${prev.row_no}`);
+        // 1С повторяет строку членства для каждого телефона клиента
+        else if (same('product_name') && (same('client_ext') || same('client_name'))) mark(r, 'skipped', 'Повтор строки', `Повтор строки ${prev.row_no} (другой телефон клиента)`);
         else mark(r, 'excluded', 'Код абонемента повторяется', `Абонемент «${key}» уже есть в строке ${prev.row_no}`);
         continue;
       }
       mSeen.set(key, r);
       if (earlierMembership(key)) { mark(r, 'skipped', 'Уже перенесено раньше'); continue; }
       if (!productName) { mark(r, 'excluded', 'Нет названия абонемента'); continue; }
+      const saleDate = g(r, 'contract_date') ? parseDate(g(r, 'contract_date'))?.date : undefined;
+      // Членство продано, но не активировано: берём дату продажи, человек увидит замечание
+      const starts = rawStarts ?? (!g(r, 'starts_on') && saleDate && (!ends || saleDate <= ends) ? saleDate : undefined);
       if (!starts) { mark(r, 'excluded', 'Нет даты начала', g(r, 'starts_on') ? `Дата начала не распознана: «${g(r, 'starts_on')}»` : 'Нет даты начала'); continue; }
       if (rawEnds && !ends) { mark(r, 'excluded', 'Дата окончания не распознана', `Дата окончания не распознана: «${rawEnds}»`); continue; }
       if (ends && ends < starts) { mark(r, 'excluded', 'Окончание раньше начала'); continue; }
@@ -179,6 +190,7 @@ async function analyze(db: Db, batch: { id: string; club_id: string }) {
       const st = g(r, 'status').toLowerCase();
       const warns: string[] = [];
       if (!rawAmount) warns.push('нет стоимости, записана 0 ₽');
+      if (!rawStarts) warns.push('нет даты активации, взята дата продажи');
       if (/заморож/.test(st)) warns.push('в 1С абонемент заморожен: оформите заморозку в системе');
       const contractDateRaw = g(r, 'contract_date');
       const m: PMembership = { row: r, key, client: cl.ref, productName, starts, ends, amount,
@@ -192,7 +204,8 @@ async function analyze(db: Db, batch: { id: string; club_id: string }) {
       else mark(r, 'ok');
     }
   }
-  const findMembership = (client: ClientRef | null, memExt: string, contract: string, date: string): string | null => {
+  const findMembership = (client: ClientRef | null, rawMemExt: string, rawContract: string, date: string): string | null => {
+    const memExt = rawMemExt ? linkNumber(rawMemExt) : ''; const contract = rawContract ? linkNumber(rawContract) : '';
     if (memExt && mByKey.has(memExt)) return memExt;
     if (contract && mByContract.has(contract)) return mByContract.get(contract)!.key;
     if (contract && mByKey.has(contract)) return contract;
@@ -212,6 +225,8 @@ async function analyze(db: Db, batch: { id: string; club_id: string }) {
     for (const r of byFile.get(f.id) ?? []) {
       if (isFooter(r.cells)) { const s = parseMoney(g(r, 'amount')); if (s !== null) footers.payments = (footers.payments ?? 0) + s; mark(r, 'skipped', 'Строка итогов отчёта'); continue; }
       const d = parseDate(g(r, 'date'));
+      // В отчёте КОРП документ оплаты разнесён по членствам; строка без суммы — членство, на которое из этой оплаты ничего не пришлось
+      if (!g(r, 'amount')) { mark(r, 'skipped', 'Нулевая сумма'); continue; }
       const signed = parseMoney(g(r, 'amount'));
       if (!d) { mark(r, 'excluded', 'Нет даты платежа', g(r, 'date') ? `Дата не распознана: «${g(r, 'date')}»` : 'Нет даты платежа'); continue; }
       if (signed === null) { mark(r, 'excluded', 'Сумма не распознана', `Сумма не распознана: «${g(r, 'amount')}»`); continue; }
@@ -223,7 +238,9 @@ async function analyze(db: Db, batch: { id: string; club_id: string }) {
       const entry = { month, dir, amount, loaded: false };
       moneyAll.push(entry);
       const ext = g(r, 'ext_id');
-      const base = ext ? `${ext}|${d.date}|${dir}` : `h:${sha([d.date, d.time, g(r, 'client_ext'), g(r, 'client_name'), signed, g(r, 'method'), op].join('|')).slice(0, 24)}`;
+      // Одна оплата может быть разнесена на несколько членств: каждая часть — отдельный платёж
+      const part = linkNumber(g(r, 'membership_ext') || g(r, 'contract_number') || '');
+      const base = ext ? `${ext}|${d.date}|${dir}${part ? `|${part}` : ''}` : `h:${sha([d.date, d.time, g(r, 'client_ext'), g(r, 'client_name'), signed, g(r, 'method'), op].join('|')).slice(0, 24)}`;
       const key = ext ? base : occKey(base);
       const prev = paySeen.get(key);
       if (prev) {
@@ -277,6 +294,7 @@ async function analyze(db: Db, batch: { id: string; club_id: string }) {
   /* ---- остатки и долги ---- */
   const debts: PDebt[] = [];
   let debtSource = 0; let advanceSource = 0; let advanceCount = 0;
+  const debtSeen = new Map<string, Row>();
   for (const f of filesOf('balances')) {
     const g = getter(f);
     for (const r of byFile.get(f.id) ?? []) {
@@ -289,12 +307,16 @@ async function analyze(db: Db, batch: { id: string; club_id: string }) {
       const advKop = Math.max(0, adv) + (debt < 0 ? -debt : 0);
       debtSource += debtKop; advanceSource += advKop; if (advKop) advanceCount++;
       if (!debtKop && !advKop) { mark(r, 'skipped', 'Нулевой остаток'); continue; }
-      const cl = findClient(g(r, 'client_ext'), g(r, 'client_name'), g(r, 'client_phone'));
-      if ('error' in cl) { mark(r, 'excluded', cl.group, cl.error); continue; }
       const dueRaw = g(r, 'due_on');
       const dueOn = (dueRaw ? parseDate(dueRaw)?.date : null) ?? today;
+      const key = `${srcClient(g, r)}|${linkNumber(g(r, 'membership_ext') || g(r, 'contract_number') || '')}|${debtKop}|${dueOn}`;
+      // 1С повторяет долг документа продажи в каждой строке номенклатуры этого документа
+      const prevDebt = debtSeen.get(key);
+      if (prevDebt) { debtSource -= debtKop; advanceSource -= advKop; if (advKop) advanceCount--; mark(r, 'skipped', 'Повтор строки', `Тот же долг документа уже в строке ${prevDebt.row_no}`); continue; }
+      debtSeen.set(key, r);
+      const cl = findClient(g(r, 'client_ext'), g(r, 'client_name'), g(r, 'client_phone'));
+      if ('error' in cl) { mark(r, 'excluded', cl.group, cl.error); continue; }
       const membershipKey = findMembership(cl.ref, g(r, 'membership_ext'), g(r, 'contract_number'), dueOn);
-      const key = `${srcClient(g, r)}|${g(r, 'membership_ext') || g(r, 'contract_number') || ''}|${debtKop}|${dueOn}`;
       if (earlier.has(`debt:${key}`)) { mark(r, 'skipped', 'Уже перенесено раньше'); continue; }
       if (debtKop) debts.push({ row: r, key, client: cl.ref, membershipKey, amount: debtKop, dueOn });
       if (advKop) mark(r, 'warning', 'Аванс клиента', `аванс ${rub(advKop)}: лицевого счёта в системе пока нет, сумма показана в отчёте сверки`);
@@ -302,8 +324,64 @@ async function analyze(db: Db, batch: { id: string; club_id: string }) {
     }
   }
 
+  /* ---- задачи и звонки ---- */
+  const tasks: PTask[] = [];
+  if (filesOf('tasks').length) {
+    // Ответственного ищем по ФИО среди сотрудников клуба; не нашли — задача уходит управляющему клуба
+    const staff = (await db.query(`select distinct u.id, u.full_name, a.role_code from users u join user_assignments a on a.user_id = u.id
+      where a.club_id = $1 and u.status = 'active'`, [batch.club_id])).rows as { id: string; full_name: string; role_code: string }[];
+    const staffByName = new Map<string, string>();
+    for (const u of staff) {
+      const n = normName(u.full_name); staffByName.set(n, u.id);
+      const [fam, name] = n.split(' '); if (fam && name && !staffByName.has(`${fam} ${name}`)) staffByName.set(`${fam} ${name}`, u.id);
+    }
+    const gmId = staff.find((u) => u.role_code === 'gm')?.id ?? null;
+    const findStaff = (raw: string) => { const n = normName(raw); if (!n) return null; const [fam, name] = n.split(' '); return staffByName.get(n) ?? staffByName.get(`${fam} ${name}`) ?? null; };
+    const taskSeen = new Set<string>();
+    for (const f of filesOf('tasks')) {
+      const g = getter(f);
+      for (const r of byFile.get(f.id) ?? []) {
+        if (isFooter(r.cells)) { mark(r, 'skipped', 'Строка итогов отчёта'); continue; }
+        const due = parseDate(g(r, 'due_at'));
+        const rawDone = g(r, 'done_at'); const done = rawDone ? parseDate(rawDone) : null;
+        if (!due && !done) { mark(r, 'excluded', 'Нет срока задачи', g(r, 'due_at') ? `Срок не распознан: «${g(r, 'due_at')}»` : 'Нет срока задачи'); continue; }
+        const status = g(r, 'status').toLowerCase().replace(/ё/g, 'е');
+        const cancelled = /отмен|аннул|не актуал/.test(status);
+        const closed = !!done || cancelled || /выполн|заверш|закрыт|сделан|^да$/.test(status);
+        const at = (d: { date: string; time: string | null }) => `${d.date} ${d.time ?? '12:00:00'}`;
+        const dueAt = at(due ?? done!);
+        const doneAt = closed ? at(done ?? due!) : null;
+        const ext = g(r, 'ext_id') ? linkNumber(g(r, 'ext_id')) : '';
+        const key = ext || `h:${sha([dueAt, srcClient(g, r), g(r, 'title'), g(r, 'kind')].join('|')).slice(0, 24)}`;
+        if (taskSeen.has(key)) { mark(r, 'skipped', 'Повтор строки'); continue; }
+        taskSeen.add(key);
+        if (earlier.has(`task:${key}`)) { mark(r, 'skipped', 'Уже перенесено раньше'); continue; }
+        let client: ClientRef | null = null;
+        if (g(r, 'client_ext') || g(r, 'client_name') || g(r, 'client_phone')) {
+          const cl = findClient(g(r, 'client_ext'), g(r, 'client_name'), g(r, 'client_phone'));
+          if ('error' in cl) { mark(r, 'excluded', cl.group, cl.error); continue; }
+          client = cl.ref;
+        }
+        const kindRaw = g(r, 'kind');
+        const kind = taskKindOf(`${kindRaw} ${g(r, 'title')}`);
+        const desc = g(r, 'description');
+        const titleBase = g(r, 'title') || kindRaw || 'Задача из 1С';
+        const title = (desc && !closed && desc !== titleBase ? `${titleBase}: ${desc}` : titleBase).slice(0, 500);
+        const resultParts = [cancelled ? 'Отменена в 1С' : '', g(r, 'result'), closed && desc && desc !== titleBase ? desc : ''].filter(Boolean);
+        const warns: string[] = [];
+        const assigneeRaw = g(r, 'assignee');
+        let assigneeId = findStaff(assigneeRaw);
+        if (!assigneeId && !closed) { assigneeId = gmId; warns.push(assigneeRaw ? `сотрудника «${assigneeRaw}» нет в системе, задача у управляющего` : 'не указан ответственный, задача у управляющего'); }
+        if (!client && !closed) warns.push('задача без клиента');
+        tasks.push({ row: r, key, client, kind, title, dueAt, doneAt, result: resultParts.join('. ').slice(0, 2000) || null, assigneeId });
+        if (warns.length) mark(r, 'warning', closed ? 'Есть замечания' : 'Открытая задача: есть замечания', warns.join('; '));
+        else mark(r, 'ok');
+      }
+    }
+  }
+
   /* ---- отчёт ---- */
-  const missing = REPORT_TYPES.filter((t) => !filesOf(t).length);
+  const missing = REQUIRED_REPORTS.filter((t) => !filesOf(t).length);
   const unconfirmed = files.filter((f) => f.report_type && !f.mapping_confirmed).map((f) => f.original_name);
   const unknown = files.filter((f) => !f.report_type).map((f) => f.original_name);
   const counts = Object.fromEntries(REPORT_TYPES.map((t) => {
@@ -357,6 +435,8 @@ async function analyze(db: Db, batch: { id: string; club_id: string }) {
       membershipsWithoutContract: memberships.filter((m) => !m.contractNumber).length,
       membershipsActive: memberships.filter((m) => !m.cancelled && m.starts <= today && (!m.ends || m.ends >= today)).length,
       paymentsWithoutMembership: payments.filter((p) => !p.membershipKey).length,
+      tasksOpen: tasks.filter((x) => !x.doneAt).length,
+      tasksHistory: tasks.filter((x) => x.doneAt).length,
       notTransferred: [
         'Заморозки из 1С переносятся отметкой в отчёте: сами заморозки оформляются в системе',
         'Авансы клиентов показаны в отчёте: лицевого счёта в системе пока нет',
@@ -365,7 +445,7 @@ async function analyze(db: Db, batch: { id: string; club_id: string }) {
     },
     issues: [...issues.values()].sort((a, b) => ['conflict', 'excluded', 'warning', 'skipped'].indexOf(a.status) - ['conflict', 'excluded', 'warning', 'skipped'].indexOf(b.status) || b.count - a.count),
   };
-  return { files, rows, marks, report, today, clients, memberships, payments, visits, debts, canonical };
+  return { files, rows, marks, report, today, clients, memberships, payments, visits, debts, tasks, canonical };
 }
 
 async function saveMarks(db: Db, marks: Map<string, Mark>) {
@@ -496,6 +576,16 @@ async function apply(db: Db, ctx: Actor, batch: { id: string; club_id: string; t
   [t, club, batch.id], vs, ({ v, id }) => [id, personOf(v.client), v.membershipKey ? mId.get(v.membershipKey) ?? null : null, v.at]);
   for (const { v, id } of vs) reg('visit', v.key, id, v.row);
 
+  // Задачи и звонки: открытые — в работу ответственному, выполненные — история в карточке клиента
+  const ts = a.tasks.map((x) => ({ x, id: randomUUID() }));
+  await bulk(db, `insert into tasks(id, tenant_id, club_id, assignee_id, person_id, kind, title, due_at, done_at, result, created_by, created_at, import_batch_id)
+    select x.id, $1, $2, x.assignee, x.person, x.kind, x.title, x.due::timestamp at time zone c.timezone, x.done::timestamp at time zone c.timezone, x.result, $3,
+      least(now(), x.due::timestamp at time zone c.timezone), $4
+    from unnest($5::uuid[], $6::uuid[], $7::uuid[], $8::text[], $9::text[], $10::text[], $11::text[], $12::text[]) as x(id, assignee, person, kind, title, due, done, result)
+    join clubs c on c.id = $2`,
+  [t, club, ctx.userId, batch.id], ts, ({ x, id }) => [id, x.assigneeId, x.client ? personOf(x.client) : null, x.kind, x.title, x.dueAt, x.doneAt, x.result]);
+  for (const { x, id } of ts) reg('task', x.key, id, x.row);
+
   // Сегменты перенесённых клиентов по их абонементам
   await db.query(`update persons p set segment = case
       when exists (select 1 from memberships m where m.person_id = p.id and m.status = 'active' and m.starts_on <= $2 and (m.ends_on is null or m.ends_on >= $2)) then 'действующий'
@@ -525,7 +615,7 @@ async function apply(db: Db, ctx: Actor, batch: { id: string; club_id: string; t
   await saveMarks(db, a.marks);
   await db.query(`update import_rows set status = 'imported' where batch_id = $1 and status = 'warning'`, [batch.id]);
   const applied = { persons: newPersons.length, merged: a.clients.length - newPersons.length, memberships: ms.length, contracts: withContract.length,
-    payments: pays.length, visits: vs.length, debts: debts.length, products: products.size };
+    payments: pays.length, visits: vs.length, debts: debts.length, products: products.size, tasks: ts.filter((x) => !x.x.doneAt).length, taskHistory: ts.filter((x) => x.x.doneAt).length };
   const report = { ...a.report, mode: 'applied', applied };
   await db.query(`update import_batches set status = 'applied', report = $2, applied_at = now(), applied_by = $3 where id = $1`, [batch.id, JSON.stringify(report), ctx.userId]);
   await audit(db, ctx, 'import.applied', 'import_batch', batch.id, null, applied);
@@ -715,6 +805,24 @@ export function importRoutes(app: FastifyInstance, pool: pg.Pool) {
       from import_rows r join import_files f on f.id = r.file_id
       where r.batch_id = $1 and ($2::text is null or ($2 = 'conflict' and r.conflict_with is not null) or ($2 <> 'conflict' and r.status = $2)) and ($3::text is null or f.report_type = $3)
       order by f.uploaded_at, r.row_no limit $4`, [id, status || null, type || null, Math.min(Number(limit) || 200, 1000)])).rows);
+  });
+
+  // Одно решение сразу для всех нерешённых конфликтов пакета: например, общий телефон у членов семьи
+  app.post('/api/import/batches/:id/resolve-conflicts', async (req) => {
+    const ctx = requirePerm(req, P.importManage);
+    const { id } = req.params as { id: string };
+    const { resolution } = (req.body ?? {}) as { resolution?: string };
+    if (!['new', 'skip'].includes(resolution ?? '')) throw badRequest('Выберите решение: создать отдельно или не переносить');
+    return withCtx(pool, ctx, async (db) => {
+      editable(await loadBatch(db, id));
+      const n = (await db.query(`update import_rows set resolution = $2, resolved_by = $3, resolved_at = now()
+        where batch_id = $1 and conflict_with is not null and resolution is null`, [id, resolution, ctx.userId])).rowCount ?? 0;
+      if (n) {
+        await db.query(`update import_batches set status = 'draft' where id = $1`, [id]);
+        await audit(db, ctx, 'import.conflicts_resolved_bulk', 'import_batch', id, null, { resolution, rows: n });
+      }
+      return { resolved: n };
+    });
   });
 
   app.post('/api/import/rows/:id/resolve', async (req) => {

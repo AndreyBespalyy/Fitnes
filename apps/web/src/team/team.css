@@ -196,3 +196,22 @@
 .tm-adv-note{display:block;margin-top:6px;font-size:11.5px;color:var(--muted)}
 .tm-adv-err{display:block;color:var(--bad,#e5484d);font-size:12px;margin-top:4px}
 @media (max-width:600px){.tm-adv-list li{flex-wrap:wrap}.tm-adv-btns{margin-left:auto}.tm-adv-done{max-width:none}}
+
+/* Кнопки под сообщениями ИИ-помощника: следующий шаг разговора или переход в раздел */
+.tm-acts{display:flex;flex-wrap:wrap;gap:6px;margin:6px 0 2px}
+.tm-acts button{border:1px solid var(--line, rgba(255,255,255,.18));background:transparent;color:inherit;border-radius:999px;padding:5px 12px;font-size:13px;cursor:pointer;line-height:1.3}
+.tm-acts button.ask{border-color:var(--accent);color:var(--accent)}
+.tm-acts button:hover{background:rgba(255,255,255,.06)}
+.tm-acts button.task{border:0;background:var(--accent);color:var(--accent-ink);font-weight:700}
+.tm-acts button.done{border-color:#3fb950;color:#3fb950}
+.tm-draft{display:grid;gap:12px}
+.tm-draft label{display:grid;gap:6px;font-weight:600;font-size:14px}
+.tm-draft select,.tm-draft textarea,.tm-draft input:not([type=checkbox]){font:inherit;font-weight:400;background:var(--surface-2);color:var(--ink);border:1px solid var(--line);border-radius:10px;padding:9px 11px}
+.tm-draft small{font-weight:400;color:var(--muted, #9aa4b2)}
+.tm-draft-btns{display:flex;gap:8px;justify-content:flex-end}
+.tm-acts button.act{border-color:var(--accent)}
+.tm-acts-note{flex-basis:100%;color:var(--muted, #9aa4b2)}
+.tm-draft-who{display:grid;gap:8px}
+.tm-draft .tm-who-row{display:flex;align-items:center;gap:8px;font-weight:400;width:100%}
+.tm-draft .tm-who-row input{width:18px;height:18px;flex:none;margin:0}
+.tm-who-row span{flex:1;min-width:0}

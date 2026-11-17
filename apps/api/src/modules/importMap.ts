@@ -3,10 +3,12 @@
 import { createHash } from 'node:crypto';
 import { normalizePhone } from './crm.ts';
 
-export type ReportType = 'clients' | 'memberships' | 'payments' | 'visits' | 'balances';
-export const REPORT_TYPES: ReportType[] = ['clients', 'memberships', 'payments', 'visits', 'balances'];
+export type ReportType = 'clients' | 'memberships' | 'payments' | 'visits' | 'balances' | 'tasks';
+export const REPORT_TYPES: ReportType[] = ['clients', 'memberships', 'payments', 'visits', 'balances', 'tasks'];
+/** Без этих отчётов перенос не начинается; «Задачи» — по желанию. */
+export const REQUIRED_REPORTS: ReportType[] = ['clients', 'memberships', 'payments', 'visits', 'balances'];
 export const REPORT_NAMES: Record<ReportType, string> = {
-  clients: 'Клиенты', memberships: 'Абонементы и договоры', payments: 'Платежи', visits: 'Посещения', balances: 'Остатки и долги',
+  clients: 'Клиенты', memberships: 'Абонементы и договоры', payments: 'Платежи', visits: 'Посещения', balances: 'Остатки и долги', tasks: 'Задачи и звонки',
 };
 
 type Kind = 'text' | 'date' | 'datetime' | 'money' | 'int' | 'phone' | 'email';
@@ -18,8 +20,8 @@ const CLIENT_LINK: FieldDef[] = [
   { key: 'client_phone', label: 'Телефон клиента', kind: 'phone', weight: 0.5, syn: ['телефон', 'телефон клиента', 'мобильный телефон', 'моб телефон', 'клиент телефон'] },
 ];
 const MEMBERSHIP_LINK: FieldDef[] = [
-  { key: 'membership_ext', label: 'Код абонемента', kind: 'text', weight: 0.5, syn: ['код абонемента', 'номер абонемента', 'id абонемента', 'абонемент код', 'номер членства', 'членство номер', 'членство'] },
-  { key: 'contract_number', label: 'Номер договора', kind: 'text', weight: 0.5, syn: ['номер договора', 'договор', 'договор номер', 'договор клиента', 'основание'] },
+  { key: 'membership_ext', label: 'Код абонемента', kind: 'text', weight: 0.5, syn: ['код абонемента', 'номер абонемента', 'id абонемента', 'абонемент код', 'номер членства', 'членство номер', 'членство', 'членство пакет услуг', 'членство пакет услуг номер'] },
+  { key: 'contract_number', label: 'Номер договора', kind: 'text', weight: 0.5, syn: ['номер договора', 'договор', 'договор номер', 'договор клиента', 'основание', 'документ продажи номер', 'основание посещения', 'посещение основание посещения'] },
 ];
 
 export const FIELDS: Record<ReportType, FieldDef[]> = {
@@ -29,16 +31,16 @@ export const FIELDS: Record<ReportType, FieldDef[]> = {
     { key: 'phone', label: 'Телефон', kind: 'phone', weight: 2, syn: ['телефон', 'мобильный телефон', 'моб телефон', 'телефон мобильный', 'контактный телефон', 'сотовый телефон', 'сотовый'] },
     { key: 'email', label: 'Эл. почта', kind: 'email', weight: 1, syn: ['email', 'e mail', 'электронная почта', 'почта', 'эл почта', 'адрес электронной почты'] },
     { key: 'birth_date', label: 'Дата рождения', kind: 'date', weight: 2, syn: ['дата рождения', 'день рождения', 'др'] },
-    { key: 'card', label: 'Номер карты', kind: 'text', weight: 1, syn: ['номер карты', 'карта', 'карта клиента', 'штрихкод', 'штрих код', 'номер браслета'] },
+    { key: 'card', label: 'Номер карты', kind: 'text', weight: 1, syn: ['номер карты', 'карта', 'карта клиента', 'штрихкод', 'штрих код', 'номер браслета', 'код карты'] },
     { key: 'registered_on', label: 'Дата регистрации', kind: 'date', weight: 1, syn: ['дата регистрации', 'дата создания', 'зарегистрирован', 'дата анкеты', 'дата добавления'] },
     { key: 'comment', label: 'Комментарий', kind: 'text', weight: 0.3, syn: ['комментарий', 'примечание'] },
   ],
   memberships: [
-    { key: 'ext_id', label: 'Код абонемента', kind: 'text', weight: 1, syn: ['код абонемента', 'номер абонемента', 'id абонемента', 'абонемент код', 'код', 'номер членства', 'код членства', 'number', 'номер'] },
+    { key: 'ext_id', label: 'Код абонемента', kind: 'text', weight: 1, syn: ['код абонемента', 'номер абонемента', 'id абонемента', 'абонемент код', 'код', 'номер членства', 'код членства', 'number', 'номер', 'членство пакет услуг номер'] },
     ...CLIENT_LINK,
     { key: 'contract_number', label: 'Номер договора', kind: 'text', weight: 1, syn: ['номер договора', 'договор', 'договор номер', 'договор клиента'] },
     { key: 'contract_date', label: 'Дата договора', kind: 'date', weight: 1, syn: ['дата договора', 'дата продажи', 'дата оформления', 'дата покупки', 'продано', 'продан'] },
-    { key: 'product_name', label: 'Абонемент (название)', kind: 'text', required: true, weight: 3, syn: ['вид абонемента', 'абонемент', 'услуга', 'номенклатура', 'тариф', 'вид членства', 'членство', 'наименование абонемента', 'вид карты'] },
+    { key: 'product_name', label: 'Абонемент (название)', kind: 'text', required: true, weight: 3, syn: ['вид абонемента', 'абонемент', 'услуга', 'номенклатура', 'тариф', 'вид членства', 'членство', 'наименование абонемента', 'вид карты', 'членство пакет услуг'] },
     { key: 'starts_on', label: 'Дата начала', kind: 'date', required: true, weight: 2, syn: ['дата начала', 'начало', 'действует с', 'дата активации', 'начало действия', 'с', 'активирован', 'активировано'] },
     { key: 'ends_on', label: 'Дата окончания', kind: 'date', weight: 3, syn: ['дата окончания', 'окончание', 'действует по', 'действует до', 'срок действия', 'дата завершения', 'окончание действия', 'по'] },
     { key: 'amount', label: 'Стоимость', kind: 'money', weight: 1, syn: ['стоимость', 'сумма', 'цена', 'сумма договора', 'стоимость абонемента', 'сумма продажи'] },
@@ -47,22 +49,24 @@ export const FIELDS: Record<ReportType, FieldDef[]> = {
     { key: 'status', label: 'Состояние', kind: 'text', weight: 1, syn: ['статус', 'состояние', 'статус абонемента'] },
   ],
   payments: [
-    { key: 'ext_id', label: 'Номер документа', kind: 'text', weight: 1, syn: ['номер документа', 'номер', 'документ', 'номер чека', 'код операции', 'номер платежа'] },
-    { key: 'date', label: 'Дата оплаты', kind: 'datetime', required: true, weight: 2, syn: ['дата оплаты', 'дата платежа', 'дата', 'дата операции', 'дата документа', 'период', 'дата и время'] },
+    { key: 'ext_id', label: 'Номер документа', kind: 'text', weight: 1, syn: ['номер документа', 'номер', 'документ', 'номер чека', 'код операции', 'номер платежа', 'документ движения номер'] },
+    { key: 'date', label: 'Дата оплаты', kind: 'datetime', required: true, weight: 2, syn: ['дата оплаты', 'дата платежа', 'дата', 'дата операции', 'дата документа', 'период', 'дата и время', 'документ движения дата'] },
     ...CLIENT_LINK,
     ...MEMBERSHIP_LINK,
     { key: 'amount', label: 'Сумма', kind: 'money', required: true, weight: 3, syn: ['сумма', 'сумма оплаты', 'оплачено', 'сумма платежа', 'приход', 'сумма документа', 'сумма руб'] },
-    { key: 'method', label: 'Способ оплаты', kind: 'text', weight: 2, syn: ['вид оплаты', 'способ оплаты', 'форма оплаты', 'тип оплаты', 'касса', 'вид расчета'] },
-    { key: 'operation', label: 'Операция (оплата или возврат)', kind: 'text', weight: 1, syn: ['операция', 'вид операции', 'тип операции', 'вид документа', 'тип документа', 'вид движения'] },
+    { key: 'method', label: 'Способ оплаты', kind: 'text', weight: 2, syn: ['вид оплаты', 'способ оплаты', 'форма оплаты', 'тип оплаты', 'касса', 'вид расчета', 'тип денежных средств'] },
+    { key: 'operation', label: 'Операция (оплата или возврат)', kind: 'text', weight: 1, syn: ['операция', 'вид операции', 'тип операции', 'вид документа', 'тип документа', 'вид движения', 'документ движения вид операции'] },
     { key: 'comment', label: 'Комментарий', kind: 'text', weight: 0.3, syn: ['комментарий', 'примечание', 'назначение'] },
   ],
   visits: [
-    { key: 'ext_id', label: 'Код посещения', kind: 'text', weight: 0.5, syn: ['код посещения', 'номер посещения', 'id посещения'] },
-    { key: 'visited_at', label: 'Дата и время посещения', kind: 'datetime', required: true, weight: 3, syn: ['дата посещения', 'время входа', 'дата и время посещения', 'дата визита', 'вход', 'время посещения', 'посещение', 'дата и время', 'дата'] },
-    { key: 'left_at', label: 'Время выхода', kind: 'datetime', weight: 2, syn: ['время выхода', 'выход', 'дата выхода'] },
+    { key: 'ext_id', label: 'Код посещения', kind: 'text', weight: 0.5, syn: ['код посещения', 'номер посещения', 'id посещения', 'посещение'] },
+    { key: 'visited_at', label: 'Дата и время посещения', kind: 'datetime', required: true, weight: 3, syn: ['дата посещения', 'время входа', 'дата и время посещения', 'дата визита', 'вход', 'время посещения', 'дата и время', 'дата', 'дата прихода', 'посещение дата прихода'] },
+    { key: 'left_at', label: 'Время выхода', kind: 'datetime', weight: 2, syn: ['время выхода', 'выход', 'дата выхода', 'дата ухода', 'посещение дата ухода'] },
     ...CLIENT_LINK,
-    ...MEMBERSHIP_LINK,
-    { key: 'zone', label: 'Зона или занятие', kind: 'text', weight: 1, syn: ['зона', 'зал', 'занятие', 'услуга', 'вид посещения'] },
+    // В 1С:Фитнес клуб КОРП колонка «Номер» в отчёте посещений — номер членства, по которому прошёл клиент
+    { ...MEMBERSHIP_LINK[0], syn: [...MEMBERSHIP_LINK[0].syn, 'номер'] },
+    MEMBERSHIP_LINK[1],
+    { key: 'zone', label: 'Зона или занятие', kind: 'text', weight: 1, syn: ['зона', 'зал', 'занятие', 'услуга', 'вид посещения', 'помещение', 'посещение помещение'] },
   ],
   balances: [
     ...CLIENT_LINK,
@@ -70,6 +74,19 @@ export const FIELDS: Record<ReportType, FieldDef[]> = {
     { key: 'debt', label: 'Долг клиента', kind: 'money', weight: 3, syn: ['долг', 'задолженность', 'сумма долга', 'к оплате', 'дебиторская задолженность', 'долг клиента', 'задолженность клиента'] },
     { key: 'advance', label: 'Аванс (деньги клиента)', kind: 'money', weight: 3, syn: ['аванс', 'остаток денег', 'депозит', 'баланс', 'на счете', 'предоплата', 'остаток средств', 'остаток на счете', 'лицевой счет'] },
     { key: 'due_on', label: 'Оплатить до', kind: 'date', weight: 1, syn: ['срок оплаты', 'оплатить до', 'дата долга', 'дата платежа', 'дата'] },
+  ],
+  // Задачи и взаимодействия CRM 1С: открытые становятся задачами, выполненные — историей в карточке клиента
+  tasks: [
+    { key: 'ext_id', label: 'Номер задачи', kind: 'text', weight: 0.5, syn: ['код задачи', 'номер задачи', 'задача номер', 'взаимодействие номер', 'номер'] },
+    ...CLIENT_LINK,
+    { key: 'kind', label: 'Вид (звонок, встреча…)', kind: 'text', weight: 2, syn: ['вид задачи', 'тип задачи', 'вид взаимодействия', 'тип взаимодействия', 'вид', 'тип', 'вид события', 'способ связи'] },
+    { key: 'title', label: 'Тема', kind: 'text', weight: 2, syn: ['тема', 'задача', 'наименование', 'заголовок', 'предмет', 'взаимодействие'] },
+    { key: 'description', label: 'Описание', kind: 'text', weight: 1, syn: ['описание', 'содержание', 'текст', 'комментарий', 'описание задачи', 'примечание'] },
+    { key: 'due_at', label: 'Срок (дата и время)', kind: 'datetime', required: true, weight: 3, syn: ['срок', 'срок выполнения', 'крайний срок', 'дата задачи', 'запланировано на', 'дата начала', 'начало', 'дата и время', 'дата', 'план'] },
+    { key: 'done_at', label: 'Дата выполнения', kind: 'datetime', weight: 3, syn: ['дата выполнения', 'выполнено', 'дата завершения', 'завершено', 'дата закрытия', 'факт', 'фактическая дата'] },
+    { key: 'status', label: 'Статус', kind: 'text', weight: 2, syn: ['статус', 'состояние', 'статус задачи', 'выполнена'] },
+    { key: 'result', label: 'Результат', kind: 'text', weight: 2, syn: ['результат', 'итог', 'результат выполнения', 'результат взаимодействия', 'исход'] },
+    { key: 'assignee', label: 'Ответственный', kind: 'text', weight: 2, syn: ['ответственный', 'исполнитель', 'сотрудник', 'менеджер', 'ответственный сотрудник'] },
   ],
 };
 
@@ -79,6 +96,7 @@ const FILE_HINTS: [ReportType, RegExp][] = [
   ['payments', /оплат|платеж|платёж|касс|поступлен|payment/i],
   ['visits', /посещ|визит|проход|visit/i],
   ['balances', /долг|остат|задолж|баланс|balance|debt/i],
+  ['tasks', /задач|взаимодейств|звонк|task/i],
 ];
 
 export const normHeader = (s: string) => s.toLowerCase().replace(/ё/g, 'е').replace(/[^a-zа-я0-9]+/g, ' ').trim();
@@ -205,6 +223,32 @@ export function methodOf(raw: string): string {
   if (/нал/.test(s)) return 'cash';
   if (/банк|перевод|расчетн|платежн|счет/.test(s)) return 'bank_transfer';
   if (/онлайн|сайт|интернет|online/.test(s)) return 'online';
+  return 'other';
+}
+
+/** Номер документа или членства для связи отчётов: «00000006729» и «Членство "Gold" 6729 от 30.10.2022» → «6729». */
+export function linkNumber(raw: string): string {
+  const s = raw.trim();
+  const m = s.match(/\s(\d+)\s+от\s+\d{1,2}\.\d{1,2}\.\d{2,4}/);
+  const v = m ? m[1] : s;
+  return /^\d+$/.test(v) ? v.replace(/^0+(?=\d)/, '') : v;
+}
+
+/** Название из представления документа 1С: «Членство "Sandow Gold" 6729 от 30.10.2022 00:00» → «Sandow Gold». */
+export function productFromPresentation(raw: string): string {
+  const m = raw.trim().match(/^(?:Членство|Пакет услуг|Пакет)\s+"(.+)"\s+\d+\s+от\s/);
+  return m ? m[1] : raw.trim();
+}
+
+/** Строка документа продажи в отчёте по членствам КОРП — это не членство. */
+export const isSaleDocRow = (raw: string) => /^Продажа\s+\d+\s+от\s/.test(raw.trim());
+
+/** Вид задачи из 1С → вид задачи в системе. */
+export function taskKindOf(raw: string): 'call' | 'meeting' | 'message' | 'other' {
+  const s = raw.toLowerCase().replace(/ё/g, 'е');
+  if (/звон|телефон|прозвон|обзвон/.test(s)) return 'call';
+  if (/встреч|визит|экскурс|пробн|консультац/.test(s)) return 'meeting';
+  if (/сообщ|смс|sms|письм|почт|whatsapp|telegram|мессендж|рассыл/.test(s)) return 'message';
   return 'other';
 }
 

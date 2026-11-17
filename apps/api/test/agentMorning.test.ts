@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import pg from 'pg';
 import { setupTestApp, login } from './helpers.ts';
 import { withCtx } from '../src/db.ts';
-import { HINTS_RE, morningHints, processMorningHints } from '../src/modules/agentMorning.ts';
+import { HINTS_RE, followUps, morningHints, processMorningHints } from '../src/modules/agentMorning.ts';
 
 let t: Awaited<ReturnType<typeof setupTestApp>>;
 const ck: Record<string, Record<string, string>> = {};
@@ -13,7 +13,7 @@ const sql = async (q: string, p: unknown[] = []) => { const c = new pg.Client(t.
 let centr = ''; let tenant = ''; let tz = ''; let classToday = false;
 const uid: Record<string, string> = {};
 const sys = () => ({ tenantId: tenant, allClubs: true, clubIds: [] });
-const hintsOf = (login: string, role: string) => withCtx(t.pool, sys(), (db) => morningHints(db, { id: uid[login], name: login, role }, [centr]));
+const hintsOf = (login: string, role: string) => withCtx(t.pool, sys(), async (db) => (await morningHints(db, { id: uid[login], name: login, role }, [centr])).map((h) => h.text));
 
 async function ask(text: string, who: string) {
   const chat = (await req('POST', '/api/agent/chat', who)).json().id;
@@ -121,4 +121,21 @@ test('чат: «подсказки на сегодня»; настройка ч�
   const g2 = (await req('GET', `/api/agent/settings?clubId=${centr}`, 'o.smirnov')).json();
   assert.equal(g2.morningHour, 8);
   assert.equal(g2.morningHints, false);
+});
+
+test('кнопки под подсказками и под ответами помощника', async () => {
+  const rows = await sql(`select m.meta from team_messages m join users u on u.id::text = m.meta->>'userId' where m.meta->>'kind' = 'morning_hints' and u.login = 'm.volkova'`);
+  const acts = rows[0].meta.acts as { label: string; ask?: string; url?: string }[][];
+  assert.equal(acts.length, 3);
+  assert.deepEqual(acts[0], [{ label: 'Открыть заявки без ответа', url: '/?tab=leads&filter=noresponse' }]);
+  assert.deepEqual(acts[1].map((a) => a.ask ?? a.url), ['что просрочено', '/?tab=tasks']);
+  assert.ok(acts[2].some((a) => a.label === 'Позвонить: Злата Горячева' && !!(a as { dial?: { personId: string } }).dial?.personId), JSON.stringify(acts[2])); // клиенту — сразу звонок
+  // Кнопка «Показать просроченные» — помощник отвечает списком и даёт следующий шаг
+  const chat = (await req('POST', '/api/agent/chat', 'm.volkova')).json().id;
+  await ask('что просрочено', 'm.volkova');
+  const last = (await sql(`select meta from team_messages where chat_id = $1 order by created_at desc limit 1`, [chat]))[0].meta;
+  assert.deepEqual(last.actions.map((a: { label: string }) => a.label), ['Открыть задачи', 'Мои задачи']);
+  assert.deepEqual(followUps('выполним план?', true).map((a) => a.label), ['Что горит', 'Открыть продажи']);
+  assert.equal(followUps('что горит', false).length, 0);
+  assert.equal(followUps('привет', true).length, 0);
 });

@@ -1,7 +1,7 @@
 // Шаг 14. Звонки: записи разговоров, черновик итога от ИИ, подтверждение менеджером, оценка РОПа и качество ИИ.
 import { CallEvaluation } from './insights.tsx';
 import { useEffect, useState, type FormEvent } from 'react';
-import { api, can, type Club, type Me, type Staff } from './api.ts';
+import { api, can, type Club, type Me, type Staff, navParams } from './api.ts';
 import { dt, errText, toast } from './ui.ts';
 import { ExportButton } from './privacy.tsx';
 import { PbxSettings } from './telephony.tsx';
@@ -56,8 +56,8 @@ export function CallsPage({ me, clubs, clubId, openPerson }: { me: Me; clubs: Cl
     ['review', 'На проверку', true], ['all', 'Все разговоры', true], ['upload', 'Загрузить записи', true],
     ['quality', 'Качество ИИ', can(me, 'ai.review')], ['settings', 'Настройки', can(me, 'plan.manage')],
   ];
-  const [tab, setTab] = useState('review');
-  const [open, setOpen] = useState<string | null>(null);
+  const [tab, setTab] = useState(() => (navParams('calls').call ? 'all' : 'review'));
+  const [open, setOpen] = useState<string | null>(() => navParams('calls').call ?? null);
   const [ver, setVer] = useState(0);
   return (
     <>

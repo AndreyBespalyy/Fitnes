@@ -13,7 +13,7 @@ import { PersonPasses } from './access.tsx';
 import { PersonCards } from './payments.tsx';
 import { CallDialog, PersonCalls } from './calls.tsx';
 import { PersonCallFlags, TakeLeadButton } from './salesOps.tsx';
-import { SituationButton } from './agent.tsx';
+import { ScriptButton, SituationButton } from './agent.tsx';
 import { PersonPrivacy } from './privacy.tsx';
 
 type Stage = { id: string; name: string; kind: 'open' | 'won' | 'lost'; openCount?: number };
@@ -23,7 +23,7 @@ type Lead = { id: string; createdAt: string; clubName: string; personId: string;
   isRepeat: boolean; assigneeName: string | null; dueAt: string; respondedAt: string | null; takenAt?: string | null; responseState: 'in_time' | 'late' | 'overdue' | 'waiting' };
 type Opp = { id: string; stageId: string; personId: string; personName: string; ownerName: string | null; nextTaskAt: string | null; overdue: boolean };
 type Task = { id: string; kind: string; title: string; dueAt: string; doneAt: string | null; result: string | null; personId: string | null; personName: string | null;
-  opportunityId: string | null; assigneeName: string | null; overdue: boolean; callId: string | null };
+  opportunityId: string | null; assigneeId?: string | null; assigneeName: string | null; overdue: boolean; callId: string | null };
 type Card = {
   person: { id: string; fullName: string; segment: string; homeClubId: string | null; homeClubName: string | null; createdAt: string; autopayEnabled: boolean; autopayChangedAt: string | null; marketingConsent: boolean; messagingOptOut: boolean };
   contacts: { type: string; value: string; isPrimary: boolean }[];
@@ -157,18 +157,25 @@ export function TasksPage({ me, clubId, openPerson }: { me: Me; clubId: string; 
   const [scope, setScope] = useState<'mine' | 'all'>(() => (navParams('tasks').scope === 'all' && can(me, 'crm.view_all') ? 'all' : 'mine'));
   const [doing, setDoing] = useState<Task | null>(null);
   const [call, setCall] = useState<string | null>(null);
-  const reload = () => api<Task[]>('GET', `/api/tasks?scope=${scope}${clubId !== 'all' ? `&clubId=${clubId}` : ''}`).then(setTasks).catch(() => setTasks([]));
-  useEffect(() => { reload(); }, [scope, clubId]);
+  // Из ИИ-помощника: «Задачи на сегодня: <менеджер>» — задачи одного сотрудника, только просроченные и на сегодня
+  const [only, setOnly] = useState<{ user: string; today: boolean } | null>(() => { const q = navParams('tasks'); return q.user && can(me, 'crm.view_all') ? { user: q.user, today: q.day === 'today' } : null; });
+  const [all, setAll] = useState<Task[]>([]);
+  const reload = () => api<Task[]>('GET', `/api/tasks?scope=${only ? 'all' : scope}${clubId !== 'all' ? `&clubId=${clubId}` : ''}`).then(setAll).catch(() => setAll([]));
+  useEffect(() => { setTasks(only ? all.filter((t) => t.assigneeId === only.user) : all); }, [all, only]);
+  useEffect(() => { reload(); }, [scope, clubId, only]);
   const now = Date.now();
   const endOfDay = new Date(); endOfDay.setHours(23, 59, 59, 999);
   const groups: [string, Task[]][] = [
     ['Просрочено', tasks.filter((t) => t.overdue)],
     ['Сегодня', tasks.filter((t) => !t.overdue && new Date(t.dueAt).getTime() <= endOfDay.getTime())],
-    ['Позже', tasks.filter((t) => new Date(t.dueAt).getTime() > endOfDay.getTime() && new Date(t.dueAt).getTime() > now)],
+    ['Позже', only?.today ? [] : tasks.filter((t) => new Date(t.dueAt).getTime() > endOfDay.getTime() && new Date(t.dueAt).getTime() > now)],
   ];
+  const whoName = only ? all.find((t) => t.assigneeId === only.user)?.assigneeName : null;
   return (
     <>
-      {can(me, 'crm.view_all') && (
+      {only && <div className="card row between" style={{ alignItems: 'center' }}><b>{whoName ? `Задачи: ${whoName}` : 'Задачи сотрудника'}{only.today ? ' — просроченные и на сегодня' : ''}</b>
+        <button className="btn sm" onClick={() => setOnly(null)}>Все задачи</button></div>}
+      {can(me, 'crm.view_all') && !only && (
         <div className="tabs" role="group"><button aria-pressed={scope === 'mine'} onClick={() => setScope('mine')}>Мои</button><button aria-pressed={scope === 'all'} onClick={() => setScope('all')}>Все в клубе</button></div>
       )}
       {groups.map(([title, list]) => list.length > 0 && (
@@ -184,6 +191,7 @@ export function TasksPage({ me, clubId, openPerson }: { me: Me; clubId: string; 
                   {t.personId && (t.kind === 'call' || t.kind === 'first_response') && !t.doneAt && <DialButton personId={t.personId} />}
                   {t.callId && <button className="btn sm pri" onClick={() => setCall(t.callId)}>Итог разговора</button>}
                   <SituationButton type="task" id={t.id} />
+                  {t.personId && ['call', 'first_response', 'meeting'].includes(t.kind) && !t.doneAt && <ScriptButton type="task" id={t.id} />}
                   <button className={`btn sm ${t.callId ? '' : 'pri'}`} onClick={() => setDoing(t)}>Выполнить</button>
                 </div>
               </div>
@@ -265,7 +273,7 @@ export function PersonCard({ me, id, onClose }: { me: Me; id: string; onClose: (
           <div><h1>{card.person.fullName}</h1>
             <div className="row" style={{ marginTop: 4 }}><span className="chip acc">{card.person.segment}</span>
               <span className="small">{card.person.homeClubName ?? 'клиент другого клуба сети'} · в базе с {dt(card.person.createdAt)}</span></div>
-            {can(me, 'crm.work') && <div style={{ marginTop: 10 }}><SituationButton type="person" id={card.person.id} small={false} /></div>}</div>
+            {can(me, 'crm.work') && <div style={{ marginTop: 10 }}><div className="row" style={{ gap: 8, flexWrap: 'wrap' }}><SituationButton type="person" id={card.person.id} small={false} /><ScriptButton type="person" id={card.person.id} small={false} /></div></div>}</div>
           <div className="card kv">{card.contacts.map((c, i) => <span key={i} style={{ display: 'contents' }}><span>{c.type === 'phone' ? 'Телефон' : c.type === 'email' ? 'E-mail' : c.type === 'telegram' ? 'Telegram' : c.type === 'whatsapp' ? 'WhatsApp' : c.type}</span><span className="num">{c.value}{c.type === 'phone' && c.isPrimary && <> <DialButton personId={id} label="" /></>}</span></span>)}</div>
           {!can(me, 'memberships.manage') && money && card.person.autopayEnabled && <div className="item small">Подписка списывается автоматически с привязанной карты{card.person.autopayChangedAt ? ` (включено ${dt(card.person.autopayChangedAt)})` : ''}</div>}
           {can(me, 'memberships.manage') && (
@@ -291,7 +299,7 @@ export function PersonCard({ me, id, onClose }: { me: Me; id: string; onClose: (
           {sales && card.opportunities.map((o) => (
             <div key={o.id} className="card" style={{ display: 'grid', gap: 8 }}>
               <div className="row between"><h2>{o.pipelineName}</h2>
-                <span className="row" style={{ gap: 6 }}><SituationButton type="opportunity" id={o.id} /><span className={`chip ${o.status === 'won' ? 'ok' : o.status === 'lost' ? 'bad' : 'acc'}`}>{o.status === 'open' ? 'в работе' : o.status === 'won' ? 'успешно' : 'отказ'}</span></span></div>
+                <span className="row" style={{ gap: 6 }}><SituationButton type="opportunity" id={o.id} />{o.status === 'open' && <ScriptButton type="opportunity" id={o.id} label="Скрипт" />}<span className={`chip ${o.status === 'won' ? 'ok' : o.status === 'lost' ? 'bad' : 'acc'}`}>{o.status === 'open' ? 'в работе' : o.status === 'won' ? 'успешно' : 'отказ'}</span></span></div>
               <div className="small">{o.clubName} · ответственный: {o.ownerName ?? 'не назначен'}{o.lostReason ? ` · причина отказа: ${o.lostReason}` : ''}</div>
               <div className="stagebar">{o.stages.map((s) => (
                 <button key={s.id} className={s.kind} aria-current={s.id === o.stageId} disabled={!work || o.status !== 'open' || s.id === o.stageId}
@@ -335,7 +343,7 @@ export function PersonCard({ me, id, onClose }: { me: Me; id: string; onClose: (
             {card.tasks.map((t) => (
               <div key={t.id} className={`item ${t.overdue ? 'over' : ''}`}>
                 <div className="row between"><span><b>{t.title}</b> <span className="chip">{KIND[t.kind] ?? t.kind}</span></span>
-                  <span className="row" style={{ gap: 6 }}><span className="small">{t.doneAt ? `выполнено ${dt(t.doneAt)}` : `до ${dt(t.dueAt)}`}</span>{!t.doneAt && <SituationButton type="task" id={t.id} label="Коротко" />}</span></div>
+                  <span className="row" style={{ gap: 6 }}><span className="small">{t.doneAt ? `выполнено ${dt(t.doneAt)}` : `до ${dt(t.dueAt)}`}</span>{!t.doneAt && <SituationButton type="task" id={t.id} label="Коротко" />}{!t.doneAt && ['call', 'first_response', 'meeting'].includes(t.kind) && <ScriptButton type="task" id={t.id} label="Скрипт" />}</span></div>
                 {t.result && <div className="small">Результат: {t.result}</div>}
               </div>))}
           </div>

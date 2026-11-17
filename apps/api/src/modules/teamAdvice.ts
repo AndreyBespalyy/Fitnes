@@ -14,6 +14,7 @@ import { aiChatTopic, type AiConfig } from '../lib/aiClient.ts';
 import type { YandexConfig } from '../lib/yandex.ts';
 import { noContacts } from './agent.ts';
 import { BUILTIN, ensureBuiltins, startProcess } from './agentProcesses.ts';
+import { learnedWeight, recordSuggestion } from './agentLearn.ts';
 
 export type TopicCode = 'new_client' | 'renewal' | 'return' | 'complaint' | 'new_staff' | 'meeting' | 'equipment' | 'schedule' | 'payment' | 'cleaning' | 'task' | 'other';
 export type Action =
@@ -198,7 +199,12 @@ export async function analyzeChat(db: Db, tenantId: string, chatId: string, an: 
       // Тот же совет уже есть (не выполнен или сделан за последние 3 дня) — не повторяем
       const dup = (await db.query(`select 1 from team_advice where chat_id = $1 and user_id = $2 and topic = $3 and (status = 'new' or acted_at > now() - interval '3 days')`, [chatId, m.user_id, topic])).rowCount;
       if (dup) continue;
-      await db.query(`insert into team_advice(tenant_id, chat_id, user_id, club_id, topic, body, action) values ($1,$2,$3,$4,$5,$6,$7)`, [tenantId, chatId, m.user_id, clubId, topic, a.body.slice(0, 400), JSON.stringify(a.action)]);
+      // Обучение на отзывах: тип совета, который в клубе отключили или который сам выключился (одни «Не то»), не показываем
+      const kind = `msg_${topic}`;
+      if (await learnedWeight(db, clubId, role, kind, m.user_id) <= 0) continue;
+      const sid = await recordSuggestion(db, { clubId, userId: m.user_id, role, source: 'advice', kind, body: a.body, targets: personId ? { personIds: [personId] } : {} });
+      await db.query(`insert into team_advice(tenant_id, chat_id, user_id, club_id, topic, body, action, suggestion_id) values ($1,$2,$3,$4,$5,$6,$7,$8)`,
+        [tenantId, chatId, m.user_id, clubId, topic, a.body.slice(0, 400), JSON.stringify(a.action), sid]);
       created++;
     }
   }
@@ -268,6 +274,7 @@ export async function startAdvice(db: Db, ctx: Ctx, id: string) {
     result = { kind: 'assistant', prompt: act.prompt, label: 'Открыт ИИ-помощник — проверьте текст и отправьте' };
   }
   await db.query(`update team_advice set status = 'started', result = $2, acted_at = now() where id = $1`, [id, JSON.stringify(result)]);
+  if (a.suggestion_id) await db.query(`update agent_suggestions set outcome = 'done', outcome_note = 'нажали «Начать» в мессенджере', outcome_at = now() where id = $1 and outcome is null`, [a.suggestion_id]);
   await audit(db, ctx, 'team.advice_started', 'team_chat', a.chat_id, null, { topic: a.topic, action: act.type });
   return result;
 }
@@ -318,8 +325,11 @@ export function teamAdviceRoutes(app: FastifyInstance, pool: pg.Pool, an: Analyz
     const ctx = requireCtx(req);
     const { id } = req.params as { id: string };
     return withCtx(pool, ctx, async (db) => {
-      const r = await db.query(`update team_advice set status = 'dismissed', acted_at = now() where id = $1 and user_id = $2 and status = 'new'`, [id, ctx.userId]);
+      const r = await db.query(`update team_advice set status = 'dismissed', acted_at = now() where id = $1 and user_id = $2 and status = 'new' returning suggestion_id`, [id, ctx.userId]);
       if (!r.rowCount) throw notFound('Совет не найден');
+      // «Скрыть» — это «Не то»: помощник реже предлагает такие советы этой роли в клубе
+      const sid = r.rows[0].suggestion_id;
+      if (sid) await db.query(`update agent_suggestions set rating = -1, reason = 'not_relevant', rated_at = now() where id = $1 and rating is null`, [sid]);
       return { ok: true };
     });
   });

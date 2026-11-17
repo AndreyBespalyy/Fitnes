@@ -19,6 +19,7 @@ import { financeRoutes } from './modules/finance.ts';
 import { importRoutes } from './modules/import.ts';
 import { messagingRoutes, startMessagingWorker } from './modules/messaging.ts';
 import { acsRoutes } from './modules/acs.ts';
+import { pocketkeyRoutes } from './modules/pocketkey.ts';
 import { billingRoutes, startBillingWorker } from './modules/billing.ts';
 import { bankRoutes } from './modules/bank.ts';
 import { dashRoutes } from './modules/dash.ts';
@@ -71,6 +72,11 @@ import { startTeamAdviceWorker, teamAdviceRoutes } from './modules/teamAdvice.ts
 import { agentRoutes } from './modules/agent.ts';
 import { agentReminderRoutes, startAgentWorker } from './modules/agentReminders.ts';
 import { agentChatRoutes, handleBotMessage } from './modules/agentChat.ts';
+import { agentDraftRoutes } from './modules/agentDrafts.ts';
+import { agentInviteRoutes } from './modules/agentInvite.ts';
+import { salesTeamRoutes } from './modules/agentSalesTeam.ts';
+import { callScriptRoutes } from './modules/agentCallScript.ts';
+import { agentLearnRoutes } from './modules/agentLearn.ts';
 import { agentMeetingRoutes } from './modules/agentMeetings.ts';
 import { processRoutes } from './modules/agentProcesses.ts';
 import { weeklyRoutes } from './modules/agentWeekly.ts';
@@ -141,6 +147,7 @@ export async function buildApp(pool: pg.Pool, opts: { webDist?: string; secureCo
   importRoutes(app, pool);
   messagingRoutes(app, pool, { fetch: opts.fetch });
   acsRoutes(app, pool);
+  pocketkeyRoutes(app, pool);
   billingRoutes(app, pool, { fetch: opts.fetch });
   bankRoutes(app, pool);
   dashRoutes(app, pool);
@@ -187,12 +194,17 @@ export async function buildApp(pool: pg.Pool, opts: { webDist?: string; secureCo
   teamRoutes(app, pool, storage, (ctx, chatId, text) => handleBotMessage(pool, ctx, chatId, text, yandex));
   agentRoutes(app, pool, yandex);
   agentChatRoutes(app, pool);
+  agentDraftRoutes(app, pool);
+  agentInviteRoutes(app, pool);
+  salesTeamRoutes(app, pool);
+  callScriptRoutes(app, pool);
   // Советы по переписке в мессенджере: тему определяет свой ИИ-сервер (или YandexGPT), без них — ключевые слова
   teamAdviceRoutes(app, pool, { ai, yandex });
   agentMeetingRoutes(app, pool);
   processRoutes(app, pool, yandex);
   weeklyRoutes(app, pool, yandex);
   agentReminderRoutes(app, pool);
+  agentLearnRoutes(app, pool);
   testNoteRoutes(app, pool, storage);
   platformRoutes(app, pool, { ownerUrl: process.env.PLATFORM_DATABASE_URL || process.env.OWNER_DATABASE_URL, secureCookie: !!opts.secureCookie });
   privacyRoutes(app, pool);

@@ -10,7 +10,7 @@ type FieldDef = { key: string; label: string; required: boolean };
 type TypeDef = { type: string; name: string; fields: FieldDef[] };
 type Batch = { id: string; clubId: string; clubName: string; status: string; createdAt: string; checkedAt: string | null; appliedAt: string | null; acceptedAt: string | null;
   rolledBackAt: string | null; createdByName: string | null; canApply?: boolean; applied?: Applied | null };
-type Applied = { persons: number; merged: number; memberships: number; contracts: number; payments: number; visits: number; debts: number; products: number };
+type Applied = { persons: number; merged: number; memberships: number; contracts: number; payments: number; visits: number; debts: number; products: number; tasks?: number; taskHistory?: number };
 type IFile = { id: string; fileName: string; reportType: string | null; detectedType: string; confidence: number; headers: string[]; headerRow: number;
   mapping: Record<string, { col: number; confidence: number } | null>; mappingConfirmed: boolean; mappingVersion: number | null; rowCount: number; sample: string[][] };
 type Count = { name: string; files: number; source: number; load: number; warning: number; excluded: number; conflict: number; skipped: number; earlier: number };
@@ -20,12 +20,13 @@ type Report = { generatedAt: string; mode: 'check' | 'applied'; canApply: boolea
   money: { months: Month[]; totals: Omit<Month, 'month'>; paymentsFooterKop: number | null; debts: { sourceKop: number; loadKop: number };
     advances: { sourceKop: number; count: number }; memberships: { loadKop: number; footerKop: number | null } };
   completeness: { clientsWithoutPhone: number; clientsWithoutBirthDate: number; clientsWithoutEmail: number; membershipsWithoutContract: number; membershipsActive: number;
-    paymentsWithoutMembership: number; notTransferred: string[] };
+    paymentsWithoutMembership: number; tasksOpen?: number; tasksHistory?: number; notTransferred: string[] };
   issues: Issue[]; applied?: Applied };
 type BatchFull = Batch & { report: Report | null; files: IFile[]; statusCounts: Record<string, number> };
 type IRow = { id: string; rowNo: number; cells: string[]; status: string; issue: string | null; conflictWith: string | null; resolution: string | null; fileName: string; headers: string[] };
 
-const ORDER = ['clients', 'memberships', 'payments', 'visits', 'balances'];
+const ORDER = ['clients', 'memberships', 'payments', 'visits', 'balances', 'tasks'];
+const OPTIONAL = ['tasks'];
 const STATUS: Record<string, [string, string]> = {
   draft: ['Подготовка', 'acc'], checked: ['Проверен', 'acc'], applied: ['Перенесён, ждёт принятия', 'warn'], accepted: ['Принят', 'ok'], rolled_back: ['Отменён', 'bad'],
 };
@@ -59,7 +60,7 @@ export function ImportPage({ clubs, clubId }: { clubs: Club[]; clubId: string })
       </div>
       {err && <div className="err">{err}</div>}
       <div className="note">
-        Нужны пять отчётов из 1С по клубу: <b>клиенты</b>, <b>абонементы и договоры</b>, <b>платежи</b>, <b>посещения</b>, <b>остатки и долги</b>, в Excel (.xlsx) или CSV.
+        Нужны пять отчётов из 1С по клубу: <b>клиенты</b>, <b>абонементы и договоры</b>, <b>платежи</b>, <b>посещения</b>, <b>остатки и долги</b>, в Excel (.xlsx) или CSV. Шестой — <b>задачи и звонки</b> — по желанию: открытые задачи перейдут в работу, выполненные — в историю клиента.
         Система сама узнаёт отчёт и колонки, вы проверяете карту полей. Пробный перенос ничего не меняет в базе и показывает отчёт сверки.
         Перенос можно отменить, пока вы его не приняли. Повторная загрузка тех же данных не создаёт дублей.
       </div>
@@ -128,7 +129,7 @@ function BatchView({ id, types, back }: { id: string; types: TypeDef[]; back: ()
           const fs = b.files.filter((f) => f.reportType === t);
           return (
             <div key={t} className="card" style={{ display: 'grid', gap: 8, alignContent: 'start' }}>
-              <div className="row between"><h2>{def?.name ?? t}</h2>{fs.length ? <span className="chip ok">загружен</span> : <span className="chip bad">нужен отчёт</span>}</div>
+              <div className="row between"><h2>{def?.name ?? t}</h2>{fs.length ? <span className="chip ok">загружен</span> : OPTIONAL.includes(t) ? <span className="chip">по желанию</span> : <span className="chip bad">нужен отчёт</span>}</div>
               {fs.map((f) => <FileCard key={f.id} f={f} types={types} editable={editable} reload={load} />)}
             </div>);
         })}
@@ -218,7 +219,7 @@ function ReportView({ r }: { r: Report }) {
         <div className="tbl"><table>
           <thead><tr><th>Отчёт</th><th className="r">Записей в 1С</th><th className="r">{r.mode === 'applied' ? 'Перенесено' : 'Перенесётся'}</th><th className="r">из них с замечанием</th>
             <th className="r">Не переносится</th><th className="r">Конфликты</th><th className="r">Повторы и пропуски</th><th className="r">Перенесено раньше</th></tr></thead>
-          <tbody>{ORDER.map((t) => { const c = r.counts[t]; return (
+          <tbody>{ORDER.filter((t) => r.counts[t] && (!OPTIONAL.includes(t) || r.counts[t].files)).map((t) => { const c = r.counts[t]; return (
             <tr key={t}><td>{c.name}</td><td className="r num">{c.source}</td><td className="r num"><b>{c.load}</b></td><td className="r num">{c.warning || ''}</td>
               <td className={`r num ${c.excluded ? 'bad' : ''}`}>{c.excluded || ''}</td><td className={`r num ${c.conflict ? 'bad' : ''}`}>{c.conflict || ''}</td>
               <td className="r num">{c.skipped - c.earlier || ''}</td><td className="r num">{c.earlier || ''}</td></tr>); })}</tbody>
@@ -260,6 +261,9 @@ function ReportView({ r }: { r: Report }) {
           <span>Действующих абонементов</span><span className="num">{r.completeness.membershipsActive}</span>
           <span>Абонементов без номера договора</span><span className="num">{r.completeness.membershipsWithoutContract}</span>
           <span>Платежей без привязки к абонементу</span><span className="num">{r.completeness.paymentsWithoutMembership}</span>
+          {r.completeness.tasksOpen !== undefined && (r.counts.tasks?.files ?? 0) > 0 && <>
+            <span>Открытых задач и звонков</span><span className="num">{r.completeness.tasksOpen}</span>
+            <span>Выполненных задач (история в карточке)</span><span className="num">{r.completeness.tasksHistory}</span></>}
         </div>
         <ul className="small" style={{ margin: 0, paddingLeft: 18 }}>{r.completeness.notTransferred.map((x) => <li key={x}>{x}</li>)}</ul>
       </div>
@@ -270,18 +274,30 @@ function ReportView({ r }: { r: Report }) {
 function Conflicts({ batchId, reload }: { batchId: string; reload: () => void }) {
   const [rows, setRows] = useState<IRow[]>([]);
   const [err, setErr] = useState('');
-  const load = () => api<IRow[]>('GET', `/api/import/batches/${batchId}/rows?status=conflict`).then(setRows).catch((e) => setErr(errText(e)));
+  const load = () => api<IRow[]>('GET', `/api/import/batches/${batchId}/rows?status=conflict&limit=1000`).then(setRows).catch((e) => setErr(errText(e)));
   useEffect(() => { load(); }, [batchId]);
   if (!rows.length) return null;
   const resolve = async (id: string, resolution: string) => {
     try { await api('POST', `/api/import/rows/${id}/resolve`, { resolution }); await load(); reload(); } catch (e) { setErr(errText(e)); }
   };
   const LBL: Record<string, string> = { merge: 'объединить', new: 'отдельный клиент', skip: 'не переносить' };
+  const open = rows.filter((r) => !r.resolution).length;
+  const resolveAll = async (resolution: 'new' | 'skip') => {
+    const what = resolution === 'new' ? 'создать отдельными клиентами' : 'не переносить';
+    if (!window.confirm(`Все нерешённые конфликты (${open}) — ${what}? Решение по отдельной строке потом можно поменять.`)) return;
+    try { await api('POST', `/api/import/batches/${batchId}/resolve-conflicts`, { resolution }); await load(); reload(); } catch (e) { setErr(errText(e)); }
+  };
   return (
     <div className="card" style={{ display: 'grid', gap: 8 }}>
       <h2>Конфликты: решите по каждой строке</h2>
       <p className="small">Исходная строка не удаляется: решение сохраняется вместе с ней. После решений запустите пробный перенос ещё раз.</p>
       {err && <div className="err">{err}</div>}
+      {open > 1 && (
+        <div className="row" style={{ alignItems: 'center' }}>
+          <span className="small">Не решено: {open}. Чаще всего это члены одной семьи с общим телефоном.</span>
+          <button className="btn sm pri" onClick={() => resolveAll('new')}>Всех создать отдельными клиентами</button>
+          <button className="btn sm" onClick={() => resolveAll('skip')}>Всех не переносить</button>
+        </div>)}
       {rows.map((r) => (
         <div key={r.id} className="item" style={{ display: 'grid', gap: 6 }}>
           <div className="small">{r.fileName}, строка {r.rowNo}</div>
@@ -334,7 +350,7 @@ function Actions({ b, reload }: { b: BatchFull; reload: () => void }) {
   };
   const applied = b.report?.applied;
   const TEXT = {
-    apply: 'Перенести данные в систему. Клиенты, абонементы, договоры, платежи, посещения и долги появятся в рабочих разделах. До принятия перенос можно отменить целиком.',
+    apply: 'Перенести данные в систему. Клиенты, абонементы, договоры, платежи, посещения, долги и задачи появятся в рабочих разделах. До принятия перенос можно отменить целиком.',
     accept: 'Принять перенос: после этого отменить его будет нельзя. Принимайте после выборочной проверки карточек знакомых клиентов.',
     rollback: 'Отменить перенос: всё, что он создал, будет удалено. Исходные файлы и решения по конфликтам останутся в истории.',
   };
@@ -347,6 +363,7 @@ function Actions({ b, reload }: { b: BatchFull; reload: () => void }) {
           <span>Платежей</span><span className="num">{applied.payments}</span>
           <span>Посещений</span><span className="num">{applied.visits}</span>
           <span>Долгов</span><span className="num">{applied.debts}</span>
+          {applied.tasks !== undefined && (applied.tasks || applied.taskHistory) ? <><span>Задач и звонков</span><span className="num">{applied.tasks} открытых, {applied.taskHistory} в истории</span></> : null}
           <span>Тарифов из 1С</span><span className="num">{applied.products} (в прайс не попадают)</span>
         </div>)}
       <div className="row">
