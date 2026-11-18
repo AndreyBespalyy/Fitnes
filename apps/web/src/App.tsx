@@ -334,7 +334,7 @@ function Shell({ me, onLogout }: { me: Me; onLogout: () => void }) {
         {tab === 'sales' && <SalesOpsPage me={me} clubs={clubs} clubId={clubId} openPerson={openPerson} />}
         {tab === 'weekly' && <WeeklyPage clubs={clubs} clubId={clubId} />}
         {tab === 'learn' && <LearnPage clubs={clubs} clubId={clubId} />}
-        {tab === 'processes' && <ProcessesPage me={me} clubs={clubs} clubId={clubId} openPerson={openPerson} />}
+        {tab === 'processes' && <ProcessesPage me={me} clubs={clubs} clubId={clubId} openPerson={openPerson} go={go} />}
         {tab === 'calls' && <CallsPage me={me} clubs={clubs} clubId={clubId} openPerson={openPerson} />}
         {tab === 'tasks' && <TasksPage key={ver} me={me} clubId={clubId} openPerson={openPerson} />}
         {tab === 'leads' && <LeadsPage key={ver} me={me} clubs={clubs} clubId={clubId} openPerson={openPerson} />}

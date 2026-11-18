@@ -2,19 +2,21 @@
 // готовые шаблоны и конструктор, «опишите процесс словами» — помощник сам разложит на шаги.
 import { useEffect, useState } from 'react';
 import { useClubPick } from './clubPick.tsx';
-import { api, can, type Club, type Me } from './api.ts';
+import { api, can, type Club, type Go, type Me } from './api.ts';
+import { DialButton } from './mobile.tsx';
 import { dt, errText, toast } from './ui.ts';
 import { SituationButton } from './agent.tsx';
 
-type Step = { title: string; role: string; hours: number };
+type Hint = 'call' | 'write' | 'card' | 'task' | 'team' | 'schedule' | 'staff' | 'result';
+type Step = { title: string; role: string; hours: number; hints?: Hint[] };
 type Tpl = { id: string; name: string; description: string; steps: Step[]; builtin: string | null };
-type PStep = { ord: number; title: string; role: string; status: string; assignee: string | null; assigneeId: string | null; dueAt: string | null; doneAt: string | null };
+type PStep = { ord: number; title: string; role: string; status: string; assignee: string | null; assigneeId: string | null; dueAt: string | null; doneAt: string | null; hints?: Hint[] };
 type Proc = { id: string; title: string; status: string; startedAt: string; dueAt: string; finishedAt: string | null; personId: string | null; person: string | null; owner: string | null; isOwner: boolean; steps: PStep[] };
 type View = 'run' | 'done' | 'templates' | 'words';
 
 const hoursText = (h: number) => (h >= 24 && h % 24 === 0 ? `${h / 24} дн.` : h < 1 ? `${Math.round(h * 60)} мин` : `${h} ч`);
 
-export function ProcessesPage({ me, clubs, clubId, openPerson }: { me: Me; clubs: Club[]; clubId: string; openPerson: (id: string) => void }) {
+export function ProcessesPage({ me, clubs, clubId, openPerson, go }: { me: Me; clubs: Club[]; clubId: string; openPerson: (id: string) => void; go?: (g: Go) => void }) {
   const [clubObj, clubChips] = useClubPick(clubs, clubId);
   const club = clubObj?.id ?? '';
   const [view, setView] = useState<View>('run');
@@ -31,14 +33,14 @@ export function ProcessesPage({ me, clubs, clubId, openPerson }: { me: Me; clubs
       {clubChips}
       <div className="tabs" role="group" aria-label="Бизнес-процессы">{views.filter((v) => v[2]).map(([k, t]) => <button key={k} aria-pressed={view === k} onClick={() => { setView(k); setEdit(null); }}>{t}</button>)}</div>
       {edit && tpls && <TemplateEditor tpl={edit} roles={tpls.roles} onClose={() => setEdit(null)} onSaved={() => { setEdit(null); void loadTpls(); setView('templates'); }} />}
-      {!edit && (view === 'run' || view === 'done') && tpls && <Running work={work} clubId={club} status={view === 'run' ? 'active' : 'done'} tpls={tpls.items} canEdit={tpls.canEdit} roles={tpls.roles} openPerson={openPerson} />}
+      {!edit && (view === 'run' || view === 'done') && tpls && <Running work={work} clubId={club} status={view === 'run' ? 'active' : 'done'} tpls={tpls.items} canEdit={tpls.canEdit} roles={tpls.roles} openPerson={openPerson} go={go} />}
       {!edit && view === 'templates' && tpls && <Templates data={tpls} onEdit={setEdit} onChanged={loadTpls} />}
       {!edit && view === 'words' && tpls && <Words onDraft={(d) => setEdit(d)} />}
     </div>
   );
 }
 
-function Running({ work, clubId, status, tpls, canEdit, roles, openPerson }: { work: boolean; clubId: string; status: string; tpls: Tpl[]; canEdit: boolean; roles: Record<string, string>; openPerson: (id: string) => void }) {
+function Running({ work, clubId, status, tpls, canEdit, roles, openPerson, go }: { work: boolean; clubId: string; status: string; tpls: Tpl[]; canEdit: boolean; roles: Record<string, string>; openPerson: (id: string) => void; go?: (g: Go) => void }) {
   const [items, setItems] = useState<Proc[] | null>(null);
   const [open, setOpen] = useState<string | null>(null);
   const load = () => api<{ items: Proc[] }>('GET', `/api/processes?clubId=${clubId}&status=${status}`).then((r) => setItems(r.items)).catch((e) => toast(errText(e)));
@@ -73,6 +75,7 @@ function Running({ work, clubId, status, tpls, canEdit, roles, openPerson }: { w
                   {(canEdit || p.isOwner) && <button className="btn sm" onClick={() => void act(`/api/processes/${p.id}/cancel`, 'Процесс отменён')}>Отменить</button>}
                 </span>
               </div>}
+              {cur && !!cur.hints?.length && <StepHints p={p} step={cur} clubId={clubId} openPerson={openPerson} go={go} onDone={load} />}
               <button className="linkish small" onClick={() => setOpen(open === p.id ? null : p.id)}>{open === p.id ? 'Скрыть шаги' : `Все шаги (${done} из ${p.steps.length})`}</button>
               {open === p.id && <ol className="proc-steps">{p.steps.map((s) => (
                 <li key={s.ord} className={s.status}>{s.status === 'done' ? '✅' : s.status === 'active' ? '▶️' : s.status === 'skipped' ? '—' : '○'} {s.title} <span className="muted">— {s.assignee ?? roles[s.role]}{s.doneAt ? `, выполнен ${dt(s.doneAt)}` : s.dueAt ? `, срок ${dt(s.dueAt)}` : ''}</span></li>))}</ol>}
@@ -81,6 +84,54 @@ function Running({ work, clubId, status, tpls, canEdit, roles, openPerson }: { w
         })}
       </div>}
   </>);
+}
+
+/* ---------- Подсказки-действия у текущего шага (замечание тестировщика №26) ---------- */
+export const HINT_META: Record<Hint, [string, string]> = {
+  call: ['📞', 'Позвонить клиенту'], write: ['💬', 'Написать клиенту'], card: ['👤', 'Карточка клиента'], task: ['✅', 'Поставить задачу'],
+  team: ['👥', 'Написать коллегам'], schedule: ['📅', 'Открыть расписание'], staff: ['🧑‍💼', 'Открыть «Персонал»'], result: ['📝', 'Записать итог и завершить шаг'],
+};
+const tomorrowNoon = () => { const d = new Date(); d.setDate(d.getDate() + 1); d.setHours(12, 0, 0, 0); return new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 16); };
+
+function StepHints({ p, step, clubId, openPerson, go, onDone }: { p: Proc; step: PStep; clubId: string; openPerson: (id: string) => void; go?: (g: Go) => void; onDone: () => void }) {
+  const [form, setForm] = useState<'task' | 'result' | null>(null);
+  const [text, setText] = useState('');
+  const [due, setDue] = useState(tomorrowNoon);
+  const [busy, setBusy] = useState(false);
+  const open = (f: 'task' | 'result') => { setForm(form === f ? null : f); setText(f === 'task' ? step.title : ''); };
+  const submit = async () => {
+    setBusy(true);
+    try {
+      if (form === 'task') { await api('POST', '/api/tasks', { clubId, title: `${text.trim()} · процесс «${p.title}»`.slice(0, 300), dueAt: new Date(due).toISOString(), personId: p.personId ?? undefined }); toast('Задача поставлена — она в разделе «Задачи»'); }
+      else { await api('POST', `/api/processes/${p.id}/step-done`, { result: text.trim() || 'Сделано' }); toast('Итог записан, следующий шаг запущен'); onDone(); }
+      setForm(null);
+    } catch (e) { toast(errText(e)); } finally { setBusy(false); }
+  };
+  const btn = (h: Hint, onClick: () => void) => <button key={h} className={`proc-hint${form === h ? ' on' : ''}`} onClick={onClick}><span aria-hidden="true">{HINT_META[h][0]}</span>{HINT_META[h][1]}</button>;
+  return (
+    <div className="proc-hints-wrap">
+      <div className="proc-hints" role="group" aria-label="Что сделать на этом шаге">
+        <span className="small muted">Что сделать:</span>
+        {step.hints!.map((h) => {
+          if (h === 'call' && p.personId) return <DialButton key={h} personId={p.personId} label={`${HINT_META.call[0]} ${HINT_META.call[1]}`} className="proc-hint" />;
+          if ((h === 'write' || h === 'card') && p.personId) return btn(h, () => openPerson(p.personId!));
+          if (h === 'team' || h === 'schedule' || h === 'staff') return go ? btn(h, () => go({ tab: h })) : null;
+          if (h === 'task' || h === 'result') return btn(h, () => open(h));
+          return null;
+        })}
+      </div>
+      {form && (
+        <div className="proc-hint-form">
+          {form === 'task' ? <>
+            <input value={text} onChange={(e) => setText(e.target.value)} placeholder="Что нужно сделать" aria-label="Задача" autoFocus />
+            <input type="datetime-local" value={due} onChange={(e) => setDue(e.target.value)} aria-label="Срок" />
+          </> : <textarea rows={2} value={text} onChange={(e) => setText(e.target.value)} placeholder="Что сделано и чем закончилось — увидят следующие исполнители и «Коротко о ситуации»" aria-label="Итог шага" autoFocus />}
+          <button className="btn sm primary" disabled={busy || (form === 'task' && !text.trim())} onClick={() => void submit()}>{form === 'task' ? 'Поставить себе' : 'Записать и завершить шаг'}</button>
+          <button className="btn sm" onClick={() => setForm(null)}>Отмена</button>
+        </div>
+      )}
+    </div>
+  );
 }
 
 function StartForm({ clubId, tpls, onStarted }: { clubId: string; tpls: Tpl[]; onStarted: () => void }) {
@@ -165,6 +216,15 @@ function TemplateEditor({ tpl, roles, onClose, onSaved }: { tpl: Partial<Tpl>; r
           <button className="btn sm" onClick={() => move(i, -1)} aria-label="Выше">↑</button>
           <button className="btn sm" onClick={() => move(i, 1)} aria-label="Ниже">↓</button>
           <button className="btn sm" onClick={() => setSteps((x) => x.filter((_, j) => j !== i))} aria-label="Удалить шаг" disabled={steps.length === 1}>×</button>
+          <div className="proc-hint-pick" role="group" aria-label={`Кнопки-подсказки шага ${i + 1}`}>
+            <span className="small muted">Кнопки на шаге:</span>
+            {(Object.keys(HINT_META) as Hint[]).map((h) => {
+              const on = !!s.hints?.includes(h);
+              return <button key={h} type="button" aria-pressed={on} title={HINT_META[h][1]} disabled={!on && (s.hints?.length ?? 0) >= 4}
+                onClick={() => upd(i, { hints: on ? s.hints!.filter((x) => x !== h) : [...(s.hints ?? []), h] })}>{HINT_META[h][0]} {HINT_META[h][1]}</button>;
+            })}
+            {!s.hints?.length && <span className="small muted">не выбраны — помощник подберёт по смыслу шага</span>}
+          </div>
         </div>
       ))}
       <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>

@@ -484,6 +484,18 @@ input[type="checkbox"],input[type="radio"]{accent-color:var(--accent)}
 .proc-bar i{display:block;height:100%;background:var(--accent);border-radius:99px}
 .proc-cur{display:flex;gap:10px;justify-content:space-between;align-items:center;flex-wrap:wrap;padding:8px 10px;border-radius:10px;background:var(--surface-2)}
 .proc-cur.late{outline:1px solid #f87171}
+/* Подсказки-действия у текущего шага процесса */
+.proc-hints-wrap{display:grid;gap:8px}
+.proc-hints{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+.proc-hint{display:inline-flex;gap:6px;align-items:center;border:1px solid color-mix(in srgb,var(--accent) 45%,transparent);background:var(--accent-soft);color:var(--accent-strong);border-radius:999px;padding:6px 12px;font:600 13px var(--f);cursor:pointer;min-height:34px}
+.proc-hint:hover{border-color:var(--accent)}
+.proc-hint.on{background:var(--accent);color:var(--accent-ink)}
+.proc-hint-form{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+.proc-hint-form input,.proc-hint-form textarea{flex:1;min-width:200px}
+.proc-hint-pick{flex-basis:100%;padding-left:30px;display:flex;flex-wrap:wrap;gap:4px;align-items:center}
+.proc-hint-pick button{border:1px solid var(--line);background:var(--surface-2);color:var(--muted);border-radius:999px;padding:3px 9px;font:600 12px var(--f);cursor:pointer}
+.proc-hint-pick button[aria-pressed="true"]{border-color:var(--accent);background:var(--accent-soft);color:var(--accent-strong)}
+.proc-hint-pick button:disabled{opacity:.4;cursor:default}
 .proc-late{color:#f87171;font-weight:700}
 .proc-steps{margin:4px 0 0;padding-left:20px;display:grid;gap:4px}
 .proc-steps li.done{opacity:.75}
