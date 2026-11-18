@@ -80,6 +80,13 @@ export async function sendMessage(f: Fetch, ch: ChannelRow, chatId: string, text
   throw new ProviderError('Неизвестный тип канала');
 }
 
+/** Wazzup присылает входящие только на внешний адрес. Адрес задаётся через API (в кабинете Wazzup такой настройки нет) — ставим его сами при проверке канала. */
+export async function setWazzupWebhook(f: Fetch, ch: ChannelRow, url: string): Promise<void> {
+  const res = await f(`${WZ}/webhooks`, { method: 'PATCH', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${need(ch.secret, 'ключ API Wazzup')}` },
+    body: JSON.stringify({ webhooksUri: url, subscriptions: { messagesAndStatuses: true } }) });
+  if (!res.ok) { const r = await json(res); throw new ProviderError(`Wazzup не принял адрес для входящих: ${r.description ?? r.error ?? res.status}`); }
+}
+
 /** Забрать новые входящие опросом (Telegram-бот и Green-API). Для Wazzup и тестового канала — пусто. */
 export async function poll(f: Fetch, ch: ChannelRow): Promise<PollResult> {
   if (ch.kind === 'telegram_bot') {

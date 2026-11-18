@@ -14,7 +14,7 @@ import { decrypt, encrypt } from './fiscal.ts';
 import { addDays, clubToday } from './memberships.ts';
 import { clientBot } from './clientBot.ts';
 import { guardReveal } from './privacy.ts';
-import { parseWebhook, poll, ProviderError, sendMessage, testChannel, type ChannelRow, type Fetch, type Inbound } from './msgProviders.ts';
+import { parseWebhook, poll, ProviderError, sendMessage, setWazzupWebhook, testChannel, type ChannelRow, type Fetch, type Inbound } from './msgProviders.ts';
 
 type Actor = { tenantId: string; userId: string | null; ip?: string };
 type Channel = ChannelRow & { club_id: string; tenant_id: string; name: string; status: string; client_bot?: boolean };
@@ -484,7 +484,13 @@ export function messagingRoutes(app: FastifyInstance, pool: pg.Pool, opts: { fet
     return withCtx(pool, ctx, async (db) => {
       const ch = await loadChannel(db, id);
       try {
-        const info = await testChannel(f, ch);
+        let info = await testChannel(f, ch);
+        // Wazzup: адрес для входящих ставим сами, чтобы клиенту не пришлось ничего настраивать в кабинете Wazzup
+        if (ch.kind === 'wazzup') {
+          const hook = (await db.query('select webhook_token from msg_channels where id = $1', [id])).rows[0].webhook_token;
+          await setWazzupWebhook(f, ch, `${base(req)}/api/hooks/msg/${id}/${hook}`);
+          info += '. Входящие сообщения будут приходить в «Переписку»';
+        }
         await db.query('update msg_channels set last_ok_at = now(), last_error = null where id = $1', [id]);
         return { ok: true, info };
       } catch (e) {
