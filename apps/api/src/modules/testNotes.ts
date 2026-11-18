@@ -264,6 +264,18 @@ export function testNoteRoutes(app: FastifyInstance, pool: pg.Pool, storage: str
     });
   });
 
+  // Удалить запись из журнала по просьбе собственника (ежедневный разбор, 18.11.2026)
+  app.delete('/api/test-notes/export/:id', async (req) => {
+    const ctx = await byKey(req);
+    const { id } = req.params as { id: string };
+    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id)) throw notFound('Запись не найдена');
+    return withCtx(pool, ctx, async (db) => {
+      const r = await db.query('delete from test_notes where id = $1 returning number', [id]);
+      if (!r.rowCount) throw notFound('Запись не найдена');
+      return { ok: true, number: r.rows[0].number };
+    });
+  });
+
   app.patch('/api/test-notes/export/status', async (req) => {
     const ctx = await byKey(req);
     const b = (req.body ?? {}) as { ids?: string[]; status?: string; statusNote?: string | null };
