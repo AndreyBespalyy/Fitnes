@@ -71,6 +71,7 @@ import { platformRoutes } from './modules/platform.ts';
 import { salesOpsRoutes, startSalesOpsWorker } from './modules/salesOps.ts';
 import { testNoteRoutes } from './modules/testNotes.ts';
 import { navBadgeRoutes } from './modules/navBadges.ts';
+import { personCardRoutes } from './modules/personCard.ts';
 import { teamRoutes, startTeamPushWorker } from './modules/team.ts';
 import { startTeamAdviceWorker, teamAdviceRoutes } from './modules/teamAdvice.ts';
 import { agentRoutes } from './modules/agent.ts';
@@ -146,6 +147,7 @@ export async function buildApp(pool: pg.Pool, opts: { webDist?: string; secureCo
   // Файлы (PDF договоров, сканы, подписи) лежат на диске; путь задаётся STORAGE_DIR, по умолчанию папка storage в корне проекта
   const storage = opts.storageDir ?? process.env.STORAGE_DIR ?? join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..', 'storage');
   contractRoutes(app, pool, storage);
+  personCardRoutes(app, pool, storage);
   siteRoutes(app, pool, storage);
   fiscalRoutes(app, pool, { fetch: opts.fetch });
   financeRoutes(app, pool);

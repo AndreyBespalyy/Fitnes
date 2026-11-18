@@ -7,7 +7,7 @@ const ck: Record<string, Record<string, string>> = {};
 let centr: { id: string }, sever: { id: string };
 before(async () => {
   t = await setupTestApp();
-  for (const l of ['a.bespalyy', 'o.smirnov', 'd.lis', 'm.volkova', 'i.kotova']) ck[l] = (await login(t.app, l)).cookie!;
+  for (const l of ['a.bespalyy', 'o.smirnov', 'd.lis', 'm.volkova', 'i.kotova', 'a.kim']) ck[l] = (await login(t.app, l)).cookie!;
   const clubs = (await t.app.inject({ method: 'GET', url: '/api/clubs', cookies: ck['a.bespalyy'] })).json();
   centr = clubs.find((c: { name: string }) => c.name === 'Клуб «Центр»');
   sever = clubs.find((c: { name: string }) => c.name === 'Клуб «Север»');
@@ -93,8 +93,10 @@ test('заморозка: минимальный срок, годовой лим
   const startsOn = m.startsOn;
   const later = new Date(`${startsOn}T00:00:00Z`); later.setUTCDate(later.getUTCDate() + 40);
   assert.equal((await req('POST', `/api/memberships/${id}/freeze`, 'd.lis', { startsOn: later.toISOString().slice(0, 10), days: 31 })).statusCode, 400);
-  // Менеджер не замораживает
-  assert.equal((await req('POST', `/api/memberships/${id}/freeze`, 'm.volkova', { days: 10 })).statusCode, 403);
+  // Менеджер тоже замораживает из карточки (замечание №50) по тем же правилам клуба: меньше минимального срока нельзя
+  assert.equal((await req('POST', `/api/memberships/${id}/freeze`, 'm.volkova', { days: 1 })).statusCode, 400);
+  // Тренер — нет
+  assert.equal((await req('POST', `/api/memberships/${id}/freeze`, 'a.kim', { days: 10 })).statusCode, 403);
 });
 
 test('продление считается от даты окончания, а не от сегодня', async () => {

@@ -1,7 +1,7 @@
 // Шаг 6. Настройки клуба по абонементам, тарифы с версиями цен, продажа, заморозка, продление, график платежей, право прохода.
 import type { FastifyInstance } from 'fastify';
 import type pg from 'pg';
-import { requirePerm } from '../auth.ts';
+import { requireAnyPerm, requirePerm } from '../auth.ts';
 import { audit, withCtx, type Ctx, type Db } from '../db.ts';
 import { badRequest, HttpError, notFound } from '../errors.ts';
 import { PERMISSIONS as P } from '../roles.ts';
@@ -480,7 +480,8 @@ export function membershipRoutes(app: FastifyInstance, pool: pg.Pool) {
   });
 
   app.post('/api/memberships/:id/freeze', async (req) => {
-    const ctx = requirePerm(req, P.membershipsManage);
+    // Заморозку оформляет и менеджер из карточки клиента (замечание №50); правила клуба проверяются в freezeMembership
+    const ctx = requireAnyPerm(req, P.membershipsManage, P.membershipsSell);
     const { id } = req.params as { id: string };
     return withCtx(pool, ctx, (db) => freezeMembership(db, ctx, id, (req.body ?? {}) as { startsOn?: string; days?: number }));
   });
