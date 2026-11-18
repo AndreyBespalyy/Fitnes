@@ -34,6 +34,25 @@ const time = (s: string) => new Date(s).toLocaleString('ru-RU', { day: '2-digit'
 const maskWa = (d: string) => d.replace(/^7(\d{3})(\d{3})(\d{2})(\d{2})$/, '+7 $1 ***-**-$4');
 const who = (c: Conv) => c.personName ?? c.title;
 
+type ChatSum = { at: string; messages: number; messenger: string; manager: string | null; essence: string; need: string; objections: string[]; agreements: string;
+  outcome: string | null; nextStep: { title: string } | null };
+const OUTCOME: Record<string, string> = { interested: 'интересно', thinking: 'думает', refused: 'отказ', bought: 'купил', other: 'другое' };
+/** Итог переписки от ИИ — как итог разговора у звонков */
+function ChatSummary({ s }: { s: ChatSum }) {
+  return (
+    <details className="note small" open>
+      <summary><b>✦ Итог переписки</b> · разбор ИИ, {time(s.at)}{s.outcome ? ` · ${OUTCOME[s.outcome] ?? s.outcome}` : ''}</summary>
+      <div style={{ display: 'grid', gap: 2, marginTop: 4 }}>
+        <span>{s.essence}</span>
+        {s.need && <span>Потребность: {s.need}</span>}
+        {s.objections?.length > 0 && <span>Возражения: {s.objections.join('; ')}</span>}
+        {s.agreements && <span>Договорились: {s.agreements}</span>}
+        {s.nextStep?.title && <span>Следующий шаг: {s.nextStep.title}</span>}
+      </div>
+    </details>
+  );
+}
+
 /* ---------------- окно переписки ---------------- */
 export function ChatsPage({ me, clubs, clubId, openPerson }: { me: Me; clubs: Club[]; clubId: string; openPerson: (id: string) => void }) {
   const [list, setList] = useState<Conv[]>([]);
@@ -84,7 +103,8 @@ export function ChatPane({ me, conv, onBack, onSent, openPerson, compact }: { me
   const [err, setErr] = useState('');
   const [busy, setBusy] = useState(false);
   const end = useRef<HTMLDivElement>(null);
-  const load = () => api<{ messages: Msg[] }>('GET', `/api/msg/conversations/${conv.id}/messages`).then((r) => setMsgs(r.messages)).catch((e) => setErr(errText(e)));
+  const [sums, setSums] = useState<ChatSum[]>([]);
+  const load = () => api<{ messages: Msg[]; summaries?: ChatSum[] }>('GET', `/api/msg/conversations/${conv.id}/messages`).then((r) => { setMsgs(r.messages); setSums(r.summaries ?? []); }).catch((e) => setErr(errText(e)));
   useEffect(() => { setMsgs([]); setText(''); setErr(''); load(); const t = setInterval(load, 4000); return () => clearInterval(t); }, [conv.id]);
   useEffect(() => { api<Template[]>('GET', `/api/msg/templates?clubId=${conv.clubId}`).then((x) => setTpl(x.filter((t) => t.isActive))).catch(() => {}); }, [conv.clubId]);
   useEffect(() => { end.current?.scrollIntoView({ block: 'end' }); }, [msgs.length]);
@@ -111,6 +131,7 @@ export function ChatPane({ me, conv, onBack, onSent, openPerson, compact }: { me
             <div><b>{who(conv)}</b><div className="small">{MESSENGER[conv.messenger]} · {conv.channelName}{conv.messenger === 'whatsapp' ? ` · ${maskWa(conv.chatId)}` : ''}</div></div></div>
           {conv.personId && openPerson && <button className="btn sm" onClick={() => openPerson(conv.personId!)}>Карточка клиента</button>}
         </div>)}
+      {sums[0] && <ChatSummary s={sums[0]} />}
       {conv.optOut && <div className="note">Клиент отписался от сообщений: автосообщения ему не уходят. Отвечать на его вопросы можно.</div>}
       <div className="msgs" style={compact ? { maxHeight: 320 } : undefined}>
         {msgs.map((m) => (
@@ -212,6 +233,11 @@ export function MessagingAdmin({ me, clubs, clubId }: { me: Me; clubs: Club[]; c
 }
 
 const KIND_INFO: Record<string, { title: string; messengers: string[]; text: string; secret?: string; fields: [string, string][] }> = {
+  tg_user: { title: 'Telegram-аккаунт клуба (свой модуль)', messengers: ['telegram'], fields: [],
+    text: 'CRM входит в обычный Telegram-аккаунт клуба по коду, как приложение. Можно писать клиенту первым по номеру. Без посредников и абонентской платы.' },
+  wa_cloud: { title: 'WhatsApp для бизнеса напрямую (свой модуль)', messengers: ['whatsapp'], secret: 'Постоянный ключ доступа (System User token)',
+    fields: [['phoneNumberId', 'Идентификатор номера (Phone number ID)'], ['openTemplate', 'Шаблон для первого сообщения (название из WhatsApp Manager)'], ['templateLang', 'Язык шаблона (по умолчанию ru)']],
+    text: 'Официальный канал WhatsApp от Meta, без посредников. Нужен аккаунт WhatsApp Business Platform. Первое сообщение клиенту уходит по одобренному шаблону.' },
   telegram_bot: { title: 'Telegram-бот клуба', messengers: ['telegram'], secret: 'Токен бота от @BotFather', fields: [],
     text: 'Клиенты пишут боту клуба. Создайте бота в @BotFather и вставьте токен. Работает сразу, внешний адрес не нужен.' },
   green_api: { title: 'WhatsApp через Green-API', messengers: ['whatsapp'], secret: 'apiTokenInstance', fields: [['idInstance', 'Номер инстанса (idInstance)'], ['apiUrl', 'Адрес API (если в кабинете указан свой)']],
@@ -221,15 +247,63 @@ const KIND_INFO: Record<string, { title: string; messengers: string[]; text: str
   test: { title: 'Тестовый канал', messengers: ['whatsapp', 'telegram'], fields: [], text: 'Для проверки: отправка всегда успешна, сообщение клиента можно сымитировать.' },
 };
 
+/* Вход в Telegram-аккаунт клуба: номер → код из Telegram → облачный пароль (если включён) */
+function TgLogin({ clubId, channelId, onDone, onCancel }: { clubId: string; channelId?: string; onDone: () => void; onCancel: () => void }) {
+  const [f, setF] = useState({ phone: '', apiId: '', apiHash: '', code: '', password: '' });
+  const [step, setStep] = useState<'phone' | 'code' | 'password'>('phone');
+  const [loginId, setLoginId] = useState('');
+  const [hint, setHint] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState('');
+  const set = (k: keyof typeof f) => (e: { target: { value: string } }) => setF({ ...f, [k]: e.target.value });
+  const run = async (fn: () => Promise<void>) => { setBusy(true); setErr(''); try { await fn(); } catch (x) { setErr(errText(x)); } finally { setBusy(false); } };
+  const start = () => run(async () => {
+    const r = await api<{ loginId: string; viaApp: boolean }>('POST', '/api/msg/tg-login/start', { clubId, channelId, phone: f.phone, apiId: f.apiId || undefined, apiHash: f.apiHash || undefined });
+    setLoginId(r.loginId); setStep('code');
+    setHint(r.viaApp ? 'Код пришёл в приложение Telegram на телефоне клуба (сообщение от «Telegram»).' : 'Код пришёл по СМС на номер аккаунта.');
+  });
+  const finish = () => run(async () => {
+    const r = await api<{ ok?: boolean; needPassword?: boolean; account?: string }>('POST', '/api/msg/tg-login/code', step === 'password' ? { loginId, password: f.password } : { loginId, code: f.code });
+    if (r.needPassword) { setStep('password'); return; }
+    toast(`Telegram-аккаунт ${r.account ?? ''} подключён. Сообщения клиентов появятся в «Переписке»`); onDone();
+  });
+  return (
+    <div style={{ display: 'grid', gap: 8 }}>
+      <h3 style={{ margin: 0 }}>{channelId ? 'Войти в Telegram заново' : 'Вход в Telegram-аккаунт клуба'}</h3>
+      {err && <div className="err">{err}</div>}
+      {step === 'phone' && <>
+        <label className="f">Номер телефона аккаунта клуба<input value={f.phone} onChange={set('phone')} placeholder="+7 900 000-00-00" autoComplete="off" /></label>
+        <div className="grid2">
+          <label className="f">api_id<input value={f.apiId} onChange={set('apiId')} inputMode="numeric" placeholder="если не задан на сервере" /></label>
+          <label className="f">api_hash<input type="password" autoComplete="off" value={f.apiHash} onChange={set('apiHash')} placeholder="если не задан на сервере" /></label></div>
+        <p className="small muted" style={{ margin: 0 }}>api_id и api_hash выдают бесплатно на my.telegram.org → API development tools (один раз для клуба). Входить лучше в отдельный рабочий аккаунт клуба, а не в личный.</p>
+        <div className="row"><button type="button" className="btn pri" disabled={busy || !f.phone.trim()} onClick={start}>Получить код</button><button type="button" className="btn" onClick={onCancel}>Отмена</button></div>
+      </>}
+      {step === 'code' && <>
+        <p className="small" style={{ margin: 0 }}>{hint}</p>
+        <label className="f">Код из Telegram<input value={f.code} onChange={set('code')} inputMode="numeric" autoComplete="one-time-code" autoFocus /></label>
+        <div className="row"><button type="button" className="btn pri" disabled={busy || !f.code.trim()} onClick={finish}>Войти</button><button type="button" className="btn" onClick={onCancel}>Отмена</button></div>
+      </>}
+      {step === 'password' && <>
+        <p className="small" style={{ margin: 0 }}>У аккаунта включена двухэтапная проверка. Введите облачный пароль Telegram.</p>
+        <label className="f">Облачный пароль<input type="password" value={f.password} onChange={set('password')} autoComplete="off" autoFocus /></label>
+        <div className="row"><button type="button" className="btn pri" disabled={busy || !f.password} onClick={finish}>Войти</button><button type="button" className="btn" onClick={onCancel}>Отмена</button></div>
+      </>}
+    </div>
+  );
+}
+
 function Channels({ clubId, canSimulate }: { clubId: string; canSimulate: boolean }) {
   const [list, setList] = useState<Channel[]>([]);
   const [form, setForm] = useState<{ kind: string; messenger: string; name: string; secret: string; settings: Record<string, string> } | null>(null);
   const [sim, setSim] = useState<{ id: string; messenger: string; name: string; phone: string; text: string } | null>(null);
+  const [relogin, setRelogin] = useState<string | null>(null);
   const [err, setErr] = useState('');
   const load = () => api<Channel[]>('GET', `/api/msg/channels?clubId=${clubId}`).then(setList).catch((e) => setErr(errText(e)));
   useEffect(() => { load(); }, [clubId]);
   const save = async (e: FormEvent) => {
     e.preventDefault(); setErr('');
+    if (form?.kind === 'tg_user') return; // у Telegram-аккаунта свой вход по коду
     try {
       const c = await api<{ id: string }>('POST', '/api/msg/channels', { clubId, ...form });
       const t = await api<{ ok: boolean; info: string }>('POST', `/api/msg/channels/${c.id}/test`);
@@ -250,12 +324,14 @@ function Channels({ clubId, canSimulate }: { clubId: string; canSimulate: boolea
     <>
       {err && <div className="err">{err}</div>}
       <div className="card tbl">
-        <div className="row between"><h2>Каналы клуба</h2>{!form && <button className="btn pri sm" onClick={() => setForm({ kind: 'telegram_bot', messenger: 'telegram', name: '', secret: '', settings: {} })}>Подключить канал</button>}</div>
+        <div className="row between"><h2>Каналы клуба</h2>{!form && <button className="btn pri sm" onClick={() => setForm({ kind: 'tg_user', messenger: 'telegram', name: '', secret: '', settings: {} })}>Подключить канал</button>}</div>
         {!list.length ? <p className="muted">Каналов нет.</p> : (
           <table><thead><tr><th>Канал</th><th>Мессенджер</th><th>Подключение</th><th>Состояние</th><th /></tr></thead>
             <tbody>{list.map((c) => (
               <tr key={c.id}>
-                <td><b>{c.name}</b>{c.webhookUrl && !c.polling && c.kind !== 'test' && <div className="small">Адрес для входящих: <code>{c.webhookUrl}</code></div>}
+                <td><b>{c.name}</b>{c.webhookUrl && !c.polling && c.kind !== 'test' && c.kind !== 'tg_user' && <div className="small">Адрес для входящих: <code>{c.webhookUrl}</code></div>}
+                  {c.kind === 'wa_cloud' && c.webhookUrl && <div className="small">Маркер подтверждения (Verify token): <code>{c.webhookUrl.split('/').pop()}</code></div>}
+                  {c.kind === 'tg_user' && <div className="small">Аккаунт: {c.settings.account ?? '—'}</div>}
                   {c.messenger === 'telegram' && (c.kind === 'telegram_bot' || c.kind === 'test') && (
                     <label className="small row" style={{ gap: 6, marginTop: 4 }} title="Клиент делится номером и в боте видит абонемент и остаток, продлевает с оплатой онлайн и оформляет заморозку. Остальные сообщения, как и раньше, приходят в «Переписку»">
                       <input type="checkbox" checked={!!c.clientBot} onChange={() => botToggle(c)} style={{ width: 'auto' }} /> Клиентский бот: абонемент, продление, заморозка</label>)}</td>
@@ -264,10 +340,12 @@ function Channels({ clubId, canSimulate }: { clubId: string; canSimulate: boolea
                   : <span className="chip ok">работает{c.lastOkAt ? `, ${dt(c.lastOkAt)}` : ''}</span>}</td>
                 <td className="r"><div className="row" style={{ justifyContent: 'flex-end' }}>
                   {canSimulate && c.kind === 'test' && c.status === 'active' && <button className="btn sm" onClick={() => setSim({ id: c.id, messenger: c.messenger, name: 'Анна Тестова', phone: c.messenger === 'whatsapp' ? '+7 916 000-00-01' : '', text: 'Здравствуйте! Сколько стоит абонемент?' })}>Написать от клиента</button>}
+                  {c.kind === 'tg_user' && <button className="btn sm" onClick={() => setRelogin(c.id)}>Войти заново</button>}
                   <button className="btn sm" onClick={() => test(c.id)}>Проверить</button>
                   <button className="btn sm" onClick={() => toggle(c)}>{c.status === 'active' ? 'Отключить' : 'Включить'}</button></div></td>
               </tr>))}</tbody></table>)}
       </div>
+      {relogin && <TgLogin clubId={clubId} channelId={relogin} onDone={() => { setRelogin(null); load(); }} onCancel={() => setRelogin(null)} />}
       {sim && (
         <form className="card" onSubmit={simulate} style={{ display: 'grid', gap: 8 }}>
           <h2>Сообщение от клиента (имитация)</h2>
@@ -287,11 +365,13 @@ function Channels({ clubId, canSimulate }: { clubId: string; canSimulate: boolea
           </div>
           {info.messengers.length > 1 && <label className="f">Мессенджер<select className="f" value={form.messenger} onChange={(e) => setForm({ ...form, messenger: e.target.value })}>
             {info.messengers.map((m) => <option key={m} value={m}>{MESSENGER[m]}</option>)}</select></label>}
+          {form.kind === 'tg_user' ? <TgLogin clubId={clubId} onDone={() => { setForm(null); load(); }} onCancel={() => setForm(null)} /> : <>
           <label className="f">Название в системе<input value={form.name} placeholder={`${MESSENGER[form.messenger]} клуба`} onChange={(e) => setForm({ ...form, name: e.target.value })} /></label>
           {info.fields.map(([k, l]) => <label key={k} className="f">{l}<input value={form.settings[k] ?? ''} onChange={(e) => setForm({ ...form, settings: { ...form.settings, [k]: e.target.value } })} /></label>)}
           {info.secret && <label className="f">{info.secret}<input type="password" autoComplete="off" value={form.secret} onChange={(e) => setForm({ ...form, secret: e.target.value })} /></label>}
           <p className="small">Токены хранятся в зашифрованном виде и больше не показываются. Подробно по шагам: вкладка «Инструкция».</p>
           <div className="row"><button className="btn pri">Подключить и проверить</button><button type="button" className="btn" onClick={() => setForm(null)}>Отмена</button></div>
+          </>}
         </form>)}
     </>
   );
