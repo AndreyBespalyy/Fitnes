@@ -153,3 +153,20 @@ test('обращение к клиенту: имя и отчество, без �
   assert.match(s.lines[0].text, /^«Анна Петровна, добрый день! Это Мария из клуба «Центр»/);
   assert.doesNotMatch(JSON.stringify(s.lines), /Отчествова/);
 });
+
+test('«Коротко о ситуации» в карточке клиента: менеджер, РОП, администратор; тренер — только по своим клиентам', async () => {
+  ck['d.lis'] ??= (await login(t.app, 'd.lis')).cookie!;
+  const own = (await req('POST', '/api/leads', 'm.volkova', { clubId: centr, fullName: 'Тренерова Ольга', phone: '+79007770041', sourceCode: 'walk_in' })).json().personId;
+  const other = (await req('POST', '/api/leads', 'm.volkova', { clubId: centr, fullName: 'Чужая Вера', phone: '+79007770042', sourceCode: 'walk_in' })).json().personId;
+  const type = (await sql(`select id from class_types where club_id = $1 limit 1`, [centr]))[0]?.id
+    ?? (await sql(`insert into class_types(tenant_id, club_id, name, kind) values ($1, $2, 'Йога', 'group') returning id`, [tenant, centr]))[0].id;
+  const s = (await sql(`insert into class_sessions(tenant_id, club_id, type_id, trainer_id, starts_at, ends_at, capacity) values ($1,$2,$3,$4, now() + interval '1 day', now() + interval '1 day 1 hour', 10) returning id`,
+    [tenant, centr, type, uid['a.kim']]))[0].id;
+  await sql(`insert into class_bookings(tenant_id, club_id, session_id, person_id, status) values ($1,$2,$3,$4,'booked')`, [tenant, centr, s, own]);
+  for (const who of ['m.volkova', 'o.astafeva', 'd.lis']) assert.equal((await req('GET', `/api/agent/brief/person/${own}`, who)).statusCode, 200, who);
+  const r = await req('GET', `/api/agent/brief/person/${own}`, 'a.kim');
+  assert.equal(r.statusCode, 200, r.body);
+  assert.ok(r.json().text.length > 10);
+  assert.equal((await req('GET', `/api/agent/brief/person/${other}`, 'a.kim')).statusCode, 403);
+  assert.equal((await req('GET', `/api/agent/call-script/person/${own}`, 'a.kim')).statusCode, 403); // скрипт продаж — только отделу продаж
+});

@@ -346,7 +346,7 @@ export function PersonCard({ me: meIn, id, onClose }: { me: Me; id: string; onCl
           <div><PersonHead me={viewOnly ? { ...me, permissions: [] } : me} person={card.person} reload={reload}>
             <div className="row" style={{ marginTop: 4 }}><span className="chip acc">{card.person.segment}</span>
               <span className="small">{card.person.homeClubName ?? 'клиент другого клуба сети'} · в базе с {dt(card.person.createdAt)}</span></div>
-            {can(me, 'crm.work') && <div style={{ marginTop: 10 }}><div className="row" style={{ gap: 8, flexWrap: 'wrap' }}><SituationButton type="person" id={card.person.id} small={false} /><ScriptButton type="person" id={card.person.id} small={false} /></div></div>}
+            {(can(me, 'crm.work') || can(me, 'messages.work') || me.roles.some((r) => r.code === 'trainer')) && <div style={{ marginTop: 10 }}><div className="row" style={{ gap: 8, flexWrap: 'wrap' }}><SituationButton type="person" id={card.person.id} small={false} />{can(me, 'crm.work') && <ScriptButton type="person" id={card.person.id} small={false} />}</div></div>}
           </PersonHead></div>
           {sales && !viewOnly && <OwnerBlock me={me} personId={card.person.id} clubId={card.person.homeClubId} />}
           <div className="card kv">{card.contacts.map((c, i) => <span key={i} style={{ display: 'contents' }}><span>{c.type === 'phone' ? 'Телефон' : c.type === 'email' ? 'E-mail' : c.type === 'telegram' ? 'Telegram' : c.type === 'whatsapp' ? 'WhatsApp' : c.type}</span><span className="num">{c.type === 'phone' && phones ? (phones[card.contacts.filter((x) => x.type === 'phone').indexOf(c)] ?? c.value) : c.value}
