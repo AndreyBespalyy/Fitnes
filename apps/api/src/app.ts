@@ -71,6 +71,7 @@ import { platformRoutes } from './modules/platform.ts';
 import { salesOpsRoutes, startSalesOpsWorker } from './modules/salesOps.ts';
 import { testNoteRoutes } from './modules/testNotes.ts';
 import { navBadgeRoutes } from './modules/navBadges.ts';
+import { personCardRoutes } from './modules/personCard.ts';
 import { teamRoutes, startTeamPushWorker } from './modules/team.ts';
 import { startTeamAdviceWorker, teamAdviceRoutes } from './modules/teamAdvice.ts';
 import { agentRoutes } from './modules/agent.ts';
