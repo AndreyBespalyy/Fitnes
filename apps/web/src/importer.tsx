@@ -10,7 +10,7 @@ type FieldDef = { key: string; label: string; required: boolean };
 type TypeDef = { type: string; name: string; fields: FieldDef[] };
 type Batch = { id: string; clubId: string; clubName: string; status: string; createdAt: string; checkedAt: string | null; appliedAt: string | null; acceptedAt: string | null;
   rolledBackAt: string | null; createdByName: string | null; canApply?: boolean; applied?: Applied | null };
-type Applied = { persons: number; merged: number; memberships: number; contracts: number; payments: number; visits: number; debts: number; products: number; tasks?: number; taskHistory?: number };
+type Applied = { persons: number; merged: number; memberships: number; contracts: number; payments: number; visits: number; debts: number; products: number; tasks?: number; taskHistory?: number; staff?: number };
 type IFile = { id: string; fileName: string; reportType: string | null; detectedType: string; confidence: number; headers: string[]; headerRow: number;
   mapping: Record<string, { col: number; confidence: number } | null>; mappingConfirmed: boolean; mappingVersion: number | null; rowCount: number; sample: string[][] };
 type Count = { name: string; files: number; source: number; load: number; warning: number; excluded: number; conflict: number; skipped: number; earlier: number };
@@ -20,13 +20,16 @@ type Report = { generatedAt: string; mode: 'check' | 'applied'; canApply: boolea
   money: { months: Month[]; totals: Omit<Month, 'month'>; paymentsFooterKop: number | null; debts: { sourceKop: number; loadKop: number };
     advances: { sourceKop: number; count: number }; memberships: { loadKop: number; footerKop: number | null } };
   completeness: { clientsWithoutPhone: number; clientsWithoutBirthDate: number; clientsWithoutEmail: number; membershipsWithoutContract: number; membershipsActive: number;
-    paymentsWithoutMembership: number; tasksOpen?: number; tasksHistory?: number; notTransferred: string[] };
+    paymentsWithoutMembership: number; tasksOpen?: number; tasksHistory?: number;
+    staffNew?: number; staffRoles?: { position: string; role: string | null; count: number }[]; notTransferred: string[] };
   issues: Issue[]; applied?: Applied };
 type BatchFull = Batch & { report: Report | null; files: IFile[]; statusCounts: Record<string, number> };
 type IRow = { id: string; rowNo: number; cells: string[]; status: string; issue: string | null; conflictWith: string | null; resolution: string | null; fileName: string; headers: string[] };
 
-const ORDER = ['clients', 'memberships', 'payments', 'visits', 'balances', 'tasks'];
-const OPTIONAL = ['tasks'];
+const ORDER = ['clients', 'memberships', 'payments', 'visits', 'balances', 'tasks', 'staff'];
+const OPTIONAL = ['tasks', 'staff'];
+const ROLE_NAMES: Record<string, string> = { gm: 'Управляющий', rop: 'Руководитель ОП', manager: 'Менеджер ОП', desk: 'Администратор ресепшн', trainer: 'Тренер', fin: 'Финансист' };
+type Credential = { fullName: string; login: string; tempPassword: string; role: string; position: string };
 const STATUS: Record<string, [string, string]> = {
   draft: ['Подготовка', 'acc'], checked: ['Проверен', 'acc'], applied: ['Перенесён, ждёт принятия', 'warn'], accepted: ['Принят', 'ok'], rolled_back: ['Отменён', 'bad'],
 };
@@ -60,7 +63,7 @@ export function ImportPage({ clubs, clubId }: { clubs: Club[]; clubId: string })
       </div>
       {err && <div className="err">{err}</div>}
       <div className="note">
-        Нужны пять отчётов из 1С по клубу: <b>клиенты</b>, <b>абонементы и договоры</b>, <b>платежи</b>, <b>посещения</b>, <b>остатки и долги</b>, в Excel (.xlsx) или CSV. Шестой — <b>задачи и звонки</b> — по желанию: открытые задачи перейдут в работу, выполненные — в историю клиента.
+        Нужны пять отчётов из 1С по клубу: <b>клиенты</b>, <b>абонементы и договоры</b>, <b>платежи</b>, <b>посещения</b>, <b>остатки и долги</b>, в Excel (.xlsx) или CSV. Шестой — <b>задачи и звонки</b> — по желанию: открытые задачи перейдут в работу, выполненные — в историю клиента. Седьмой — <b>сотрудники</b> — по желанию: каждому создаётся вход в систему с ролью по должности. Пропущенное (сотрудников, недостающих клиентов) можно догрузить позже отдельным переносом.
         Система сама узнаёт отчёт и колонки, вы проверяете карту полей. Пробный перенос ничего не меняет в базе и показывает отчёт сверки.
         Перенос можно отменить, пока вы его не приняли. Повторная загрузка тех же данных не создаёт дублей.
       </div>
@@ -264,7 +267,18 @@ function ReportView({ r }: { r: Report }) {
           {r.completeness.tasksOpen !== undefined && (r.counts.tasks?.files ?? 0) > 0 && <>
             <span>Открытых задач и звонков</span><span className="num">{r.completeness.tasksOpen}</span>
             <span>Выполненных задач (история в карточке)</span><span className="num">{r.completeness.tasksHistory}</span></>}
+          {(r.counts.staff?.files ?? 0) > 0 && <><span>Новых сотрудников</span><span className="num">{r.completeness.staffNew ?? 0}</span></>}
         </div>
+        {(r.counts.staff?.files ?? 0) > 0 && !!r.completeness.staffRoles?.length && (
+          <div style={{ display: 'grid', gap: 4 }}>
+            <h3 style={{ margin: 0 }}>Роли по должностям из 1С</h3>
+            <p className="small" style={{ margin: 0 }}>Проверьте, какую роль получит каждая должность. Чтобы поменять роль, впишите её в колонку «Роль» в файле и загрузите файл заново, или поправьте роль после переноса в «Персонале».</p>
+            <div className="tbl"><table>
+              <thead><tr><th>Должность в 1С</th><th>Роль в системе</th><th className="num">Человек</th></tr></thead>
+              <tbody>{r.completeness.staffRoles.map((x) => <tr key={x.position}><td>{x.position}</td>
+                <td>{x.role ? ROLE_NAMES[x.role] ?? x.role : <span className="chip bad">не определена, не переносится</span>}</td><td className="num">{x.count}</td></tr>)}</tbody>
+            </table></div>
+          </div>)}
         <ul className="small" style={{ margin: 0, paddingLeft: 18 }}>{r.completeness.notTransferred.map((x) => <li key={x}>{x}</li>)}</ul>
       </div>
     </>
@@ -340,10 +354,12 @@ function Actions({ b, reload }: { b: BatchFull; reload: () => void }) {
   const [password, setPassword] = useState('');
   const [err, setErr] = useState('');
   const [busy, setBusy] = useState(false);
+  const [creds, setCreds] = useState<Credential[]>([]);
   const run = async (e: FormEvent) => {
     e.preventDefault(); setErr(''); setBusy(true);
     try {
-      await api('POST', `/api/import/batches/${b.id}/${act}`, { password });
+      const res = await api<{ staffCredentials?: Credential[] }>('POST', `/api/import/batches/${b.id}/${act}`, { password });
+      if (act === 'apply' && res.staffCredentials?.length) setCreds(res.staffCredentials);
       toast(act === 'apply' ? 'Данные перенесены' : act === 'accept' ? 'Перенос принят' : 'Перенос отменён');
       setAct(null); setPassword(''); reload();
     } catch (x) { setErr(errText(x)); } finally { setBusy(false); }
@@ -364,8 +380,10 @@ function Actions({ b, reload }: { b: BatchFull; reload: () => void }) {
           <span>Посещений</span><span className="num">{applied.visits}</span>
           <span>Долгов</span><span className="num">{applied.debts}</span>
           {applied.tasks !== undefined && (applied.tasks || applied.taskHistory) ? <><span>Задач и звонков</span><span className="num">{applied.tasks} открытых, {applied.taskHistory} в истории</span></> : null}
+          {applied.staff ? <><span>Сотрудников</span><span className="num">{applied.staff}</span></> : null}
           <span>Тарифов из 1С</span><span className="num">{applied.products} (в прайс не попадают)</span>
         </div>)}
+      {creds.length > 0 && <StaffCredentials list={creds} />}
       <div className="row">
         {b.status === 'checked' && <button className="btn pri" disabled={!b.report?.canApply} onClick={() => setAct('apply')}>Перенести в систему</button>}
         {b.status === 'draft' && b.report && <span className="small">Есть изменения после проверки: запустите пробный перенос.</span>}
@@ -385,3 +403,18 @@ function Actions({ b, reload }: { b: BatchFull; reload: () => void }) {
   );
 }
 
+/** Логины и временные пароли новых сотрудников: показываются один раз, сразу после переноса */
+function StaffCredentials({ list }: { list: Credential[] }) {
+  const text = list.map((c) => `${c.fullName}\t${ROLE_NAMES[c.role] ?? c.role}\tлогин: ${c.login}\tвременный пароль: ${c.tempPassword}`).join('\n');
+  const copy = () => navigator.clipboard.writeText(`Вход: ${location.origin}\n${text}`).then(() => toast('Скопировано')).catch(() => toast('Не удалось скопировать: выделите таблицу вручную'));
+  return (
+    <div className="item" style={{ display: 'grid', gap: 8 }}>
+      <b>Учётные записи сотрудников: {list.length}</b>
+      <p className="small" style={{ margin: 0 }}>Сохраните или раздайте эти данные сейчас: временные пароли показываются только один раз. При первом входе каждый задаст свой пароль. Потерянный пароль можно сбросить в «Персонале».</p>
+      <div className="tbl"><table>
+        <thead><tr><th>Сотрудник</th><th>Роль</th><th>Логин</th><th>Временный пароль</th></tr></thead>
+        <tbody>{list.map((c) => <tr key={c.login}><td>{c.fullName}<div className="small muted">{c.position}</div></td><td>{ROLE_NAMES[c.role] ?? c.role}</td><td><code>{c.login}</code></td><td><code>{c.tempPassword}</code></td></tr>)}</tbody>
+      </table></div>
+      <div className="row"><button type="button" className="btn" onClick={copy}>Скопировать всё</button><button type="button" className="btn" onClick={() => window.print()}>Распечатать</button></div>
+    </div>);
+}
