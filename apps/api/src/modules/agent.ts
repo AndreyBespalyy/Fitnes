@@ -7,9 +7,9 @@ import { chatSummariesOf } from './chatAi.ts';
 import { createHash } from 'node:crypto';
 import type { FastifyInstance } from 'fastify';
 import type pg from 'pg';
-import { can, requirePerm } from '../auth.ts';
+import { can, requireCtx, requirePerm } from '../auth.ts';
 import { withCtx, type Ctx, type Db } from '../db.ts';
-import { badRequest, notFound } from '../errors.ts';
+import { badRequest, forbidden, notFound } from '../errors.ts';
 import { PERMISSIONS as P } from '../roles.ts';
 import { situationFlow } from './agentFlow.ts';
 import { ygptComplete, type YandexConfig } from '../lib/yandex.ts';
@@ -385,8 +385,20 @@ const sourcesOf = (f: Facts) => ({
 /* ---------- маршруты ---------- */
 export function agentRoutes(app: FastifyInstance, pool: pg.Pool, yandex: YandexConfig | null) {
   app.get('/api/agent/brief/:type/:id', async (req) => {
-    const ctx = requirePerm(req, P.crmWork);
     const { type, id } = req.params as { type: string; id: string };
+    // «Коротко о ситуации» в карточке клиента (18.11.2026): менеджер, РОП, администратор — по клиентам клуба; тренер — только по своим клиентам
+    if (type === 'person') {
+      const ctx = requireCtx(req);
+      const { force } = req.query as { force?: string };
+      return withCtx(pool, ctx, async (db) => {
+        if (!(can(ctx, P.crmWork) || can(ctx, P.messagesWork))) {
+          const { isTrainerClient } = await import('./agentInvite.ts');
+          if (!(can(ctx, P.personsView) && await isTrainerClient(db, ctx.userId, id))) throw forbidden('Коротко о ситуации — только по вашим клиентам');
+        }
+        return situationBrief(db, ctx, yandex, 'person', id, force === '1');
+      });
+    }
+    const ctx = requirePerm(req, P.crmWork);
     const { force } = req.query as { force?: string };
     if (type === 'process') {
       const { processBrief } = await import('./agentProcesses.ts');
