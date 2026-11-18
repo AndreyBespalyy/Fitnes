@@ -1,5 +1,5 @@
 import { lazy, Suspense, useEffect, useState, type ComponentType, type FormEvent } from 'react';
-import { api, ApiError, can, clearDeviceData, setNavIntent, type Go, MODEL, MODEL_SHORT, type Club, type Me, type Person, type RoleDef, type Staff } from './api.ts';
+import { api, ApiError, can, clearDeviceData, navParams, setNavIntent, type Go, MODEL, MODEL_SHORT, type Club, type Me, type Person, type RoleDef, type Staff } from './api.ts';
 import { errText, toast as alertOk } from './ui.ts';
 import { ReportProblem } from './report.tsx';
 import { CommandPalette, SideNav } from './nav.tsx';
@@ -173,6 +173,8 @@ function Shell({ me, onLogout }: { me: Me; onLogout: () => void }) {
   const [init] = useState(() => { const u = readUrl(); if (u.tab && Object.keys(u.p).length) setNavIntent({ tab: u.tab, p: u.p }); return u; });
   const [tab, setTabState] = useState<Tab>(init.tab ?? firstTab);
   const [more, setMore] = useState(false);
+  // Счётчики в меню: непрочитанные в Мессенджере, необработанные диалоги, задачи на сегодня (замечание №44)
+  const [badges, setBadges] = useState<Record<string, number>>({});
   const [cmdk, setCmdk] = useState(false);
   const [personId, setPersonId] = useState<string | null>(init.person);
   const [teamKey, setTeamKey] = useState(0); // «Дядя Витя» в шапке: заново открыть мессенджер на чате Дяди Вити
@@ -301,6 +303,11 @@ function Shell({ me, onLogout }: { me: Me; onLogout: () => void }) {
     trainer: ['trainer', 'schedule', 'home', 'tasks'], admin: ['dash', 'access', 'staff', 'system'], techadmin: ['access', 'import', 'staff', 'system'],
   };
   const PRIMARY: Tab[] = (me.roles.length === 1 && ROLE_BOTTOM[me.roles[0].code]) || ['dash', 'desk', 'trainer', 'hot', 'tasks', 'chats', 'home', 'schedule', 'access', 'problems', 'finance', 'pnl'];
+  useEffect(() => {
+    const load = () => { if (document.visibilityState === 'visible') api<{ team: number; chats: number; tasks: number }>('GET', `/api/nav/badges?clubId=${clubId}`).then(setBadges).catch(() => null); };
+    load(); const t = setInterval(load, 60_000); document.addEventListener('visibilitychange', load);
+    return () => { clearInterval(t); document.removeEventListener('visibilitychange', load); };
+  }, [clubId, tab]);
   const bottom = PRIMARY.filter((k) => visible.some((v) => v[0] === k)).slice(0, 4);
   // Главные разделы роли подгружаем заранее, в свободную минуту: они откроются мгновенно и будут работать без связи
   useEffect(() => {
@@ -317,7 +324,7 @@ function Shell({ me, onLogout }: { me: Me; onLogout: () => void }) {
   return (
     <>
       <div className="shell">
-      <SideNav items={visible.map(([k, t]) => [k, t])} groupOf={ownerOnly(me) ? { tariffs: 'setup', shop: 'setup', access: 'setup', load: 'money' } : undefined} tab={tab} setTab={(t) => setTab(t as Tab)} open={more}
+      <SideNav items={visible.map(([k, t]) => [k, t])} groupOf={ownerOnly(me) ? { tariffs: 'setup', shop: 'setup', access: 'setup', load: 'money' } : undefined} tab={tab} setTab={(t) => setTab(t as Tab)} open={more} badges={badges}
         brand={<div className="brand"><i />Клубная ОС</div>}
         club={clubs.length === 1 && !me.allClubs ? clubPick('club-pick') : null} />
       <div className="main-col">
@@ -390,7 +397,7 @@ function Shell({ me, onLogout }: { me: Me; onLogout: () => void }) {
       </div>
       <CommandPalette items={visible.map(([k, t]) => [k, t])} open={cmdk} setOpen={setCmdk} setTab={(t) => setTab(t as Tab)} openPerson={openPerson} canPersons={can(me, 'persons.view')} />
       <nav className="bottom-nav" aria-label="Главные разделы">
-        {bottom.map((k) => <button key={k} aria-pressed={tab === k && !more} onClick={() => setTab(k)}><span aria-hidden="true">{icon[k]}</span>{short[k]}</button>)}
+        {bottom.map((k) => <button key={k} aria-pressed={tab === k && !more} onClick={() => setTab(k)}><span aria-hidden="true">{icon[k]}</span>{short[k]}{badges[k] ? <b className="nv-n"> ({badges[k] > 99 ? '99+' : badges[k]})</b> : null}</button>)}
         <button aria-pressed={more || !bottom.includes(tab)} onClick={() => { setMore(!more); window.scrollTo(0, 0); }}><span aria-hidden="true">☰</span>Ещё</button>
       </nav>
       {personId && <Suspense fallback={null}><PersonCard me={me} id={personId} onClose={closePerson} /></Suspense>}
@@ -410,19 +417,24 @@ function NoAccess({ label, home }: { label: string; home: () => void }) {
   );
 }
 
+// Вкладки «Клиентов» (замечания №39 и №45): новые, члены клуба, бывшие и корпоративные — вместо отдельного раздела «Компании»
+const HOME_KINDS: [string, string][] = [['', 'Все'], ['new', 'Новые клиенты'], ['member', 'Члены клуба'], ['former', 'Бывшие члены клуба']];
 function Home({ me, clubs, clubId, openPerson }: { me: Me; clubs: Club[]; clubId: string; openPerson: (id: string) => void }) {
   const [persons, setPersons] = useState<Person[]>([]);
   const [q, setQ] = useState('');
+  const [kind, setKind] = useState(() => navParams('home').kind ?? '');
+  const corp = !trainerOnly(me) && (can(me, 'tariffs.manage') || can(me, 'finance.work') || can(me, 'crm.view_all') || can(me, 'memberships.sell'));
   useEffect(() => {
     const t = setTimeout(() => {
       const qs = new URLSearchParams();
       if (clubId !== 'all') qs.set('clubId', clubId);
       if (q.trim()) qs.set('q', q.trim());
       if (trainerOnly(me)) qs.set('mine', '1');
-      api<Person[]>('GET', `/api/persons?${qs}`).then(setPersons).catch(() => setPersons([]));
+      if (kind && kind !== 'corp') qs.set('kind', kind);
+      if (kind !== 'corp') api<Person[]>('GET', `/api/persons?${qs}`).then(setPersons).catch(() => setPersons([]));
     }, 250);
     return () => clearTimeout(t);
-  }, [clubId, q]);
+  }, [clubId, q, kind]);
   const club = clubs.find((c) => c.id === clubId);
   // Колонка «Клуб» нужна, только когда в списке клиенты нескольких клубов
   const manyClubs = clubId === 'all' && clubs.length > 1;
@@ -431,12 +443,18 @@ function Home({ me, clubs, clubId, openPerson }: { me: Me; clubs: Club[]; clubId
       <div className="row between">
         <div><div className="lbl">{club ? MODEL[club.salesModel] : 'Все клубы сети'}</div><h1>{club ? club.name : 'Вся сеть'}</h1></div>
       </div>
+      {!trainerOnly(me) && <div className="tabs" role="group" aria-label="Какие клиенты">
+        {HOME_KINDS.map(([k, l]) => <button key={k || 'all'} aria-pressed={kind === k} onClick={() => setKind(k)}>{l}</button>)}
+        {corp && <button aria-pressed={kind === 'corp'} onClick={() => setKind('corp')}>Корпоративные клиенты</button>}
+      </div>}
+      {kind === 'corp' ? <Suspense fallback={<p className="muted">Загрузка…</p>}><CompaniesPage me={me} clubs={clubs} clubId={clubId} openPerson={openPerson} /></Suspense> : <>
       <input type="search" value={q} onChange={(e) => setQ(e.target.value)} placeholder="Поиск по имени или телефону" aria-label="Поиск клиента" style={{ maxWidth: 420 }} />
       <p className="small" style={{ margin: 0 }}>{trainerOnly(me) ? 'Видны клиенты, записанные на ваши занятия за 90 дней и вперёд.' : `Видны клиенты ${me.allClubs ? 'всей сети' : 'вашего клуба'}.`} Нажмите на имя, чтобы открыть карточку.</p>
       <div className="card"><div className="tbl"><table>
         <thead><tr><th>Клиент</th><th>Категория</th>{manyClubs && <th>Клуб</th>}<th>Телефон</th></tr></thead>
         <tbody>{persons.map((p) => <tr key={p.id}><td><button className="btn sm" onClick={() => openPerson(p.id)}>{p.fullName}</button></td><td><span className="chip acc">{p.segment}</span></td>{manyClubs && <td>{p.clubName}</td>}<td className="num">{p.phone}</td></tr>)}</tbody>
       </table></div>{persons.length === 0 && <p className="muted">Клиентов нет.</p>}</div>
+      </>}
     </>
   );
 }

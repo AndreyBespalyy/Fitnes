@@ -10,10 +10,11 @@ const GROUPS: [string, string][] = [
 ];
 const GROUP: Record<string, string> = {
   dash: 'today', problems: 'today', tasks: 'today', processes: 'today', weekly: 'today', hot: 'today', calls: 'today', desk: 'today', trainer: 'today',
-  sales: 'sales', leads: 'sales', board: 'sales', home: 'sales', chats: 'sales', retention: 'sales', reviews: 'sales', corp: 'sales',
+  sales: 'sales', leads: 'sales', board: 'sales', home: 'sales', chats: 'today', retention: 'sales', reviews: 'sales', corp: 'sales',
   schedule: 'club', access: 'club', load: 'club', shop: 'club', tariffs: 'club', contracts: 'club',
   finance: 'money', payouts: 'money', fiscal: 'money', pnl: 'money', cohorts: 'money',
-  team: 'today', staff: 'team', roles: 'team', stafftime: 'team', activity: 'team', learn: 'team',
+  // Мессенджер сотрудников — в «Клуб», переписка с клиентами — в «Сегодня» (замечание №44, 18.11.2026)
+  team: 'club', staff: 'team', roles: 'team', stafftime: 'team', activity: 'team', learn: 'team',
   clubs: 'setup', config: 'setup', telephony: 'setup', pipelines: 'setup', intake: 'setup', messaging: 'setup', site: 'setup', import: 'setup', onboarding: 'setup', usage: 'setup', notes: 'setup', privacy: 'setup', system: 'setup',
   help: 'foot', profile: 'foot',
 };
@@ -75,10 +76,10 @@ export const NavIcon = ({ k }: { k: string }) => (
   </svg>
 );
 
-export function SideNav({ items, tab, setTab, open, brand, club, groupOf = {} }: { items: Item[]; tab: string; setTab: (t: string) => void; open: boolean; brand: ReactNode; club: ReactNode; groupOf?: Record<string, string> }) {
+export function SideNav({ items, tab, setTab, open, brand, club, groupOf = {}, badges = {} }: { items: Item[]; tab: string; setTab: (t: string) => void; open: boolean; brand: ReactNode; club: ReactNode; groupOf?: Record<string, string>; badges?: Record<string, number> }) {
   const groups = GROUPS.map(([g, title]) => [title, items.filter(([k]) => (groupOf[k] ?? GROUP[k] ?? 'other') === g)] as const).filter(([, l]) => l.length);
   const foot = items.filter(([k]) => GROUP[k] === 'foot');
-  const btn = ([k, t]: Item) => <button key={k} className="nv" aria-pressed={tab === k} onClick={() => setTab(k)}><NavIcon k={k} /><span>{t}</span></button>;
+  const btn = ([k, t]: Item) => <button key={k} className="nv" aria-pressed={tab === k} onClick={() => setTab(k)}><NavIcon k={k} /><span>{t}{badges[k] ? <b className="nv-n" aria-label={`необработанных: ${badges[k]}`}> ({badges[k] > 99 ? '99+' : badges[k]})</b> : null}</span></button>;
   return (
     <aside className={`side main-tabs ${open ? 'open' : ''}`} aria-label="Разделы">
       {brand}

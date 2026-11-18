@@ -70,6 +70,7 @@ import { fileURLToPath } from 'node:url';
 import { platformRoutes } from './modules/platform.ts';
 import { salesOpsRoutes, startSalesOpsWorker } from './modules/salesOps.ts';
 import { testNoteRoutes } from './modules/testNotes.ts';
+import { navBadgeRoutes } from './modules/navBadges.ts';
 import { teamRoutes, startTeamPushWorker } from './modules/team.ts';
 import { startTeamAdviceWorker, teamAdviceRoutes } from './modules/teamAdvice.ts';
 import { agentRoutes } from './modules/agent.ts';
@@ -211,6 +212,7 @@ export async function buildApp(pool: pg.Pool, opts: { webDist?: string; secureCo
   agentReminderRoutes(app, pool);
   agentLearnRoutes(app, pool);
   testNoteRoutes(app, pool, storage);
+  navBadgeRoutes(app, pool);
   platformRoutes(app, pool, { ownerUrl: process.env.PLATFORM_DATABASE_URL || process.env.OWNER_DATABASE_URL, secureCookie: !!opts.secureCookie });
   privacyRoutes(app, pool);
   pdRoutes(app, pool);
