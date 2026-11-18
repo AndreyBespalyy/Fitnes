@@ -8,7 +8,7 @@ import { can, requireCtx, requirePerm } from '../auth.ts';
 import { audit, withCtx, type Db } from '../db.ts';
 import { badRequest, forbidden, notFound } from '../errors.ts';
 import { PERMISSIONS as P } from '../roles.ts';
-import { firstName } from './agentInvite.ts';
+import { addressName, givenName } from '../lib/names.ts';
 import { SCRIPTS, type ScriptItem } from './agentScripts.ts';
 
 type Line = [stage: string, text: string];
@@ -180,7 +180,7 @@ export async function callScript(db: Db, ctx: { userId: string }, type: 'task' |
 
   const fromWhere = visited ? 'вы были у нас на гостевом визите' : 'вы оставляли заявку';
   const vars: Record<string, string> = {
-    '{к}': p ? firstName(p.full_name) : '[Имя]', '{я}': me ? firstName(me) : '[Имя]',
+    '{к}': p ? addressName(p.full_name) : '[Имя]', '{я}': me ? givenName(me) : '[Имя]',
     '{когда}': meet ? whenOf(new Date(meet.due_at), tz) : suggestWhen(new Date(), tz),
     '{откуда}': fromWhere, '{Откуда}': fromWhere[0].toUpperCase() + fromWhere.slice(1),
     '{до}': memb ? dmy(memb.ends) : '[дата окончания]',

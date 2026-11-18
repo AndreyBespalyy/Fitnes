@@ -1,6 +1,7 @@
 // Кнопки под подсказками тренера: «Написать клиентам» — готовое приглашение на следующее занятие (дата, время, коротко о занятии),
 // отправляется в мессенджер клиента; «Позвонить» — тренер может звонить своим клиентам.
 import type { FastifyInstance } from 'fastify';
+import { givenName } from '../lib/names.ts';
 import type pg from 'pg';
 import { can, requireCtx } from '../auth.ts';
 import { audit, withCtx, type Ctx, type Db } from '../db.ts';
@@ -68,7 +69,8 @@ async function conversationFor(db: Db, ctx: Ctx, personId: string): Promise<{ id
 }
 
 /** Имя для обращения: в CRM пишут «Имя Фамилия»; если первым словом стоит фамилия на -ов/-ев/-ин/-ова… — берём второе */
-export const firstName = (full: string) => { const w = full.trim().split(/\s+/); return w.length >= 2 && /(ов|ев|ёв|ин|ын|ова|ева|ина|ына|ский|цкий|ская|цкая)$/i.test(w[0]) ? w[1] : w[0]; };
+/** Имя для обращения в приглашении (без фамилии), см. lib/names.ts */
+export const firstName = (full: string) => givenName(full);
 
 export function agentInviteRoutes(app: FastifyInstance, pool: pg.Pool) {
   // Черновик: текст приглашения и кому получится отправить
