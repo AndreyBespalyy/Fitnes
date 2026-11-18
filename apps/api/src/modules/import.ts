@@ -972,9 +972,10 @@ export function importRoutes(app: FastifyInstance, pool: pg.Pool) {
     }
   };
   const ownerOnly = (ctx: Ctx) => { if (!can(ctx, '*')) throw forbidden('Удалять демо-данные может только собственник'); };
-  app.get('/api/import/demo-cleanup', async (req) => {
+  // Предпросмотр — POST: служебный файл приложения обрывает GET дольше 8 секунд, а подсчёт по большой базе идёт дольше
+  app.post('/api/import/demo-cleanup/preview', async (req) => {
     const ctx = requirePerm(req, P.importManage); ownerOnly(ctx);
-    const { clubId } = req.query as { clubId?: string };
+    const { clubId } = (req.body ?? {}) as { clubId?: string };
     if (!clubId) throw badRequest('Выберите клуб');
     return withCtx(pool, ctx, async (db) => {
       const imported = Number((await db.query('select count(*) from persons where home_club_id = $1 and import_batch_id is not null', [clubId])).rows[0].count);
