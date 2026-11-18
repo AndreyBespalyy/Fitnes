@@ -581,7 +581,7 @@ export function configRoutes(app: FastifyInstance, pool: pg.Pool) {
     return withCtx(pool, ctx, async (db) => (await db.query(`select a.id::text, a.action, a.at, a.before, a.after, u.full_name as "by", v.number as "versionNo"
         from audit_log a left join users u on u.id = a.actor_id
         left join config_versions v on a.object_type = 'config_version' and v.id::text = a.object_id
-       where ((a.object_type = 'club' and a.object_id = $1 and a.action = any($2)) or (v.club_id = $1 and a.action in ('config.published', 'config.rolled_back')))
+       where ((a.object_type = 'club' and a.object_id = $1::text and a.action = any($2::text[])) or (v.club_id::text = $1::text and a.action in ('config.published', 'config.rolled_back')))
        order by a.at desc limit 200`, [clubId, SETTINGS_ACTIONS])).rows.map((r) => ({ ...r, title: CHANGE_TITLE[r.action] ?? r.action })));
   });
 
