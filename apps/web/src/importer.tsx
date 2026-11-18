@@ -103,7 +103,7 @@ function DemoCleanup({ clubId, clubName }: { clubId: string; clubName: string })
   useEffect(() => { setPre(null); setErr(''); setPassword(''); }, [clubId]);
   const preview = async () => {
     setBusy(true); setErr('');
-    try { setPre(await api('GET', `/api/import/demo-cleanup?clubId=${clubId}`)); } catch (e) { setErr(errText(e)); } finally { setBusy(false); }
+    try { setPre(await api('POST', '/api/import/demo-cleanup/preview', { clubId })); } catch (e) { setErr(errText(e)); } finally { setBusy(false); }
   };
   const run = async (e: FormEvent) => {
     e.preventDefault(); setBusy(true); setErr('');

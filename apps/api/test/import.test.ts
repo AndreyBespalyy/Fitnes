@@ -409,8 +409,8 @@ test('демо-данные клуба: предпросмотр и удален
   const demoBefore = await q('select count(*) from persons where home_club_id = $1 and import_batch_id is null');
   assert.ok(demoBefore > 0 && importedBefore > 0);
 
-  assert.equal((await api('GET', `/api/import/demo-cleanup?clubId=${c2}`, gm)).statusCode, 403, 'управляющему нельзя');
-  const pre = await api('GET', `/api/import/demo-cleanup?clubId=${c2}`, owner);
+  assert.equal((await api('POST', '/api/import/demo-cleanup/preview', gm, { clubId: c2 })).statusCode, 403, 'управляющему нельзя');
+  const pre = await api('POST', '/api/import/demo-cleanup/preview', owner, { clubId: c2 });
   assert.equal(pre.statusCode, 200, pre.body);
   assert.equal(pre.json().counts.persons, demoBefore);
   assert.equal(pre.json().imported, importedBefore);
