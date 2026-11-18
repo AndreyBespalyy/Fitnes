@@ -3,6 +3,7 @@
 import { useEffect, useState, type FormEvent } from 'react';
 import qrcode from 'qrcode-generator';
 import { api, can, type Club, type Me, type Person, navParams } from './api.ts';
+import { ownerOnly } from './roleMenu.ts';
 import { dt, errText, toast } from './ui.ts';
 import { Md } from './fiscal.tsx';
 import guide from '../../../docs/03_Инструкции/Турникеты_и_шлюз.md?raw';
@@ -26,8 +27,9 @@ const mins = (m: number | null) => (m == null ? '—' : m >= 60 ? `${Math.floor(
 export function AccessPage({ me, clubs, clubId, openPerson }: { me: Me; clubs: Club[]; clubId: string; openPerson: (id: string) => void }) {
   const [club, setClub] = useState(clubId !== 'all' ? clubId : clubs[0]?.id ?? '');
   useEffect(() => { if (clubId !== 'all') setClub(clubId); }, [clubId]);
+  // Собственнику — только настройка и отчёт, без экрана ресепшн (у него меню без операционки)
   const views: [string, string, boolean][] = [
-    ['desk', 'Ресепшн', can(me, 'acs.work')], ['report', 'Отчёт', can(me, 'acs.manage')], ['setup', 'Настройка', can(me, 'acs.manage')], ['guide', 'Инструкция', true]];
+    ['desk', 'Ресепшн', can(me, 'acs.work') && !ownerOnly(me)], ['report', 'Отчёт', can(me, 'acs.manage')], ['setup', 'Настройка', can(me, 'acs.manage')], ['guide', 'Инструкция', true]];
   const allowed = views.filter((v) => v[2]);
   const [view, setView] = useState(() => { const v = navParams('access').view; return allowed.some((a) => a[0] === v) ? v : allowed[0][0]; });
   if (!club) return <p className="muted">Клубов нет.</p>;
