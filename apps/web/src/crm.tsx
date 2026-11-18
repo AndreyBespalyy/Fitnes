@@ -310,8 +310,6 @@ export function PersonCard({ me: meIn, id, onClose }: { me: Me; id: string; onCl
   const [doingTask, setDoingTask] = useState<string | null>(null);
   const [addTask, setAddTask] = useState(false);
   // «Купил» в сделке — сначала продажа абонемента, сделка закроется сама после «Оформить» (замечание №33)
-  const [phones, setPhones] = useState<string[] | null>(null);
-  useEffect(() => setPhones(null), [id]);
   const [sellFor, setSellFor] = useState<{ oppId: string; stage: Stage; n: number } | null>(null);
   const reload = () => api<Card>('GET', `/api/persons/${id}`).then(setCard).catch((x) => setErr(errText(x)));
   useEffect(() => { reload(); }, [id]);

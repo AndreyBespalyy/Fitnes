@@ -672,10 +672,3 @@ input[type="checkbox"],input[type="radio"]{accent-color:var(--accent)}
 
 /* Счётчики в меню (замечание №44) */
 .nv-n{color:var(--accent);font-weight:800;font-family:var(--f-num)}
-/* Карточка клиента: фото и документы (замечания №31, 32) */
-.pc-photo{width:72px;height:72px;flex:none;border-radius:16px;overflow:hidden;border:1px solid var(--line);background:var(--surface-2);padding:0;display:grid;place-items:center;color:var(--muted);cursor:pointer}
-.pc-photo:disabled{cursor:default}
-.pc-photo img{width:100%;height:100%;object-fit:cover}
-.pc-docs{display:grid;grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:8px}
-.pc-doc{display:grid;gap:4px;align-content:start}
-.pc-doc img,.pc-pdf{width:100%;height:96px;object-fit:cover;border-radius:10px;border:1px solid var(--line);display:grid;place-items:center;background:var(--surface-2)}

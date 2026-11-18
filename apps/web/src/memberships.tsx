@@ -245,11 +245,6 @@ export function MembershipsBlock({ me, personId, homeClubId, sellNow = 0, onSold
     setProducts(all.length ? all : await api<Product[]>('GET', '/api/products?active=1').catch(() => []));
     setProductId(''); setInst(1); setStartsOn(new Date().toISOString().slice(0, 10));
   };
-  // Заморозка из карточки по правилам клуба (замечание №50): правила показываем прямо в форме
-  const openFreeze = (m: Membership) => {
-    setFreeze({ id: m.id, days: 14, startsOn: today }); setFrRules(null);
-    api<Settings>('GET', `/api/clubs/${m.clubId}/membership-settings`).then((st) => { setFrRules(st); setFreeze((f) => (f ? { ...f, days: Math.max(f.days, st.freezeMinDays) } : f)); }).catch(() => null);
-  };
   const box = useRef<HTMLDivElement>(null);
   useEffect(() => { if (sellNow && canSell) { openSell(); setTimeout(() => box.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 50); } }, [sellNow]);
   const prod = products.find((p) => p.id === productId);
@@ -276,7 +271,7 @@ export function MembershipsBlock({ me, personId, homeClubId, sellNow = 0, onSold
             : <PayerPick personId={personId} clubId={prod?.clubId} kind={prod?.kind} onChange={setPayer} />}
           <SaleDiscount key={productId} personId={personId} product={prod} clubId={prod?.clubId} onChange={setDiscount} />
           <div className="row">
-            <button className="btn pri sm" disabled={!productId} onClick={() => act(async () => { await api('POST', '/api/memberships', { personId, productId, installments: inst, ...(startsOn && prod?.kind !== 'subscription' ? { startsOn } : {}), ...discount, ...(prod?.familySeats ? { familyPersonIds: seatIds } : payer) }); onSold?.(); }, `Продано: ${prod?.name}. Платёж ждёт оплаты`)}>Оформить</button>
+            <button className="btn pri sm" disabled={!productId} onClick={() => act(async () => { await api('POST', '/api/memberships', { personId, productId, installments: inst, ...discount, ...(prod?.familySeats ? { familyPersonIds: seatIds } : payer) }); onSold?.(); }, `Продано: ${prod?.name}. Платёж ждёт оплаты`)}>Оформить</button>
             <button className="btn sm" onClick={() => { setSell(false); onSellCancel?.(); }}>Отмена</button>
           </div>
         </div>)}
