@@ -32,7 +32,7 @@ export const KIND_NAME: Record<string, string> = {
   desk_classes: 'Занятия и новички сегодня', desk_renew: 'Предложить продление', desk_missed: 'Перезвонить на пропущенные', desk_msgs: 'Переписка без ответственного',
   trainer_classes: 'Мои занятия и новички', trainer_noshow: 'Написать не пришедшим', trainer_idle: 'Вернуть пропавших клиентов',
   plan_red: 'План продаж отстаёт', plan_status: 'Как идёт план продаж', sales_yesterday: 'Продажи вчера', proc_late: 'Процессы вышли за срок',
-  escalations: 'Сигналы о просрочках', owner_leads: 'Заявки без ответа (собственнику)', weekly_tip: 'Совет из разбора недели', tip: 'Общий совет роли',
+  escalations: 'Сигналы о просрочках', owner_leads: 'Заявки без ответа (собственнику)', weekly_tip: 'Совет из разбора недели', weekly_tip_staff: 'Совет из разбора недели', tip: 'Общий совет роли',
   'card:agent_task': 'Карточка: просрочена задача', 'card:agent_reply': 'Карточка: клиент ждёт ответа', 'card:agent_lead': 'Карточка: заявка ждёт или передана',
   'card:agent_process': 'Карточка: бизнес-процесс', 'card:agent_meeting_move': 'Карточка: перенести ради собрания', 'card:agent_escalate': 'Карточка: просрочка дошла до руководителя',
   'card:agent_nudge': 'Карточка: руководитель просит разобрать задачи', 'card:agent_reassign': 'Карточка: задачи переданы', 'card:agent_weekly': 'Карточка: разбор недели',

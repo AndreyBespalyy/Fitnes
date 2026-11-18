@@ -1,6 +1,7 @@
 // Разбор недели (ИИ-агент, этап 7): каждый понедельник помощник сравнивает прошлую неделю с позапрошлой,
 // находит главные узкие места и пишет, что сделать. Здесь — архив разборов по клубу и сборка заново.
 import { useEffect, useState } from 'react';
+import { useClubPick } from './clubPick.tsx';
 import { api, navParams, type Club } from './api.ts';
 import { dt, errText, toast } from './ui.ts';
 import { BriefText } from './agent.tsx';
@@ -74,7 +75,8 @@ function WeeklyVisual({ rev }: { rev: Review }) {
 }
 
 export function WeeklyPage({ clubs, clubId }: { clubs: Club[]; clubId: string }) {
-  const club = clubId !== 'all' ? clubId : clubs[0]?.id ?? '';
+  const [clubObj, clubChips] = useClubPick(clubs, clubId);
+  const club = clubObj?.id ?? '';
   const [items, setItems] = useState<Item[] | null>(null);
   const [sel, setSel] = useState<string | null>(() => navParams('weekly').id ?? null);
   const [rev, setRev] = useState<Review | null>(null);
@@ -91,7 +93,7 @@ export function WeeklyPage({ clubs, clubId }: { clubs: Club[]; clubId: string })
   if (!club) return <p className="muted">Нет клубов.</p>;
   return (
     <div style={{ display: 'grid', gap: 12 }}>
-      {clubId === 'all' && <p className="small muted" style={{ margin: 0 }}>Показан клуб «{clubs[0]?.name}». Другой клуб выберите вверху.</p>}
+      {clubChips}
       <div className="card row" style={{ gap: 12, flexWrap: 'wrap', alignItems: 'center' }}>
         <div style={{ flex: 1, minWidth: 240 }}>
           <b>✦ Разбор недели</b>

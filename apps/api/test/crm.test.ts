@@ -157,7 +157,11 @@ test('заявка через API источника: по ключу, повт�
 test('ресепшн может создать лид, но не видит сделки', async () => {
   const desk = (await login(t.app, 'd.lis')).cookie!;
   assert.equal((await req('POST', '/api/leads', desk, { clubId: centr.id, fullName: 'Гость Ресепшн', phone: '+79163334455', sourceCode: 'walk_in' })).statusCode, 201);
-  assert.equal((await req('GET', '/api/tasks', desk)).statusCode, 403);
+  // «Мои задачи» есть у ресепшна, но только свои — чужие задачи и сделки не видны
+  const tasks = await req('GET', '/api/tasks?scope=all', desk);
+  assert.equal(tasks.statusCode, 200);
+  assert.ok(!tasks.json().some((x: { opportunityId?: string | null; assigneeLogin?: string }) => x.opportunityId), 'сделки ресепшну не видны');
+  assert.equal((await req('GET', '/api/opportunities', desk)).statusCode, 403);
 });
 
 test('норму первого ответа меняет администратор', async () => {

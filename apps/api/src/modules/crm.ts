@@ -2,13 +2,14 @@
 import { createHash } from 'node:crypto';
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import type pg from 'pg';
-import { can, requirePerm } from '../auth.ts';
+import { can, requireCtx, requirePerm } from '../auth.ts';
 import { audit, withCtx, type Ctx, type Db } from '../db.ts';
 import { badRequest, HttpError, notFound, unauthorized } from '../errors.ts';
 import { PERMISSIONS as P } from '../roles.ts';
 import { routeByShifts } from './staffTime.ts';
 import { trackAccess } from './privacy.ts';
 import { recordConsent } from './pd.ts';
+import { advanceProcesses } from './agentProcesses.ts';
 
 /** Телефон в формат +7XXXXXXXXXX; null, если это не российский мобильный или городской номер. */
 export function normalizePhone(raw: string | undefined | null): string | null {
@@ -340,18 +341,55 @@ export function crmRoutes(app: FastifyInstance, pool: pg.Pool) {
   });
 
   // Задачи
+  // «Мои задачи» есть у всех ролей (проверка CRM 17.11.2026): ресепшн, тренер и финансист получают шаги процессов
+  // и задачи из советов. Без права работы в CRM — только свои задачи.
   app.get('/api/tasks', async (req) => {
-    const ctx = requirePerm(req, P.crmWork);
+    const ctx = requireCtx(req);
     const { clubId, scope } = req.query as { clubId?: string; scope?: string };
-    const mine = scope !== 'all' || onlyMine(ctx);
+    const mine = scope !== 'all' || onlyMine(ctx) || !can(ctx, P.crmWork);
     return withCtx(pool, ctx, async (db) => (await db.query(
       `${TASK_SELECT} where t.done_at is null and ($1::uuid is null or t.club_id = $1) and ($2::uuid is null or t.assignee_id = $2)
        order by t.due_at limit 300`, [clubId || null, mine ? ctx.userId : null])).rows);
   });
 
+  // Кому можно поставить задачу: активные сотрудники клуба (и сетевые руководители)
+  app.get('/api/tasks/assignees', async (req) => {
+    const ctx = requireCtx(req);
+    const { clubId } = req.query as { clubId?: string };
+    if (!clubId) throw badRequest('Выберите клуб');
+    return withCtx(pool, ctx, async (db) => (await db.query(
+      `select distinct on (u.id) u.id, u.full_name as name, r.name as role from users u
+         join user_assignments a on a.user_id = u.id join roles r on r.code = a.role_code
+        where u.status = 'active' and not u.is_bot and (a.club_id = $1 or a.club_id is null) and a.role_code <> 'admin'
+          and a.active_from <= current_date and (a.active_to is null or a.active_to >= current_date)
+        order by u.id, r.sort`, [clubId])).rows.sort((x, y) => (x.id === ctx.userId ? -1 : y.id === ctx.userId ? 1 : x.name.localeCompare(y.name))));
+  });
+
   app.post('/api/tasks', async (req, reply) => {
-    const ctx = requirePerm(req, P.crmWork);
-    const b = (req.body ?? {}) as NextTask & { opportunityId?: string };
+    const ctx = requireCtx(req);
+    const b = (req.body ?? {}) as NextTask & { opportunityId?: string; clubId?: string; assigneeId?: string; personId?: string };
+    if (!b.opportunityId) {
+      // Задача вручную: себе или коллеге, по клиенту или без (кнопка «+ Задача»)
+      const title = b.title?.trim();
+      if (!title) throw badRequest('Укажите, что нужно сделать');
+      const due = b.dueAt ? new Date(b.dueAt) : null;
+      if (!due || Number.isNaN(due.getTime())) throw badRequest('Укажите дату и время задачи');
+      if (!b.clubId) throw badRequest('Выберите клуб');
+      const id = await withCtx(pool, ctx, async (db) => {
+        const to = b.assigneeId || ctx.userId;
+        const ok = (await db.query(`select 1 from users u join user_assignments a on a.user_id = u.id where u.id = $1 and u.status = 'active'
+          and (a.club_id = $2 or a.club_id is null) and (a.active_to is null or a.active_to >= current_date)`, [to, b.clubId])).rowCount;
+        if (!ok) throw badRequest('Этот сотрудник не работает в выбранном клубе');
+        const kind = ['call', 'meeting', 'message', 'other'].includes(b.kind ?? '') ? b.kind : (b.personId ? 'call' : 'other');
+        const tid = (await db.query(`insert into tasks(tenant_id, club_id, assignee_id, person_id, kind, title, due_at, created_by) values ($1,$2,$3,$4,$5,$6,$7,$8) returning id`,
+          [ctx.tenantId, b.clubId, to, b.personId || null, kind, title.slice(0, 300), due, ctx.userId])).rows[0].id as string;
+        await audit(db, ctx, 'task.created', 'task', tid, null, { title, assigneeId: to, personId: b.personId ?? null });
+        return tid;
+      });
+      reply.code(201);
+      return { id };
+    }
+    if (!can(ctx, P.crmWork)) throw new HttpError(403, 'Недостаточно прав', 'forbidden');
     const id = await withCtx(pool, ctx, async (db) => {
       const o = await loadOpp(db, ctx, b.opportunityId ?? '');
       if (o.status !== 'open') throw badRequest('Сделка закрыта');
@@ -364,12 +402,12 @@ export function crmRoutes(app: FastifyInstance, pool: pg.Pool) {
   });
 
   app.post('/api/tasks/:id/complete', async (req) => {
-    const ctx = requirePerm(req, P.crmWork);
+    const ctx = requireCtx(req);
     const { id } = req.params as { id: string };
     const b = (req.body ?? {}) as { result?: string; nextTask?: NextTask };
     return withCtx(pool, ctx, async (db) => {
       const t = (await db.query('select * from tasks where id = $1', [id])).rows[0];
-      if (!t || (onlyMine(ctx) && t.assignee_id !== ctx.userId)) throw notFound('Задача не найдена');
+      if (!t || ((onlyMine(ctx) || !can(ctx, P.crmWork)) && t.assignee_id !== ctx.userId && t.created_by !== ctx.userId)) throw notFound('Задача не найдена');
       if (t.done_at) throw badRequest('Задача уже выполнена');
       if (!b.result?.trim()) throw badRequest('Коротко напишите результат');
       if (t.call_id && (await db.query(`select 1 from call_summaries s join calls c on c.id = s.call_id where s.call_id = $1 and s.status in ('draft', 'needs_manual') and c.user_id = $2`, [t.call_id, t.assignee_id])).rowCount)
@@ -386,6 +424,8 @@ export function crmRoutes(app: FastifyInstance, pool: pg.Pool) {
       if (t.lead_id) await db.query('update leads set first_response_at = coalesce(first_response_at, now()) where id = $1', [t.lead_id]);
       else if (t.opportunity_id) await db.query('update leads set first_response_at = now() where opportunity_id = $1 and first_response_at is null', [t.opportunity_id]);
       await audit(db, ctx, 'task.completed', 'task', id, null, { result: b.result.trim() });
+      // Шаг бизнес-процесса: следующий шаг ставится сразу, а не при следующем обходе
+      if ((await db.query('select 1 from process_steps where task_id = $1', [id])).rowCount) await advanceProcesses(db, ctx, t.club_id);
       return { ok: true };
     });
   });

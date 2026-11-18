@@ -1,5 +1,6 @@
 // Шаг 18, часть 3. Обзоры менеджеров, рекомендации с обратной связью, прогноз плана, план до клиентов, оценка звонков по стандарту.
 import { useEffect, useState } from 'react';
+import { useClubPick } from './clubPick.tsx';
 import { api, can, type Club, type Me, navParams } from './api.ts';
 import { dt, errText, toast } from './ui.ts';
 import { rub } from './memberships.tsx';
@@ -28,12 +29,15 @@ export function ReviewsPage({ me, clubs, clubId, openPerson }: { me: Me; clubs: 
     ['recs', 'Рекомендации', true], ['quality', 'Качество звонков', can(me, 'ai.review')]];
   const [tab, setTab] = useState(() => (tabs.some((t) => t[0] === navParams('reviews').tab && t[2]) ? navParams('reviews').tab : leader ? 'team' : 'my'));
   const [person, setPerson] = useState<{ id: string; name: string } | null>(null);
-  const club = clubs.find((c) => c.id === clubId) ?? (clubs.length === 1 ? clubs[0] : null);
-  if (!club) return <div className="card"><p style={{ margin: 0 }}>Выберите клуб вверху страницы.</p></div>;
+  const [club, clubChips] = useClubPick(clubs, clubId);
+  if (!club) return <div className="card"><p style={{ margin: 0 }}>Клубов пока нет.</p></div>;
   return (
     <div style={{ display: 'grid', gap: 12 }}>
+      {clubChips}
       <div className="tabs" role="group" aria-label="Обзоры">{tabs.filter((t) => t[2]).map(([k, t]) => <button key={k} aria-pressed={tab === k} onClick={() => { setTab(k); setPerson(null); }}>{t}</button>)}</div>
       {tab === 'my' && <ReviewView clubId={club.id} userId={null} leader={false} />}
+      {tab === 'team' && !person && can(me, 'crm.work') && <div className="row small muted" style={{ gap: 8, alignItems: 'center' }}>Места менеджеров по продажам, звонкам и скриптам — в одном рейтинге:
+        <button className="btn sm" onClick={() => window.dispatchEvent(new CustomEvent('crm-go', { detail: '/?tab=sales&view=rating' }))}>Рейтинг менеджеров</button></div>}
       {tab === 'team' && (person
         ? <><div><button className="btn sm" onClick={() => setPerson(null)}>← Весь отдел</button></div><ReviewView clubId={club.id} userId={person.id} leader /></>
         : <Team clubId={club.id} onOpen={setPerson} />)}

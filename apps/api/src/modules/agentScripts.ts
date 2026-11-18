@@ -30,7 +30,7 @@ export const SCRIPTS: Script[] = [
     step('present', 'Презентация: три факта о клубе под запрос клиента', 'Три факта под его слова: 1 100 м² зала и 140 тренажёров без очереди · групповые · круглосуточно · сауна, полотенца, вода · бокс'),
     step('trial', 'Пригласил на бесплатную пробную тренировку с тренером', '«Приходите на пробную тренировку с тренером — бесплатно. Он подберёт программу под вашу задачу»'),
     step('time', 'Назвал конкретный день и время (выбор: будни/выходные, утро/вечер)', '«Вам удобнее в будни или на выходных?» → «Утром или вечером?» → «Тогда четверг, 19:00 — записываю»'),
-    step('final', 'Итог: адрес, паспорт, сообщение в мессенджер', '«Нижегородская 29–33, БЦ «Нижегородский», чёрный козырёк. Возьмите паспорт — пропускная система. Отправлю адрес и время — Телеграм или Ватсап?»'),
+    step('final', 'Итог: адрес, паспорт, сообщение в мессенджер', '«{адрес}. Возьмите паспорт — пропускная система. Отправлю адрес и время — Телеграм или Ватсап?»'),
   ], never: [never('n_price_first', 'цена до вопросов о задаче клиента', 'Сначала задача: «От 2 690 ₽ в месяц, зависит от формата. Но цифра без задачи ничего не значит — на пробной подберём под вас»'), ...NEVER_COMMON] },
 
   { code: 'incoming', title: 'Входящий звонок', steps: [
@@ -58,7 +58,7 @@ export const SCRIPTS: Script[] = [
   { code: 'confirm', title: 'Подтверждение встречи', steps: [
     step('contact', 'Контакт: представился, спросил, удобно ли', '«[Имя], добрый день! Это [Имя] из Сандов Фитнес. Удобно две минуты?»'),
     step('remind', 'Напомнил день и время встречи, что ждёт тренер', '«Звоню напомнить: мы встречаемся в четверг в 19:00, вас ждёт тренер»'),
-    step('road', 'Предложил помочь с дорогой, назвал адрес', '«Помощь, как добраться, нужна? Нижегородская 29–33, БЦ «Нижегородский», чёрный козырёк»'),
+    step('road', 'Предложил помочь с дорогой, назвал адрес', '«Помощь, как добраться, нужна? {адрес}»'),
     step('passport', 'Напомнил взять паспорт', '«Возьмите, пожалуйста, паспорт — пропускная система»'),
     step('final', 'Финал: «Тренер ждёт вас. До встречи!»', '«Тренер уже в клубе, ждёт вас. До встречи!»'),
   ], never: [never('n_still', '«всё в силе?» / «вы придёте?» / «позвоните, если не сможете»', 'Утверждение вместо вопроса: «Звоню напомнить: мы встречаемся в четверг в 19:00, вас ждёт тренер»')] },
@@ -78,6 +78,16 @@ export const SCRIPTS: Script[] = [
     step('next', 'Договорился о следующем шаге с датой (звонок, визит)', '«Когда удобнее — утром или вечером? Записываю: завтра в 10:00»'),
   ], never: [never('n_argue', 'спор с клиентом и дожим после второго «нет»', 'После второго «нет» — вежливо закончить и поставить тег'), never('n_nodate', 'разговор без даты следующего шага', 'Всегда договаривайтесь о дате: «Помечу и позвоню ровно тогда — через месяц?»')] },
 ];
+
+/** Скрипт клуба (проверка CRM 17.11.2026, п. 4): правки РОПа из «Отдел продаж → Скрипты звонков», иначе стандартный текст.
+ *  {адрес} — адрес из карточки клуба. */
+export async function clubScript(db: Db, clubId: string, code: string): Promise<Script> {
+  const base = SCRIPTS.find((s) => s.code === code) ?? SCRIPTS[0];
+  const own = (await db.query(`select data from club_call_scripts where club_id = $1 and code = $2`, [clubId, base.code])).rows[0]?.data as { steps?: ScriptItem[]; neverItems?: ScriptItem[] } | undefined;
+  const addr = ((await db.query(`select address from clubs where id = $1`, [clubId])).rows[0]?.address as string | null) || 'адрес клуба';
+  const fill = (x: ScriptItem) => ({ ...x, text: x.text.replaceAll('{адрес}', addr), how: x.how.replaceAll('{адрес}', addr) });
+  return { ...base, steps: (own?.steps?.length ? own.steps : base.steps).map(fill), never: (own?.neverItems?.length ? own.neverItems : base.never).map(fill) };
+}
 
 /** Какой скрипт подходит разговору: входящий — по направлению, остальное — по словам из расшифровки */
 export function pickScript(direction: string, text: string): Script {
@@ -120,7 +130,7 @@ export async function scriptCheckCalls(db: Db, tenantId: string, ai: AiConfig, l
   let n = 0;
   for (const c of calls) {
     const tr = c.transcript as Tr;
-    const sc = pickScript(c.direction, tr.text ?? '');
+    const sc = await clubScript(db, c.club_id, pickScript(c.direction, tr.text ?? '').code);
     const all: (ScriptItem & { kind: 'step' | 'never' })[] = [...sc.steps.map((x) => ({ ...x, kind: 'step' as const })), ...sc.never.map((x) => ({ ...x, kind: 'never' as const }))];
     let r: Awaited<ReturnType<typeof aiEvaluateCall>>;
     try {

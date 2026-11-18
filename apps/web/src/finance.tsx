@@ -36,8 +36,12 @@ export function FinancePage({ me, clubs, clubId, openPerson }: { me: Me; clubs: 
     ['online', 'Онлайн-оплаты', can(me, 'finance.view')],
     ['bank', 'Сверка с банком', can(me, 'finance.view')],
   ];
-  const allowed = views.filter((v) => v[2]);
-  const [view, setView] = useState(() => { const v = navParams('finance').view; return allowed.some((a) => a[0] === v) ? v : allowed[0]?.[0] ?? 'shift'; });
+  // Кто не работает с кассой (собственник, финансист), видит «Касса смены» последней и открывает «Финансы» на своём:
+  // собственник — ДДС и план-факт, финансист — журнал платежей (проверка CRM 17.11.2026, п. 9)
+  const cashier = can(me, 'shifts.work') && !me.roles.every((r) => r.code === 'owner' || r.code === 'fin');
+  const allowed = views.filter((v) => v[2]).sort((x, y) => (cashier ? 0 : Number(x[0] === 'shift') - Number(y[0] === 'shift')));
+  const home = cashier ? allowed[0]?.[0] : me.roles.some((r) => r.code === 'fin') ? 'payments' : 'cashflow';
+  const [view, setView] = useState(() => { const v = navParams('finance').view; return allowed.some((a) => a[0] === v) ? v : allowed.some((a) => a[0] === home) ? home! : allowed[0]?.[0] ?? 'shift'; });
   const c = clubs.find((x) => x.id === club);
   if (!c) return <p className="muted">Клубов нет.</p>;
   return (
