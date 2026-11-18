@@ -14,7 +14,7 @@ from dataclasses import dataclass
 
 import httpx
 
-from .prompts import CONFIG_SCHEMA, CONFIG_SYSTEM, EVAL_SCHEMA, EVAL_SYSTEM, PROMPT_VERSION, SCHEMA, SYSTEM, TOPIC_SCHEMA, TOPIC_SYSTEM, USER
+from .prompts import CONFIG_SCHEMA, CONFIG_SYSTEM, EVAL_SCHEMA, EVAL_SYSTEM, PROMPT_VERSION, SCHEMA, SYSTEM, TOPIC_SCHEMA, TOPIC_SYSTEM, USER, USER_CHAT, CHAT_NOTE
 
 
 @dataclass
@@ -159,12 +159,13 @@ def summarize(llm, transcript: dict, ctx: dict) -> dict:
     text = mask(str(transcript.get("text", ""))).strip()
     if len(text.split()) < 12:
         return {"summary": None, "confidence": None, "engine": llm.engine, "reason": "Разговор слишком короткий"}
-    user = USER.format(
-        clubName=ctx.get("clubName") or "—", managerName=ctx.get("managerName") or "—", clientName=ctx.get("clientName") or "не указан",
-        direction="входящий" if ctx.get("direction") == "in" else "исходящий", callTime=ctx.get("callTime") or "—",
-        timezone=ctx.get("timezone") or "Europe/Moscow", transcript=text[:24000],
-    )
-    out = llm.complete(SYSTEM, user)
+    common = dict(clubName=ctx.get("clubName") or "—", managerName=ctx.get("managerName") or "—", clientName=ctx.get("clientName") or "не указан",
+                  callTime=ctx.get("callTime") or "—", timezone=ctx.get("timezone") or "Europe/Moscow", transcript=text[:24000])
+    if ctx.get("kind") == "chat":
+        system, user = SYSTEM + CHAT_NOTE, USER_CHAT.format(channel=ctx.get("channel") or "мессенджер", **common)
+    else:
+        system, user = SYSTEM, USER.format(direction="входящий" if ctx.get("direction") == "in" else "исходящий", **common)
+    out = llm.complete(system, user)
     # Тема не важна (решение 16.11.2026): если модель написала суть, итог берём, даже когда она отметила sufficient = false
     if not str(out.get("essence", "")).strip():
         return {"summary": None, "confidence": None, "engine": llm.engine, "reason": out.get("reason") or "Данных недостаточно"}

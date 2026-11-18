@@ -4,6 +4,9 @@
 //  - green_api    — WhatsApp через Green-API (номер клуба). Тоже работает опросом.
 //  - wazzup       — WhatsApp или Telegram через Wazzup. Входящие приходят только на внешний адрес (после переезда на сервер).
 //  - test         — тестовый канал: отправка всегда успешна, входящие можно сымитировать из интерфейса.
+//  - tg_user      — свой модуль: Telegram-аккаунт клуба (вход по коду, протокол Telegram). Соединение живёт в фоновом процессе (tgUser.ts),
+//                   отправка идёт через него; в других процессах сообщение ждёт в очереди.
+//  - wa_cloud     — свой модуль: официальный канал WhatsApp для бизнеса (Cloud API) напрямую, без посредника. Входящие — на наш адрес.
 
 export type Fetch = typeof fetch;
 export type ChannelRow = { id: string; kind: string; messenger: string; settings: Record<string, string>; secret: string | null; poll_offset: string | null };
@@ -12,6 +15,13 @@ export type Inbound = { chatId: string; externalId: string; text: string; name: 
 export type PollResult = { events: Inbound[]; offset?: number | null };
 
 export class ProviderError extends Error {}
+/** Канал работает через живое соединение, а его нет в этом процессе: сообщение остаётся в очереди и уйдёт из фонового процесса. */
+export class NotHereError extends Error {}
+
+/** Живые соединения своих модулей (Telegram-аккаунт клуба): id канала → отправка. Заполняет фоновый процесс. */
+export type SendOpts = { phone?: string | null; name?: string | null };
+export type SendResult = { externalId: string; chatId?: string };
+export const liveSenders = new Map<string, (chatId: string, text: string, o: SendOpts) => Promise<SendResult>>();
 
 const json = async (r: Response) => { const t = await r.text(); try { return JSON.parse(t); } catch { return { raw: t.slice(0, 300) }; } };
 const need = (v: string | null | undefined, what: string) => { if (!v) throw new ProviderError(`Не указан ${what}`); return v; };
@@ -53,8 +63,59 @@ export function wazzupMessages(ch: ChannelRow, body: Record<string, any>): Inbou
       phone: ch.messenger === 'whatsapp' ? digits(String(m.chatId)) : m.contact?.phone ?? null, at: m.dateTime ? new Date(m.dateTime) : undefined }));
 }
 
+/* ---------- WhatsApp Cloud API (официальный канал WhatsApp для бизнеса) ---------- */
+const WA = 'https://graph.facebook.com/v21.0';
+const waAuth = (ch: ChannelRow) => ({ Authorization: `Bearer ${need(ch.secret, 'постоянный ключ доступа WhatsApp')}`, 'Content-Type': 'application/json' });
+// Коды Cloud API: 131047 — прошло больше 24 часов с последнего сообщения клиента, писать можно только шаблоном; 131026 — номера нет в WhatsApp
+const WA_OUTSIDE_WINDOW = 131047;
+async function waPost(f: Fetch, ch: ChannelRow, payload: Record<string, unknown>) {
+  const res = await f(`${WA}/${need(ch.settings.phoneNumberId, 'идентификатор номера (Phone number ID)')}/messages`,
+    { method: 'POST', headers: waAuth(ch), body: JSON.stringify({ messaging_product: 'whatsapp', ...payload }) });
+  return { res, r: await json(res) };
+}
+async function waSend(f: Fetch, ch: ChannelRow, to: string, text: string): Promise<SendResult> {
+  let { res, r } = await waPost(f, ch, { to, type: 'text', text: { body: text, preview_url: false } });
+  // Клиент давно не писал: WhatsApp разрешает начать только одобренным шаблоном. Шаблон клуба с одной переменной {{1}} — в неё наш текст
+  if (!res.ok && r.error?.code === WA_OUTSIDE_WINDOW && ch.settings.openTemplate) {
+    ({ res, r } = await waPost(f, ch, { to, type: 'template', template: { name: ch.settings.openTemplate, language: { code: ch.settings.templateLang || 'ru' },
+      components: [{ type: 'body', parameters: [{ type: 'text', text: text.replace(/\s*\n+\s*/g, ' ').slice(0, 1000) }] }] } }));
+  }
+  if (!res.ok || !r.messages?.[0]?.id) {
+    const code = r.error?.code;
+    throw new ProviderError(code === WA_OUTSIDE_WINDOW ? 'Клиент не писал больше суток: WhatsApp разрешает начать переписку только одобренным шаблоном. Укажите шаблон в настройках канала'
+      : code === 131026 ? 'У клиента нет WhatsApp на этом номере. Напишите в Telegram или позвоните'
+      : code === 190 ? 'Ключ доступа WhatsApp недействителен: обновите его в настройках канала'
+      : `WhatsApp: ${r.error?.message ?? r.raw ?? res.status}`);
+  }
+  return { externalId: String(r.messages[0].id) };
+}
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function waMessages(ch: ChannelRow, body: any): Inbound[] {
+  const out: Inbound[] = [];
+  for (const e of body?.entry ?? []) for (const c of e.changes ?? []) {
+    const v = c.value ?? {};
+    if (ch.settings.phoneNumberId && v.metadata?.phone_number_id && v.metadata.phone_number_id !== ch.settings.phoneNumberId) continue;
+    const names = new Map<string, string>((v.contacts ?? []).map((x: { wa_id: string; profile?: { name?: string } }) => [x.wa_id, x.profile?.name ?? '']));
+    for (const m of v.messages ?? []) {
+      const text = m.text?.body ?? m.button?.text ?? m.interactive?.button_reply?.title ?? m.image?.caption ?? (m.type === 'image' ? '[фото]' : m.type === 'audio' ? '[голосовое сообщение]' : `[${m.type ?? 'сообщение'}]`);
+      out.push({ chatId: digits(String(m.from)), externalId: String(m.id), text, name: names.get(m.from) || 'Клиент из WhatsApp', phone: digits(String(m.from)),
+        at: m.timestamp ? new Date(Number(m.timestamp) * 1000) : undefined });
+    }
+  }
+  return out;
+}
+
+/* ---------- Telegram-аккаунт клуба: отправка через живое соединение ---------- */
+async function liveSend(ch: ChannelRow, chatId: string, text: string, o: SendOpts): Promise<SendResult> {
+  const send = liveSenders.get(ch.id);
+  if (!send) throw new NotHereError('Отправит фоновый процесс');
+  return send(chatId, text, o);
+}
+
 /** markup — кнопки клиентского бота (только Telegram-бот; другие каналы отправляют один текст). */
-export async function sendMessage(f: Fetch, ch: ChannelRow, chatId: string, text: string, markup?: unknown): Promise<{ externalId: string }> {
+export async function sendMessage(f: Fetch, ch: ChannelRow, chatId: string, text: string, markup?: unknown, o: SendOpts = {}): Promise<SendResult> {
+  if (ch.kind === 'tg_user') return liveSend(ch, chatId, text, o);
+  if (ch.kind === 'wa_cloud') return waSend(f, ch, digits(chatId), text);
   if (ch.kind === 'test') return { externalId: `test-${Date.now()}-${Math.random().toString(36).slice(2, 8)}` };
   if (ch.kind === 'telegram_bot') {
     const r = await json(await f(tg(ch, 'sendMessage'), { method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -70,12 +131,21 @@ export async function sendMessage(f: Fetch, ch: ChannelRow, chatId: string, text
   }
   if (ch.kind === 'wazzup') {
     const res = await f(`${WZ}/message`, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${need(ch.secret, 'ключ API Wazzup')}` },
-      body: JSON.stringify({ channelId: need(ch.settings.channelId, 'канал Wazzup'), chatType: ch.messenger, chatId, text }) });
+      // Первое сообщение в Telegram по номеру телефона («tel:7…»): Wazzup находит клиента в Telegram по номеру (канал Telegram-аккаунта, tgapi)
+      body: JSON.stringify({ channelId: need(ch.settings.channelId, 'канал Wazzup'), chatType: ch.messenger, text,
+        ...(chatId.startsWith('tel:') ? { phone: digits(chatId) } : { chatId }) }) });
     const r = await json(res);
-    if (!res.ok || !r.messageId) throw new ProviderError(`Wazzup: ${r.description ?? r.error ?? r.raw ?? res.status}`);
+    if (!res.ok || !r.messageId) throw new ProviderError(chatId.startsWith('tel:') && res.status === 400 ? 'Клиента нет в Telegram по этому номеру, или он закрыл поиск по номеру. Напишите в WhatsApp или позвоните' : `Wazzup: ${r.description ?? r.error ?? r.raw ?? res.status}`);
     return { externalId: String(r.messageId) };
   }
   throw new ProviderError('Неизвестный тип канала');
+}
+
+/** Wazzup присылает входящие только на внешний адрес. Адрес задаётся через API (в кабинете Wazzup такой настройки нет) — ставим его сами при проверке канала. */
+export async function setWazzupWebhook(f: Fetch, ch: ChannelRow, url: string): Promise<void> {
+  const res = await f(`${WZ}/webhooks`, { method: 'PATCH', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${need(ch.secret, 'ключ API Wazzup')}` },
+    body: JSON.stringify({ webhooksUri: url, subscriptions: { messagesAndStatuses: true } }) });
+  if (!res.ok) { const r = await json(res); throw new ProviderError(`Wazzup не принял адрес для входящих: ${r.description ?? r.error ?? res.status}`); }
 }
 
 /** Забрать новые входящие опросом (Telegram-бот и Green-API). Для Wazzup и тестового канала — пусто. */
@@ -109,12 +179,20 @@ export function parseWebhook(ch: ChannelRow, body: any): Inbound[] {
   if (ch.kind === 'telegram_bot') { const m = tgMessage(body ?? {}); return m ? [m] : []; }
   if (ch.kind === 'green_api') { const m = gaMessage(body ?? {}); return m ? [m] : []; }
   if (ch.kind === 'wazzup') return wazzupMessages(ch, body ?? {});
+  if (ch.kind === 'wa_cloud') return waMessages(ch, body ?? {});
   return [];
 }
 
 /** Проверка подключения: возвращает понятное описание, что подключено. */
 export async function testChannel(f: Fetch, ch: ChannelRow): Promise<string> {
   if (ch.kind === 'test') return 'Тестовый канал работает';
+  if (ch.kind === 'tg_user') return liveSenders.has(ch.id) ? 'Telegram-аккаунт клуба на связи' : 'Вход в Telegram выполнен. Соединение поднимет фоновый процесс в течение минуты';
+  if (ch.kind === 'wa_cloud') {
+    const res = await f(`${WA}/${need(ch.settings.phoneNumberId, 'идентификатор номера (Phone number ID)')}?fields=display_phone_number,verified_name,quality_rating`, { headers: waAuth(ch) });
+    const r = await json(res);
+    if (!res.ok) throw new ProviderError(r.error?.code === 190 ? 'Ключ доступа WhatsApp неверный или истёк' : `WhatsApp: ${r.error?.message ?? res.status}`);
+    return `WhatsApp подключён: ${r.verified_name ?? ''} ${r.display_phone_number ?? ''}`.trim();
+  }
   if (ch.kind === 'telegram_bot') {
     const r = await json(await f(tg(ch, 'getMe')));
     if (!r.ok) throw new ProviderError(r.error_code === 401 ? 'Токен бота неверный' : `Telegram: ${r.description}`);

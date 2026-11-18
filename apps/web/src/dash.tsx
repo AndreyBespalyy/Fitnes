@@ -69,7 +69,7 @@ export function DashPage({ me, clubs, clubId, openPerson, go: goTo, canGo, pickC
         </div>}
       </div>
       {drill && <PlanDrill clubId={drill.clubId} month={drill.month} category={drill.category} userId={drill.userId} onClose={() => setDrill(null)} openPerson={openPerson} />}
-      {view === 'desk' && me.roles.some((r) => r.code === 'manager') && <MyDay clubs={clubs} clubId={clubId} openPerson={openPerson} />}
+      {view === 'desk' && me.roles.some((r) => r.code === 'manager') && <MyDay me={me} clubs={clubs} clubId={clubId} openPerson={openPerson} />}
       {view === 'desk' && (layout.widgets.length ? layout.widgets.map((w) => <Widget key={`${w}-${clubId}`} exportable={office} id={w} q={q} tick={tick} metrics={metrics} openPerson={openPerson} nav={nav} pickClub={pickClub}
         onDrill={(x) => { const c = club?.id ?? (clubs.length === 1 ? clubs[0].id : null); if (!c) { toast('Выберите клуб вверху страницы, чтобы раскрыть цифру до клиентов'); return; } setDrill({ ...x, month, clubId: c }); }}
         title={layout.available.find((a) => a.id === w)?.title ?? w} />)

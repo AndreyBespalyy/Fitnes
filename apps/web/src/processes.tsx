@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react';
 import { useClubPick } from './clubPick.tsx';
 import { api, can, type Club, type Go, type Me } from './api.ts';
-import { DialButton } from './mobile.tsx';
+import { DialButton, MessengerButtons } from './mobile.tsx';
 import { dt, errText, toast } from './ui.ts';
 import { SituationButton } from './agent.tsx';
 
@@ -33,14 +33,15 @@ export function ProcessesPage({ me, clubs, clubId, openPerson, go, canTab = () =
       {clubChips}
       <div className="tabs" role="group" aria-label="Бизнес-процессы">{views.filter((v) => v[2]).map(([k, t]) => <button key={k} aria-pressed={view === k} onClick={() => { setView(k); setEdit(null); }}>{t}</button>)}</div>
       {edit && tpls && <TemplateEditor tpl={edit} roles={tpls.roles} onClose={() => setEdit(null)} onSaved={() => { setEdit(null); void loadTpls(); setView('templates'); }} />}
-      {!edit && (view === 'run' || view === 'done') && tpls && <Running work={work} clubId={club} status={view === 'run' ? 'active' : 'done'} tpls={tpls.items} canEdit={tpls.canEdit} roles={tpls.roles} openPerson={openPerson} go={go} canTab={canTab} meId={me.id} leader={can(me, 'crm.view_all')} />}
+      {!edit && (view === 'run' || view === 'done') && tpls && <Running work={work} clubId={club} status={view === 'run' ? 'active' : 'done'} tpls={tpls.items} canEdit={tpls.canEdit} roles={tpls.roles} openPerson={openPerson} go={go} canTab={canTab} me={me} leader={can(me, 'crm.view_all')} />}
       {!edit && view === 'templates' && tpls && <Templates data={tpls} onEdit={setEdit} onChanged={loadTpls} />}
       {!edit && view === 'words' && tpls && <Words onDraft={(d) => setEdit(d)} />}
     </div>
   );
 }
 
-function Running({ work, clubId, status, tpls, canEdit, roles, openPerson, go, canTab, meId, leader }: { work: boolean; clubId: string; status: string; tpls: Tpl[]; canEdit: boolean; roles: Record<string, string>; openPerson: (id: string) => void; go?: (g: Go) => void; canTab: (tab: string) => boolean; meId: string; leader: boolean }) {
+function Running({ work, clubId, status, tpls, canEdit, roles, openPerson, go, canTab, me, leader }: { work: boolean; clubId: string; status: string; tpls: Tpl[]; canEdit: boolean; roles: Record<string, string>; openPerson: (id: string) => void; go?: (g: Go) => void; canTab: (tab: string) => boolean; me: Me; leader: boolean }) {
+  const meId = me.id;
   const [items, setItems] = useState<Proc[] | null>(null);
   const [open, setOpen] = useState<string | null>(null);
   const load = () => api<{ items: Proc[] }>('GET', `/api/processes?clubId=${clubId}&status=${status}`).then((r) => setItems(r.items)).catch((e) => toast(errText(e)));
@@ -75,7 +76,7 @@ function Running({ work, clubId, status, tpls, canEdit, roles, openPerson, go, c
                   {(canEdit || p.isOwner) && <button className="btn sm" onClick={() => void act(`/api/processes/${p.id}/cancel`, 'Процесс отменён')}>Отменить</button>}
                 </span>
               </div>}
-              {cur && !!cur.hints?.length && (cur.assigneeId === meId || p.isOwner || leader) && <StepHints p={p} step={cur} clubId={clubId} openPerson={openPerson} go={go} canTab={canTab} onDone={load} />}
+              {cur && !!cur.hints?.length && (cur.assigneeId === meId || p.isOwner || leader) && <StepHints me={me} p={p} step={cur} clubId={clubId} openPerson={openPerson} go={go} canTab={canTab} onDone={load} />}
               <button className="linkish small" onClick={() => setOpen(open === p.id ? null : p.id)}>{open === p.id ? 'Скрыть шаги' : `Все шаги (${done} из ${p.steps.length})`}</button>
               {open === p.id && <ol className="proc-steps">{p.steps.map((s) => (
                 <li key={s.ord} className={s.status}>{s.status === 'done' ? '✅' : s.status === 'active' ? '▶️' : s.status === 'skipped' ? '—' : '○'} {s.title} <span className="muted">— {s.assignee ?? roles[s.role]}{s.doneAt ? `, выполнен ${dt(s.doneAt)}` : s.dueAt ? `, срок ${dt(s.dueAt)}` : ''}</span></li>))}</ol>}
@@ -93,7 +94,7 @@ export const HINT_META: Record<Hint, [string, string]> = {
 };
 const tomorrowNoon = () => { const d = new Date(); d.setDate(d.getDate() + 1); d.setHours(12, 0, 0, 0); return new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 16); };
 
-function StepHints({ p, step, clubId, openPerson, go, canTab, onDone }: { p: Proc; step: PStep; clubId: string; openPerson: (id: string) => void; go?: (g: Go) => void; canTab: (tab: string) => boolean; onDone: () => void }) {
+function StepHints({ me, p, step, clubId, openPerson, go, canTab, onDone }: { me: Me; p: Proc; step: PStep; clubId: string; openPerson: (id: string) => void; go?: (g: Go) => void; canTab: (tab: string) => boolean; onDone: () => void }) {
   const [form, setForm] = useState<'task' | 'result' | null>(null);
   const [text, setText] = useState('');
   const [due, setDue] = useState(tomorrowNoon);
@@ -113,7 +114,10 @@ function StepHints({ p, step, clubId, openPerson, go, canTab, onDone }: { p: Pro
       <div className="proc-hints" role="group" aria-label="Что сделать на этом шаге">
         <span className="small muted">Что сделать:</span>
         {step.hints!.map((h) => {
-          if (h === 'call' && p.personId) return <DialButton key={h} personId={p.personId} label={`${HINT_META.call[0]} ${HINT_META.call[1]}`} className="proc-hint" />;
+          if (h === 'call' && p.personId) return <span key={h} style={{ display: 'contents' }}><DialButton personId={p.personId} label={`${HINT_META.call[0]} ${HINT_META.call[1]}`} className="proc-hint" />
+            {!step.hints!.includes('write') && <MessengerButtons me={me} personId={p.personId} clubId={clubId} className="proc-hint" />}</span>;
+          // «Написать клиенту» — сразу в WhatsApp или Telegram; без права на переписку — как раньше, карточка клиента
+          if (h === 'write' && p.personId && can(me, 'messages.work')) return <MessengerButtons key={h} me={me} personId={p.personId} clubId={clubId} className="proc-hint" />;
           if ((h === 'write' || h === 'card') && p.personId) return btn(h, () => openPerson(p.personId!));
           // Раздел, закрытый этой роли, в подсказках не показываем (повторная проверка CRM 18.11.2026, п. 11)
           if (h === 'team' || h === 'schedule' || h === 'staff') return go && canTab(h) ? btn(h, () => go({ tab: h })) : null;

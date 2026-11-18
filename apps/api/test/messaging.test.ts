@@ -23,6 +23,9 @@ const fakeFetch = (async (input: string | URL, init?: RequestInit) => {
     if (greenFail) return ok({ message: 'Service unavailable' }, 503);
     sent.push({ url, body }); return ok({ idMessage: `GA${sent.length}` });
   }
+  if (url === 'https://api.wazzup24.com/v3/channels') return ok([{ channelId: '11111111-2222-3333-4444-555555555555', transport: 'tgapi', plainId: '79990001122', state: 'active' }]);
+  if (url === 'https://api.wazzup24.com/v3/webhooks') { sent.push({ url, body }); return ok({ ok: true }); }
+  if (url === 'https://api.wazzup24.com/v3/message') { sent.push({ url, body }); return ok({ messageId: `WZ${sent.length}` }); }
   if (url.includes('green-api') && url.includes('receiveNotification')) return new Response('null', { status: 200 });
   return ok({ error: 'unexpected ' + url }, 404);
 }) as typeof fetch;
@@ -152,9 +155,9 @@ test('WhatsApp через Green-API: при сбое сообщение не т�
   greenFail = false;
   assert.equal((await req('POST', `/api/msg/messages/${m.id}/retry`, 'o.smirnov')).json().status, 'sent');
   assert.deepEqual(sent.at(-1)!.body, { chatId: '79260000155@c.us', message: 'Ваша тренировка перенесена на 19:00' });
-  // Telegram по телефону начать нельзя
-  const tg = await channel('telegram');
-  assert.equal((await req('POST', `/api/persons/${person}/conversations`, 'o.smirnov', { channelId: tg.id })).statusCode, 400);
+  // В Telegram-бот по телефону начать нельзя: клиент пишет боту сам
+  const bot = (await req('GET', `/api/msg/channels?clubId=${c1}`, 'o.smirnov')).json().find((c: { kind: string }) => c.kind === 'telegram_bot');
+  assert.equal((await req('POST', `/api/persons/${person}/conversations`, 'o.smirnov', { channelId: bot.id })).statusCode, 400);
   await req('PATCH', `/api/msg/channels/${r.id}`, 'o.smirnov', { status: 'disabled' });
 });
 
@@ -204,4 +207,59 @@ test('входящие от провайдера на внешний адрес:
   // Эхо собственных исходящих не считается входящим
   await app2.inject({ method: 'POST', url: path, payload: { messages: [{ ...payload.messages[0], messageId: 'wz-2', isEcho: true }] } });
   assert.equal((await sql(`select count(*)::int as n from msg_messages m join msg_conversations c on c.id = m.conversation_id where c.external_chat_id = '79165550777'`))[0].n, 1);
+});
+
+test('кнопки «WhatsApp» и «Telegram»: номер телефона клиента — его номер в мессенджерах', async () => {
+  const [p] = await sql(`select p.id, p.home_club_id as club from persons p join person_contacts pc on pc.person_id = p.id and pc.type = 'phone'
+    where p.home_club_id = $1 and not exists (select 1 from msg_conversations c where c.person_id = p.id) limit 1`, [c1]);
+  const digits = (await sql(`select normalized_value from person_contacts where person_id = $1 and type = 'phone' order by is_primary desc limit 1`, [p.id]))[0].normalized_value.replace(/\D/g, '');
+  // Тренеру переписка недоступна
+  assert.equal((await req('POST', `/api/persons/${p.id}/write`, 'a.kim', { messenger: 'whatsapp' })).statusCode, 403);
+  // Канал подключён → диалог открывается в CRM, в WhatsApp — по номеру телефона
+  const wa = (await req('POST', `/api/persons/${p.id}/write`, 'm.volkova', { messenger: 'whatsapp' })).json();
+  assert.equal(wa.mode, 'crm');
+  assert.equal((await sql(`select external_chat_id from msg_conversations where id = $1`, [wa.conversationId]))[0].external_chat_id, digits);
+  // Повторное нажатие открывает тот же диалог
+  assert.equal((await req('POST', `/api/persons/${p.id}/write`, 'm.volkova', { messenger: 'whatsapp' })).json().conversationId, wa.conversationId);
+  // Telegram: пишем первыми по номеру, ответ клиента приходит в тот же диалог
+  const tg = (await req('POST', `/api/persons/${p.id}/write`, 'm.volkova', { messenger: 'telegram' })).json();
+  assert.equal(tg.mode, 'crm');
+  assert.equal((await sql(`select external_chat_id from msg_conversations where id = $1`, [tg.conversationId]))[0].external_chat_id, `tel:${digits}`);
+  const sentMsg = (await req('POST', `/api/msg/conversations/${tg.conversationId}/messages`, 'm.volkova', { text: 'Здравствуйте! Это клуб' })).json();
+  assert.equal(sentMsg.status, 'sent');
+  const ch = await channel('telegram');
+  await req('POST', `/api/msg/channels/${ch.id}/simulate`, 'm.volkova', { chatId: '5550001', phone: `+${digits}`, name: 'Клиент', text: 'Добрый день' });
+  const convs = await sql(`select id, external_chat_id from msg_conversations where person_id = $1 and channel_id = $2`, [p.id, ch.id]);
+  assert.equal(convs.length, 1, 'переписка не раздвоилась');
+  assert.equal(convs[0].external_chat_id, '5550001');
+  // Каналов нет → ссылка на чат в приложении на устройстве сотрудника
+  await sql(`update msg_channels set status = 'disabled' where club_id = $1 and messenger = 'whatsapp'`, [c1]);
+  const [q] = await sql(`select p.id from persons p join person_contacts pc on pc.person_id = p.id and pc.type = 'phone'
+    where p.home_club_id = $1 and not exists (select 1 from msg_conversations c where c.person_id = p.id) limit 1`, [c1]);
+  const link = (await req('POST', `/api/persons/${q.id}/write`, 'm.volkova', { messenger: 'whatsapp' })).json();
+  assert.equal(link.mode, 'link');
+  assert.match(link.url, /^https:\/\/wa\.me\/7\d{10}$/);
+  await sql(`update msg_channels set status = 'disabled' where club_id = $1 and messenger = 'telegram'`, [c1]);
+  assert.match((await req('POST', `/api/persons/${q.id}/write`, 'm.volkova', { messenger: 'telegram' })).json().url, /^https:\/\/t\.me\/\+7\d{10}$/);
+  assert.equal((await req('POST', `/api/persons/${q.id}/write`, 'm.volkova', { messenger: 'viber' })).statusCode, 400);
+  await sql(`update msg_channels set status = 'active' where club_id = $1 and kind = 'test'`, [c1]);
+});
+
+test('Wazzup: адрес для входящих ставится сам, Telegram по номеру уходит полем phone', async () => {
+  const ch = (await req('POST', '/api/msg/channels', 'o.smirnov', { clubId: c1, kind: 'wazzup', messenger: 'telegram',
+    settings: { channelId: '11111111-2222-3333-4444-555555555555' }, secret: 'wz-key' })).json();
+  const r = (await req('POST', `/api/msg/channels/${ch.id}/test`, 'o.smirnov')).json();
+  assert.equal(r.ok, true, r.info);
+  const hook = sent.filter((x) => x.url.endsWith('/webhooks')).at(-1)!.body as { webhooksUri: string };
+  assert.match(hook.webhooksUri, new RegExp(`/api/hooks/msg/${ch.id}/`));
+  const [p] = await sql(`select p.id from persons p join person_contacts pc on pc.person_id = p.id and pc.type = 'phone'
+    where p.home_club_id = $1 and not exists (select 1 from msg_conversations c where c.person_id = p.id) limit 1`, [c1]);
+  const conv = (await req('POST', `/api/persons/${p.id}/write`, 'm.volkova', { messenger: 'telegram' })).json();
+  assert.equal(conv.mode, 'crm');
+  assert.equal((await req('POST', `/api/msg/conversations/${conv.conversationId}/messages`, 'm.volkova', { text: 'Привет из клуба' })).json().status, 'sent');
+  const body = sent.filter((x) => x.url.endsWith('/message')).at(-1)!.body as Record<string, string>;
+  assert.equal(body.chatType, 'telegram');
+  assert.match(body.phone, /^7\d{10}$/);
+  assert.equal(body.chatId, undefined);
+  await req('PATCH', `/api/msg/channels/${ch.id}`, 'o.smirnov', { status: 'disabled' });
 });
