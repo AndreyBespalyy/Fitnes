@@ -3,6 +3,7 @@
 // встречи, звонки (итоги и расшифровки), переписку с клиентом, обсуждения в корпоративном мессенджере (все чаты, решение 1Б),
 // абонементы, долги, посещения и собственные наблюдения агента. Получается текст до 6000 знаков, главное — жирным.
 // Если подключён YandexGPT — текст пишет он; если нет — система собирает его сама по правилам (без выдумок, только факты).
+import { chatSummariesOf } from './chatAi.ts';
 import { createHash } from 'node:crypto';
 import type { FastifyInstance } from 'fastify';
 import type pg from 'pg';
@@ -29,11 +30,14 @@ export type Facts = {
   opportunity: null | { id: string; pipeline: string; stage: string; status: string; owner: string | null; amountExpected: string | null; createdAt: string;
     lostReason: string | null; daysInStage: number; stageHistory: { at: string; from: string | null; to: string; actor: string | null; comment: string | null }[] };
   tasks: { title: string; kind: string; dueAt: string; doneAt: string | null; result: string | null; assignee: string | null; overdue: boolean }[];
-  leads: { at: string; source: string | null; comment: string | null; firstResponseMin: number | null }[];
+  leads: { at: string; source: string | null; comment: string | null; firstResponseMin: number | null; late?: boolean }[];
   meetings: { at: string; status: string }[];
   calls: { at: string; direction: string; manager: string | null; durationSec: number | null; essence: string | null; need: string | null; objections: string[];
     agreements: string | null; outcome: string | null; nextStep: string | null; transcript: string | null }[];
   clientMessages: { at: string; from: string; text: string }[];
+  // Итоги переписки от ИИ (как итоги звонков): WhatsApp и Telegram
+  chats: { at: string; messenger: string; manager: string | null; essence: string; need: string | null; objections: string[]; agreements: string | null;
+    outcome: string | null; nextStep: string | null }[];
   waitingReplySince: string | null;
   memberships: { product: string; status: string; startsOn: string; endsOn: string | null; visitsLeft: number | null; nextChargeOn: string | null }[];
   debts: { title: string; dueOn: string; amount: string }[];
@@ -59,9 +63,10 @@ async function personFacts(db: Db, personId: string, oppId: string | null, f: Fa
      order by coalesce(t.done_at, t.due_at) desc limit 20`, [personId, oppId])).rows
     .map((r) => ({ title: r.title, kind: KIND[r.kind] ?? r.kind, dueAt: r.due_at, doneAt: r.done_at, result: r.result, assignee: r.assignee, overdue: r.overdue }));
   f.leads = (await db.query(
-    `select l.created_at, s.name as source, l.comment, extract(epoch from l.first_response_at - l.created_at) / 60 as frm
+    `select l.created_at, s.name as source, l.comment, extract(epoch from l.first_response_at - l.created_at) / 60 as frm,
+       (l.first_response_at is null or l.first_response_at > l.first_response_due_at) as late
      from leads l left join lead_sources s on s.id = l.source_id where l.person_id = $1 order by l.created_at desc limit 5`, [personId])).rows
-    .map((r) => ({ at: r.created_at, source: r.source, comment: r.comment, firstResponseMin: r.frm == null ? null : Math.round(Number(r.frm)) }));
+    .map((r) => ({ at: r.created_at, source: r.source, comment: r.comment, firstResponseMin: r.frm == null ? null : Math.round(Number(r.frm)), late: !!r.late }));
   f.meetings = (await db.query(`select scheduled_at, status from meetings where person_id = $1 order by scheduled_at desc limit 5`, [personId])).rows
     .map((r) => ({ at: r.scheduled_at, status: MEETING[r.status] ?? r.status }));
   f.calls = (await db.query(
@@ -78,6 +83,8 @@ async function personFacts(db: Db, personId: string, oppId: string | null, f: Fa
   const msgs = (await db.query(
     `select m.created_at, m.direction, m.body, m.auto, u.full_name as author from msg_messages m join msg_conversations c on c.id = m.conversation_id
      left join users u on u.id = m.author_id where c.person_id = $1 order by m.created_at desc limit $2`, [personId, wide ? 80 : 30])).rows;
+  f.chats = (await chatSummariesOf(db, { personId }, wide ? 10 : 4)).map((c) => ({ at: c.at, messenger: c.messenger, manager: c.manager, essence: c.essence,
+    need: c.need || null, objections: c.objections ?? [], agreements: c.agreements || null, outcome: c.outcome ? OUTCOME[c.outcome] ?? c.outcome : null, nextStep: c.nextStep?.title ?? null }));
   f.clientMessages = msgs.reverse().map((m) => ({ at: m.created_at, from: m.direction === 'in' ? 'клиент' : m.auto ? 'автосообщение' : (m.author ?? 'клуб'), text: cut(m.body, 500) }));
   const lastIn = msgs.filter((m) => m.direction === 'in').at(-1);
   const lastOut = msgs.filter((m) => m.direction === 'out' && !m.auto).at(-1);
@@ -127,7 +134,7 @@ async function oppFacts(db: Db, oppId: string, f: Facts) {
 
 function emptyFacts(type: Facts['target']['type'], id: string, club: { name: string; timezone: string }): Facts {
   return { now: new Date().toISOString(), timezone: club.timezone, clubName: club.name, target: { type, id }, task: null, person: null, opportunity: null,
-    tasks: [], leads: [], meetings: [], calls: [], clientMessages: [], waitingReplySince: null, memberships: [], debts: [], visits: { last: null, last30: 0, recent: [] }, classes: [], team: [], observations: [] };
+    tasks: [], leads: [], meetings: [], calls: [], clientMessages: [], chats: [], waitingReplySince: null, memberships: [], debts: [], visits: { last: null, last30: 0, recent: [] }, classes: [], team: [], observations: [] };
 }
 
 export async function collectFacts(db: Db, ctx: Ctx, type: 'task' | 'opportunity' | 'person', id: string): Promise<{ facts: Facts; clubId: string }> {
@@ -255,6 +262,17 @@ export function rulesBrief(f: Facts) {
     out.push('');
   }
   if (f.classes.length) out.push(...classesText(f.classes, tz), '');
+  const lastChat = f.chats[0];
+  if (lastChat) {
+    out.push(`**Итог переписки** (${lastChat.messenger}, разбор ИИ)`);
+    out.push(`• ${fmtDate(lastChat.at, tz)}${lastChat.manager ? `, ${lastChat.manager}` : ''}: ${cut(lastChat.essence, 400)}`);
+    if (lastChat.need) out.push(`• Потребность: ${cut(lastChat.need, 200)}`);
+    if (lastChat.objections.length) out.push(`• Возражения: ${lastChat.objections.map((o) => cut(o, 80)).join('; ')}`);
+    if (lastChat.agreements) out.push(`• Договорились: ${cut(lastChat.agreements, 200)}`);
+    if (lastChat.outcome) out.push(`• Итог: ${lastChat.outcome}`);
+    if (lastChat.nextStep) out.push(`• Следующий шаг: ${cut(lastChat.nextStep, 160)}`);
+    out.push('');
+  }
   if (f.clientMessages.length) {
     out.push('**Переписка с клиентом** (последние сообщения)');
     for (const m of f.clientMessages.slice(-5)) out.push(`• ${fmtDate(m.at, tz)}, ${m.from}: ${cut(m.text, 200)}`);
@@ -282,7 +300,7 @@ export function rulesBrief(f: Facts) {
     out.push('');
   }
   if (f.observations.length) {
-    out.push('**Наблюдения ИИ-помощника**');
+    out.push('**Наблюдения Дяди Вити**');
     for (const o of f.observations.slice(0, 4)) out.push(`• ${fmtDate(o.at, tz)}: ${cut(o.text, 200)}`);
   }
   return fitBrief(out.join('\n'));
@@ -360,7 +378,7 @@ export async function situationBrief(db: Db, ctx: Ctx, yandex: YandexConfig | nu
 }
 
 const sourcesOf = (f: Facts) => ({
-  tasks: f.tasks.length, calls: f.calls.length, clientMessages: f.clientMessages.length, team: f.team.length,
+  tasks: f.tasks.length, calls: f.calls.length, clientMessages: f.clientMessages.length, chats: f.chats.length, team: f.team.length,
   stages: f.opportunity?.stageHistory.length ?? 0, observations: f.observations.length,
 });
 

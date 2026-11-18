@@ -68,7 +68,7 @@ test('просроченная задача: карточка исполните
   assert.equal((await notes('o.smirnov')).filter((x) => x.objectId === task).length, 1);
   // Наблюдение агента попадает в «Коротко о ситуации»
   const brief = (await req('GET', `/api/agent/brief/task/${task}?force=1`, who)).json();
-  assert.match(brief.text, /Наблюдения ИИ-помощника/);
+  assert.match(brief.text, /Наблюдения Дяди Вити/);
   // РОП: «Напомнить исполнителю»
   const nudge = await req('POST', `/api/agent/notifications/${rop.id}/action`, 'o.astafeva', { action: 'nudge' });
   assert.equal(nudge.statusCode, 200, nudge.body);
@@ -137,4 +137,23 @@ test('настройки: менеджер видит, управляющий м
   assert.equal(ok.json().taskRopMinutes, 30);
   const night = await withCtx(t.pool, { tenantId: tenant, allClubs: true, clubIds: [] }, (db) => processAgentClub(db, { tenantId: tenant, userId: null }, { id: centr, h: 23 }));
   assert.deepEqual(night, { tasks: 0, replies: 0, reassigned: 0 });
+});
+
+test('повторная проверка CRM 18.11.2026: РОП меняет сроки своего отдела, остальное — нет; задача ресепшна идёт управляющему, а не РОПу', async () => {
+  const g = (await req('GET', `/api/agent/settings?clubId=${centr}`, 'o.astafeva')).json();
+  assert.equal(g.canEdit, true);
+  assert.equal(g.scope, 'sales');
+  const r = await req('PUT', '/api/agent/settings', 'o.astafeva', { clubId: centr, taskRopMinutes: 45, quietFrom: 20 });
+  assert.equal(r.statusCode, 200, r.body);
+  assert.equal(r.json().taskRopMinutes, 45);
+  assert.equal(r.json().quietFrom, 22, 'тишину РОП не меняет');
+  // Просроченная задача ресепшна: первый сигнал — управляющему, РОПу ничего
+  await sql(`delete from staff_notifications`);
+  const desk = (await sql(`select id from users where login = 'd.lis'`))[0].id;
+  await sql(`insert into tasks(tenant_id, club_id, assignee_id, kind, title, due_at) values ($1,$2,$3,'other','Сверить кассу', now() - interval '2 hours')`, [tenant, centr, desk]);
+  await run();
+  const esc = async (login: string) => (await sql(`select n.body from staff_notifications n join users u on u.id = n.user_id where u.login = $1 and n.body like '%Сверить кассу%'`, [login])).map((x) => x.body as string);
+  const rop = await esc('o.astafeva'); const gm = await esc('o.smirnov');
+  assert.equal(rop.length, 0, JSON.stringify(rop));
+  assert.ok(gm.some((b) => b.includes('(управляющий)')), JSON.stringify(gm));
 });

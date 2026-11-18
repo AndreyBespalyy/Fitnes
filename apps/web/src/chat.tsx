@@ -1,9 +1,12 @@
 // Шаг 10. Переписка с клиентами: единое окно (Telegram и WhatsApp), чат в карточке клиента,
 // настройки: каналы, шаблоны, автосообщения, рабочее время и автоответ.
 import { useEffect, useRef, useState, type FormEvent } from 'react';
+import { createPortal } from 'react-dom';
+import { ToConfig } from './toConfig.tsx';
 import { api, can, type Club, type Me, navParams } from './api.ts';
 import { dt, errText, toast } from './ui.ts';
 import { Md } from './fiscal.tsx';
+import { SmsSettings } from './contracts.tsx';
 import guide from '../../../docs/03_Инструкции/Мессенджеры_Telegram_WhatsApp.md?raw';
 
 type Conv = { id: string; clubId: string; channelId: string; channelName: string; channelKind: string; messenger: 'telegram' | 'whatsapp'; personId: string | null;
@@ -18,7 +21,7 @@ type Preview = { ready: { personId: string; name: string; text: string }[]; skip
 
 const MESSENGER: Record<string, string> = { telegram: 'Telegram', whatsapp: 'WhatsApp' };
 const EVENT: Record<string, [string, string]> = {
-  membership_ending: ['Абонемент заканчивается', 'за сколько дней до окончания'],
+  membership_ending: ['Абонемент заканчивается', 'за сколько дней до окончания (не придёт, если клиенту уже ушло досрочное продление из «Возврата клиентов»)'],
   debt_overdue: ['Долг по оплате', 'через сколько дней после срока платежа'],
   inactive: ['Давно не был в клубе', 'сколько дней без посещений'],
   birthday: ['День рождения', ''],
@@ -31,16 +34,42 @@ const time = (s: string) => new Date(s).toLocaleString('ru-RU', { day: '2-digit'
 const maskWa = (d: string) => d.replace(/^7(\d{3})(\d{3})(\d{2})(\d{2})$/, '+7 $1 ***-**-$4');
 const who = (c: Conv) => c.personName ?? c.title;
 
+type ChatSum = { at: string; messages: number; messenger: string; manager: string | null; essence: string; need: string; objections: string[]; agreements: string;
+  outcome: string | null; nextStep: { title: string } | null };
+const OUTCOME: Record<string, string> = { interested: 'интересно', thinking: 'думает', refused: 'отказ', bought: 'купил', other: 'другое' };
+/** Итог переписки от ИИ — как итог разговора у звонков */
+function ChatSummary({ s }: { s: ChatSum }) {
+  return (
+    <details className="note small" open>
+      <summary><b>✦ Итог переписки</b> · разбор ИИ, {time(s.at)}{s.outcome ? ` · ${OUTCOME[s.outcome] ?? s.outcome}` : ''}</summary>
+      <div style={{ display: 'grid', gap: 2, marginTop: 4 }}>
+        <span>{s.essence}</span>
+        {s.need && <span>Потребность: {s.need}</span>}
+        {s.objections?.length > 0 && <span>Возражения: {s.objections.join('; ')}</span>}
+        {s.agreements && <span>Договорились: {s.agreements}</span>}
+        {s.nextStep?.title && <span>Следующий шаг: {s.nextStep.title}</span>}
+      </div>
+    </details>
+  );
+}
+
 /* ---------------- окно переписки ---------------- */
 export function ChatsPage({ me, clubs, clubId, openPerson }: { me: Me; clubs: Club[]; clubId: string; openPerson: (id: string) => void }) {
   const [list, setList] = useState<Conv[]>([]);
   const [filter, setFilter] = useState(() => navParams('chats').filter ?? 'all');
-  const [open, setOpen] = useState<string | null>(null);
+  // Переход из кнопки «WhatsApp» / «Telegram» в приложении команды: /?tab=chats&conv=<диалог>
+  const [open, setOpen] = useState<string | null>(() => navParams('chats').conv ?? null);
   const [q, setQ] = useState('');
   const load = () => api<Conv[]>('GET', `/api/msg/conversations?filter=${filter}${clubId !== 'all' ? `&clubId=${clubId}` : ''}`).then(setList).catch(() => {});
   useEffect(() => { load(); const t = setInterval(load, 5000); return () => clearInterval(t); }, [filter, clubId]);
   const shown = list.filter((c) => !q || who(c).toLowerCase().includes(q.toLowerCase()) || (q.replace(/\D/g, '').length >= 4 && c.chatId.endsWith(q.replace(/\D/g, ''))));
-  const cur = list.find((c) => c.id === open) ?? null;
+  // Диалог, открытый по ссылке, может не попасть в первые 200 списка — подгружаем его отдельно
+  const [extra, setExtra] = useState<Conv | null>(null);
+  useEffect(() => {
+    if (!open || list.some((c) => c.id === open) || extra?.id === open) return;
+    api<{ conversation: Conv }>('GET', `/api/msg/conversations/${open}/messages`).then((r) => setExtra(r.conversation)).catch(() => {});
+  }, [open, list]);
+  const cur = list.find((c) => c.id === open) ?? (extra?.id === open ? extra : null);
   return (
     <div className="chat-layout">
       <div className={`card chat-list ${open ? 'hide-narrow' : ''}`}>
@@ -74,7 +103,8 @@ export function ChatPane({ me, conv, onBack, onSent, openPerson, compact }: { me
   const [err, setErr] = useState('');
   const [busy, setBusy] = useState(false);
   const end = useRef<HTMLDivElement>(null);
-  const load = () => api<{ messages: Msg[] }>('GET', `/api/msg/conversations/${conv.id}/messages`).then((r) => setMsgs(r.messages)).catch((e) => setErr(errText(e)));
+  const [sums, setSums] = useState<ChatSum[]>([]);
+  const load = () => api<{ messages: Msg[]; summaries?: ChatSum[] }>('GET', `/api/msg/conversations/${conv.id}/messages`).then((r) => { setMsgs(r.messages); setSums(r.summaries ?? []); }).catch((e) => setErr(errText(e)));
   useEffect(() => { setMsgs([]); setText(''); setErr(''); load(); const t = setInterval(load, 4000); return () => clearInterval(t); }, [conv.id]);
   useEffect(() => { api<Template[]>('GET', `/api/msg/templates?clubId=${conv.clubId}`).then((x) => setTpl(x.filter((t) => t.isActive))).catch(() => {}); }, [conv.clubId]);
   useEffect(() => { end.current?.scrollIntoView({ block: 'end' }); }, [msgs.length]);
@@ -101,6 +131,7 @@ export function ChatPane({ me, conv, onBack, onSent, openPerson, compact }: { me
             <div><b>{who(conv)}</b><div className="small">{MESSENGER[conv.messenger]} · {conv.channelName}{conv.messenger === 'whatsapp' ? ` · ${maskWa(conv.chatId)}` : ''}</div></div></div>
           {conv.personId && openPerson && <button className="btn sm" onClick={() => openPerson(conv.personId!)}>Карточка клиента</button>}
         </div>)}
+      {sums[0] && <ChatSummary s={sums[0]} />}
       {conv.optOut && <div className="note">Клиент отписался от сообщений: автосообщения ему не уходят. Отвечать на его вопросы можно.</div>}
       <div className="msgs" style={compact ? { maxHeight: 320 } : undefined}>
         {msgs.map((m) => (
@@ -125,6 +156,23 @@ export function ChatPane({ me, conv, onBack, onSent, openPerson, compact }: { me
   );
 }
 
+/* ---------------- окно переписки поверх любой страницы (кнопки «WhatsApp» и «Telegram») ---------------- */
+export function ChatPopup({ me, conversationId, onClose }: { me: Me; conversationId: string; onClose: () => void }) {
+  const [conv, setConv] = useState<Conv | null>(null);
+  const [err, setErr] = useState('');
+  useEffect(() => { api<{ conversation: Conv }>('GET', `/api/msg/conversations/${conversationId}/messages`).then((r) => setConv(r.conversation)).catch((e) => setErr(errText(e))); }, [conversationId]);
+  useEffect(() => { const k = (e: KeyboardEvent) => { if (e.key === 'Escape') { e.stopPropagation(); onClose(); } }; window.addEventListener('keydown', k, true); return () => window.removeEventListener('keydown', k, true); }, []);
+  return createPortal(
+    <div className="modal-bg brief-bg" role="dialog" aria-modal="true" aria-label="Переписка с клиентом" onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+      <div className="card modal" style={{ display: 'grid', gap: 10, maxWidth: 640, width: '100%' }}>
+        <div className="row between"><h2 style={{ margin: 0 }}>{conv ? `${MESSENGER[conv.messenger]}: ${who(conv)}` : 'Переписка'}</h2><button className="btn sm" onClick={onClose} aria-label="Закрыть">×</button></div>
+        {err && <div className="err">{err}</div>}
+        {conv && conv.chatId.startsWith('tel:') && <div className="note small">Пишем в Telegram по номеру телефона клиента. Когда клиент ответит, переписка продолжится здесь же.</div>}
+        {conv ? <ChatPane me={me} conv={conv} compact /> : !err && <p className="muted">Открываю переписку…</p>}
+      </div>
+    </div>, document.body);
+}
+
 /* ---------------- переписка в карточке клиента ---------------- */
 export function PersonChats({ me, personId, homeClubId, marketingConsent, optOut, reload }: { me: Me; personId: string; homeClubId: string | null;
   marketingConsent: boolean; optOut: boolean; reload: () => void }) {
@@ -134,7 +182,8 @@ export function PersonChats({ me, personId, homeClubId, marketingConsent, optOut
   const [err, setErr] = useState('');
   const load = () => api<Conv[]>('GET', `/api/msg/conversations?personId=${personId}`).then((x) => { setConvs(x); setOpen((o) => o ?? x[0]?.id ?? null); }).catch(() => {});
   useEffect(() => { load(); api<Channel[]>('GET', `/api/msg/channels${homeClubId ? `?clubId=${homeClubId}` : ''}`).then(setChannels).catch(() => {}); }, [personId]);
-  const wa = channels.filter((c) => c.messenger === 'whatsapp' && c.status === 'active' && !convs.some((v) => v.channelId === c.id));
+  // Написать первым по номеру: WhatsApp — любой канал, Telegram — канал Wazzup (бот так не умеет)
+  const wa = channels.filter((c) => c.status === 'active' && (c.messenger === 'whatsapp' || ['wazzup', 'test'].includes(c.kind)) && !convs.some((v) => v.channelId === c.id));
   const start = async (channelId: string) => {
     try { const r = await api<{ id: string }>('POST', `/api/persons/${personId}/conversations`, { channelId }); await load(); setOpen(r.id); } catch (e) { setErr(errText(e)); }
   };
@@ -144,9 +193,9 @@ export function PersonChats({ me, personId, homeClubId, marketingConsent, optOut
     <div className="card" style={{ display: 'grid', gap: 8 }}>
       <div className="row between"><h2>Переписка</h2>
         <div className="row">{convs.length > 1 && convs.map((c) => <button key={c.id} className={`btn sm ${open === c.id ? 'pri' : ''}`} onClick={() => setOpen(c.id)}>{MESSENGER[c.messenger]} · {c.channelName}</button>)}
-          {wa.map((c) => <button key={c.id} className="btn sm" onClick={() => start(c.id)}>Написать в WhatsApp ({c.name})</button>)}</div></div>
+          {wa.map((c) => <button key={c.id} className="btn sm" onClick={() => start(c.id)}>Написать в {MESSENGER[c.messenger]} ({c.name})</button>)}</div></div>
       {err && <div className="err">{err}</div>}
-      {cur ? <ChatPane me={me} conv={cur} compact onSent={load} /> : <p className="small">Переписки пока нет.{!wa.length && ' В Telegram клиент пишет клубу первым.'}</p>}
+      {cur ? <ChatPane me={me} conv={cur} compact onSent={load} /> : <p className="small">Переписки пока нет.{!wa.length && ' Кнопки «WhatsApp» и «Telegram» рядом с телефоном откроют чат с клиентом по его номеру.'}</p>}
       <div className="row" style={{ gap: 16 }}>
         <label className="row small"><input type="checkbox" style={{ width: 16, height: 16 }} checked={marketingConsent}
           onChange={(e) => setFlag({ marketingConsent: e.target.checked }, e.target.checked ? 'Согласие на рекламные сообщения отмечено' : 'Согласие снято')} />Согласен получать рекламные сообщения</label>
@@ -162,16 +211,19 @@ export function MessagingAdmin({ me, clubs, clubId }: { me: Me; clubs: Club[]; c
   const [club, setClub] = useState(clubId !== 'all' ? clubId : clubs[0]?.id ?? '');
   useEffect(() => { if (clubId !== 'all') setClub(clubId); }, [clubId]);
   const [view, setView] = useState('channels');
-  void me;
+  // Технический администратор: только подключение каналов и СМС — шаблоны и автосообщения клиентам ему не нужны
+  const full = can(me, 'messages.manage');
+  const views = ([['channels', 'Каналы', true], ['triggers', 'Автосообщения', full], ['templates', 'Шаблоны', full], ['settings', 'Рабочее время и автоответ', full],
+    ['sms', 'СМС', me.allClubs && (can(me, '*') || can(me, 'integrations.manage'))], ['guide', 'Инструкция', true]] as [string, string, boolean][]).filter((v) => v[2]);
   if (!club) return <p className="muted">Клубов нет.</p>;
   return (
     <>
       <div className="row between">
-        <div className="tabs">{[['channels', 'Каналы'], ['triggers', 'Автосообщения'], ['templates', 'Шаблоны'], ['settings', 'Рабочее время и автоответ'], ['guide', 'Инструкция']]
-          .map(([k, t]) => <button key={k} aria-pressed={view === k} onClick={() => setView(k)}>{t}</button>)}</div>
+        <div className="tabs">{views.map(([k, t]) => <button key={k} aria-pressed={view === k} onClick={() => setView(k)}>{t}</button>)}</div>
         {clubId === 'all' && <select aria-label="Клуб" value={club} onChange={(e) => setClub(e.target.value)} style={{ width: 'auto' }}>{clubs.map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}</select>}
       </div>
-      {view === 'channels' && <Channels key={club} clubId={club} />}
+      {view === 'channels' && <Channels key={club} clubId={club} canSimulate={full || can(me, 'messages.work')} />}
+      {view === 'sms' && <SmsSettings />}
       {view === 'triggers' && <Triggers key={club} clubId={club} />}
       {view === 'templates' && <Templates key={club} clubId={club} />}
       {view === 'settings' && <Settings key={club} clubId={club} />}
@@ -181,6 +233,11 @@ export function MessagingAdmin({ me, clubs, clubId }: { me: Me; clubs: Club[]; c
 }
 
 const KIND_INFO: Record<string, { title: string; messengers: string[]; text: string; secret?: string; fields: [string, string][] }> = {
+  tg_user: { title: 'Telegram-аккаунт клуба (свой модуль)', messengers: ['telegram'], fields: [],
+    text: 'CRM входит в обычный Telegram-аккаунт клуба по коду, как приложение. Можно писать клиенту первым по номеру. Без посредников и абонентской платы.' },
+  wa_cloud: { title: 'WhatsApp для бизнеса напрямую (свой модуль)', messengers: ['whatsapp'], secret: 'Постоянный ключ доступа (System User token)',
+    fields: [['phoneNumberId', 'Идентификатор номера (Phone number ID)'], ['openTemplate', 'Шаблон для первого сообщения (название из WhatsApp Manager)'], ['templateLang', 'Язык шаблона (по умолчанию ru)']],
+    text: 'Официальный канал WhatsApp от Meta, без посредников. Нужен аккаунт WhatsApp Business Platform. Первое сообщение клиенту уходит по одобренному шаблону.' },
   telegram_bot: { title: 'Telegram-бот клуба', messengers: ['telegram'], secret: 'Токен бота от @BotFather', fields: [],
     text: 'Клиенты пишут боту клуба. Создайте бота в @BotFather и вставьте токен. Работает сразу, внешний адрес не нужен.' },
   green_api: { title: 'WhatsApp через Green-API', messengers: ['whatsapp'], secret: 'apiTokenInstance', fields: [['idInstance', 'Номер инстанса (idInstance)'], ['apiUrl', 'Адрес API (если в кабинете указан свой)']],
@@ -190,15 +247,63 @@ const KIND_INFO: Record<string, { title: string; messengers: string[]; text: str
   test: { title: 'Тестовый канал', messengers: ['whatsapp', 'telegram'], fields: [], text: 'Для проверки: отправка всегда успешна, сообщение клиента можно сымитировать.' },
 };
 
-function Channels({ clubId }: { clubId: string }) {
+/* Вход в Telegram-аккаунт клуба: номер → код из Telegram → облачный пароль (если включён) */
+function TgLogin({ clubId, channelId, onDone, onCancel }: { clubId: string; channelId?: string; onDone: () => void; onCancel: () => void }) {
+  const [f, setF] = useState({ phone: '', apiId: '', apiHash: '', code: '', password: '' });
+  const [step, setStep] = useState<'phone' | 'code' | 'password'>('phone');
+  const [loginId, setLoginId] = useState('');
+  const [hint, setHint] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState('');
+  const set = (k: keyof typeof f) => (e: { target: { value: string } }) => setF({ ...f, [k]: e.target.value });
+  const run = async (fn: () => Promise<void>) => { setBusy(true); setErr(''); try { await fn(); } catch (x) { setErr(errText(x)); } finally { setBusy(false); } };
+  const start = () => run(async () => {
+    const r = await api<{ loginId: string; viaApp: boolean }>('POST', '/api/msg/tg-login/start', { clubId, channelId, phone: f.phone, apiId: f.apiId || undefined, apiHash: f.apiHash || undefined });
+    setLoginId(r.loginId); setStep('code');
+    setHint(r.viaApp ? 'Код пришёл в приложение Telegram на телефоне клуба (сообщение от «Telegram»).' : 'Код пришёл по СМС на номер аккаунта.');
+  });
+  const finish = () => run(async () => {
+    const r = await api<{ ok?: boolean; needPassword?: boolean; account?: string }>('POST', '/api/msg/tg-login/code', step === 'password' ? { loginId, password: f.password } : { loginId, code: f.code });
+    if (r.needPassword) { setStep('password'); return; }
+    toast(`Telegram-аккаунт ${r.account ?? ''} подключён. Сообщения клиентов появятся в «Переписке»`); onDone();
+  });
+  return (
+    <div style={{ display: 'grid', gap: 8 }}>
+      <h3 style={{ margin: 0 }}>{channelId ? 'Войти в Telegram заново' : 'Вход в Telegram-аккаунт клуба'}</h3>
+      {err && <div className="err">{err}</div>}
+      {step === 'phone' && <>
+        <label className="f">Номер телефона аккаунта клуба<input value={f.phone} onChange={set('phone')} placeholder="+7 900 000-00-00" autoComplete="off" /></label>
+        <div className="grid2">
+          <label className="f">api_id<input value={f.apiId} onChange={set('apiId')} inputMode="numeric" placeholder="если не задан на сервере" /></label>
+          <label className="f">api_hash<input type="password" autoComplete="off" value={f.apiHash} onChange={set('apiHash')} placeholder="если не задан на сервере" /></label></div>
+        <p className="small muted" style={{ margin: 0 }}>api_id и api_hash выдают бесплатно на my.telegram.org → API development tools (один раз для клуба). Входить лучше в отдельный рабочий аккаунт клуба, а не в личный.</p>
+        <div className="row"><button type="button" className="btn pri" disabled={busy || !f.phone.trim()} onClick={start}>Получить код</button><button type="button" className="btn" onClick={onCancel}>Отмена</button></div>
+      </>}
+      {step === 'code' && <>
+        <p className="small" style={{ margin: 0 }}>{hint}</p>
+        <label className="f">Код из Telegram<input value={f.code} onChange={set('code')} inputMode="numeric" autoComplete="one-time-code" autoFocus /></label>
+        <div className="row"><button type="button" className="btn pri" disabled={busy || !f.code.trim()} onClick={finish}>Войти</button><button type="button" className="btn" onClick={onCancel}>Отмена</button></div>
+      </>}
+      {step === 'password' && <>
+        <p className="small" style={{ margin: 0 }}>У аккаунта включена двухэтапная проверка. Введите облачный пароль Telegram.</p>
+        <label className="f">Облачный пароль<input type="password" value={f.password} onChange={set('password')} autoComplete="off" autoFocus /></label>
+        <div className="row"><button type="button" className="btn pri" disabled={busy || !f.password} onClick={finish}>Войти</button><button type="button" className="btn" onClick={onCancel}>Отмена</button></div>
+      </>}
+    </div>
+  );
+}
+
+function Channels({ clubId, canSimulate }: { clubId: string; canSimulate: boolean }) {
   const [list, setList] = useState<Channel[]>([]);
   const [form, setForm] = useState<{ kind: string; messenger: string; name: string; secret: string; settings: Record<string, string> } | null>(null);
   const [sim, setSim] = useState<{ id: string; messenger: string; name: string; phone: string; text: string } | null>(null);
+  const [relogin, setRelogin] = useState<string | null>(null);
   const [err, setErr] = useState('');
   const load = () => api<Channel[]>('GET', `/api/msg/channels?clubId=${clubId}`).then(setList).catch((e) => setErr(errText(e)));
   useEffect(() => { load(); }, [clubId]);
   const save = async (e: FormEvent) => {
     e.preventDefault(); setErr('');
+    if (form?.kind === 'tg_user') return; // у Telegram-аккаунта свой вход по коду
     try {
       const c = await api<{ id: string }>('POST', '/api/msg/channels', { clubId, ...form });
       const t = await api<{ ok: boolean; info: string }>('POST', `/api/msg/channels/${c.id}/test`);
@@ -219,12 +324,14 @@ function Channels({ clubId }: { clubId: string }) {
     <>
       {err && <div className="err">{err}</div>}
       <div className="card tbl">
-        <div className="row between"><h2>Каналы клуба</h2>{!form && <button className="btn pri sm" onClick={() => setForm({ kind: 'telegram_bot', messenger: 'telegram', name: '', secret: '', settings: {} })}>Подключить канал</button>}</div>
+        <div className="row between"><h2>Каналы клуба</h2>{!form && <button className="btn pri sm" onClick={() => setForm({ kind: 'tg_user', messenger: 'telegram', name: '', secret: '', settings: {} })}>Подключить канал</button>}</div>
         {!list.length ? <p className="muted">Каналов нет.</p> : (
           <table><thead><tr><th>Канал</th><th>Мессенджер</th><th>Подключение</th><th>Состояние</th><th /></tr></thead>
             <tbody>{list.map((c) => (
               <tr key={c.id}>
-                <td><b>{c.name}</b>{c.webhookUrl && !c.polling && c.kind !== 'test' && <div className="small">Адрес для входящих: <code>{c.webhookUrl}</code></div>}
+                <td><b>{c.name}</b>{c.webhookUrl && !c.polling && c.kind !== 'test' && c.kind !== 'tg_user' && <div className="small">Адрес для входящих: <code>{c.webhookUrl}</code></div>}
+                  {c.kind === 'wa_cloud' && c.webhookUrl && <div className="small">Маркер подтверждения (Verify token): <code>{c.webhookUrl.split('/').pop()}</code></div>}
+                  {c.kind === 'tg_user' && <div className="small">Аккаунт: {c.settings.account ?? '—'}</div>}
                   {c.messenger === 'telegram' && (c.kind === 'telegram_bot' || c.kind === 'test') && (
                     <label className="small row" style={{ gap: 6, marginTop: 4 }} title="Клиент делится номером и в боте видит абонемент и остаток, продлевает с оплатой онлайн и оформляет заморозку. Остальные сообщения, как и раньше, приходят в «Переписку»">
                       <input type="checkbox" checked={!!c.clientBot} onChange={() => botToggle(c)} style={{ width: 'auto' }} /> Клиентский бот: абонемент, продление, заморозка</label>)}</td>
@@ -232,11 +339,13 @@ function Channels({ clubId }: { clubId: string }) {
                 <td>{c.status !== 'active' ? <span className="chip">отключён</span> : c.lastError ? <span className="chip bad" title={c.lastError}>ошибка: {c.lastError}</span>
                   : <span className="chip ok">работает{c.lastOkAt ? `, ${dt(c.lastOkAt)}` : ''}</span>}</td>
                 <td className="r"><div className="row" style={{ justifyContent: 'flex-end' }}>
-                  {c.kind === 'test' && c.status === 'active' && <button className="btn sm" onClick={() => setSim({ id: c.id, messenger: c.messenger, name: 'Анна Тестова', phone: c.messenger === 'whatsapp' ? '+7 916 000-00-01' : '', text: 'Здравствуйте! Сколько стоит абонемент?' })}>Написать от клиента</button>}
+                  {canSimulate && c.kind === 'test' && c.status === 'active' && <button className="btn sm" onClick={() => setSim({ id: c.id, messenger: c.messenger, name: 'Анна Тестова', phone: c.messenger === 'whatsapp' ? '+7 916 000-00-01' : '', text: 'Здравствуйте! Сколько стоит абонемент?' })}>Написать от клиента</button>}
+                  {c.kind === 'tg_user' && <button className="btn sm" onClick={() => setRelogin(c.id)}>Войти заново</button>}
                   <button className="btn sm" onClick={() => test(c.id)}>Проверить</button>
                   <button className="btn sm" onClick={() => toggle(c)}>{c.status === 'active' ? 'Отключить' : 'Включить'}</button></div></td>
               </tr>))}</tbody></table>)}
       </div>
+      {relogin && <TgLogin clubId={clubId} channelId={relogin} onDone={() => { setRelogin(null); load(); }} onCancel={() => setRelogin(null)} />}
       {sim && (
         <form className="card" onSubmit={simulate} style={{ display: 'grid', gap: 8 }}>
           <h2>Сообщение от клиента (имитация)</h2>
@@ -256,11 +365,13 @@ function Channels({ clubId }: { clubId: string }) {
           </div>
           {info.messengers.length > 1 && <label className="f">Мессенджер<select className="f" value={form.messenger} onChange={(e) => setForm({ ...form, messenger: e.target.value })}>
             {info.messengers.map((m) => <option key={m} value={m}>{MESSENGER[m]}</option>)}</select></label>}
+          {form.kind === 'tg_user' ? <TgLogin clubId={clubId} onDone={() => { setForm(null); load(); }} onCancel={() => setForm(null)} /> : <>
           <label className="f">Название в системе<input value={form.name} placeholder={`${MESSENGER[form.messenger]} клуба`} onChange={(e) => setForm({ ...form, name: e.target.value })} /></label>
           {info.fields.map(([k, l]) => <label key={k} className="f">{l}<input value={form.settings[k] ?? ''} onChange={(e) => setForm({ ...form, settings: { ...form.settings, [k]: e.target.value } })} /></label>)}
           {info.secret && <label className="f">{info.secret}<input type="password" autoComplete="off" value={form.secret} onChange={(e) => setForm({ ...form, secret: e.target.value })} /></label>}
           <p className="small">Токены хранятся в зашифрованном виде и больше не показываются. Подробно по шагам: вкладка «Инструкция».</p>
           <div className="row"><button className="btn pri">Подключить и проверить</button><button type="button" className="btn" onClick={() => setForm(null)}>Отмена</button></div>
+          </>}
         </form>)}
     </>
   );
@@ -280,16 +391,17 @@ function Triggers({ clubId }: { clubId: string }) {
     <>
       <div className="note">Автосообщения уходят сами раз в день в выбранный час, только в рабочее время клуба. Одному клиенту — не больше лимита в неделю, повторно за тот же повод — никогда.
         Отписавшимся не уходят. Рекламные — только клиентам с согласием. По умолчанию всё выключено: включите нужные и посмотрите, кому уйдёт.</div>
+      <ToConfig view="rules" text="Включить автосообщение, за сколько дней и в котором часу — в «Настройки клуба → Сообщения клиентам», с утверждением. Здесь — шаблон и проверка." />
       {err && <div className="err">{err}</div>}
       <div className="card tbl"><table>
         <thead><tr><th>Включено</th><th>Повод</th><th>Дней</th><th>Шаблон</th><th>Час</th><th>Рекламное</th><th>За 30 дней</th><th /></tr></thead>
         <tbody>{list.map((t) => (
           <tr key={t.id}>
-            <td><input type="checkbox" style={{ width: 18, height: 18 }} checked={t.enabled} onChange={(e) => upd(t.id, { enabled: e.target.checked })} /></td>
+            <td><input type="checkbox" style={{ width: 18, height: 18 }} checked={t.enabled} disabled title="Включается в «Настройки клуба»" onChange={(e) => upd(t.id, { enabled: e.target.checked })} /></td>
             <td><b>{EVENT[t.event]?.[0]}</b>{EVENT[t.event]?.[1] && <div className="small">{EVENT[t.event][1]}</div>}</td>
-            <td>{EVENT[t.event]?.[1] ? <input type="number" min={0} max={365} style={{ width: 70 }} defaultValue={t.days} onBlur={(e) => Number(e.target.value) !== t.days && upd(t.id, { days: Number(e.target.value) })} /> : '—'}</td>
+            <td>{EVENT[t.event]?.[1] ? <input type="number" min={0} max={365} style={{ width: 70 }} defaultValue={t.days} disabled onBlur={(e) => Number(e.target.value) !== t.days && upd(t.id, { days: Number(e.target.value) })} /> : '—'}</td>
             <td><select className="f" value={t.templateId} onChange={(e) => upd(t.id, { templateId: e.target.value })}>{tpl.map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}</select></td>
-            <td><select className="f" value={t.sendHour} onChange={(e) => upd(t.id, { sendHour: Number(e.target.value) })}>{Array.from({ length: 24 }, (_, h) => <option key={h} value={h}>{h}:00</option>)}</select></td>
+            <td><select className="f" value={t.sendHour} disabled onChange={(e) => upd(t.id, { sendHour: Number(e.target.value) })}>{Array.from({ length: 24 }, (_, h) => <option key={h} value={h}>{h}:00</option>)}</select></td>
             <td><input type="checkbox" style={{ width: 18, height: 18 }} checked={t.marketing} onChange={(e) => upd(t.id, { marketing: e.target.checked })} /></td>
             <td className="num">{t.sent30}</td>
             <td className="r"><button className="btn sm" onClick={() => preview(t.id)}>Кому уйдёт сегодня</button></td>
@@ -352,11 +464,14 @@ function Settings({ clubId }: { clubId: string }) {
   const [err, setErr] = useState('');
   useEffect(() => { api<typeof s>('GET', `/api/msg/settings/${clubId}`).then(setS).catch((e) => setErr(errText(e))); }, [clubId]);
   if (!s) return <p className="muted">{err || 'Загрузка…'}</p>;
-  const save = async (e: FormEvent) => { e.preventDefault(); setErr(''); try { await api('PUT', `/api/msg/settings/${clubId}`, s); toast('Сохранено'); } catch (x) { setErr(errText(x)); } };
+  const ro = true; // меняется в «Настройки клуба» (с утверждением), здесь — просмотр
+  const save = async (e: FormEvent) => { e.preventDefault(); if (ro) return; setErr(''); try { await api('PUT', `/api/msg/settings/${clubId}`, s); toast('Сохранено'); } catch (x) { setErr(errText(x)); } };
   const hours = (from: number, to: number) => Array.from({ length: to - from + 1 }, (_, i) => from + i);
   return (
     <form className="card" onSubmit={save} style={{ display: 'grid', gap: 10, maxWidth: 640 }}>
       <h2>Рабочее время переписки</h2>
+      <ToConfig view="rules" text="Рабочее время, автоответ и лимит автосообщений меняются в «Настройки клуба → Сообщения клиентам», с утверждением и историей." />
+      <fieldset disabled={ro} style={{ border: 0, padding: 0, margin: 0, display: 'grid', gap: 10 }}>
       <div className="row">
         <label className="f">С<select className="f" value={s.workFrom} onChange={(e) => setS({ ...s, workFrom: Number(e.target.value) })}>{hours(0, 23).map((h) => <option key={h} value={h}>{h}:00</option>)}</select></label>
         <label className="f">До<select className="f" value={s.workTo} onChange={(e) => setS({ ...s, workTo: Number(e.target.value) })}>{hours(1, 24).map((h) => <option key={h} value={h}>{h}:00</option>)}</select></label>
@@ -364,9 +479,9 @@ function Settings({ clubId }: { clubId: string }) {
       <label className="row"><input type="checkbox" style={{ width: 18, height: 18 }} checked={s.autoreplyEnabled} onChange={(e) => setS({ ...s, autoreplyEnabled: e.target.checked })} />
         Автоответ на сообщения в нерабочее время (не чаще раза в 12 часов одному клиенту)</label>
       <label className="f">Текст автоответа<textarea rows={3} value={s.autoreplyText} onChange={(e) => setS({ ...s, autoreplyText: e.target.value })} /></label>
-      <label className="f">Не больше автосообщений одному клиенту в неделю<input type="number" min={0} max={14} value={s.maxAutoPerWeek} onChange={(e) => setS({ ...s, maxAutoPerWeek: Number(e.target.value) })} /></label>
+      <label className="f">Не больше автосообщений одному клиенту в неделю<input type="number" min={0} max={14} value={s.maxAutoPerWeek} onChange={(e) => setS({ ...s, maxAutoPerWeek: Number(e.target.value) })} /><span className="muted small">Считаются все рассылки клуба: автосообщения, правила, возврат клиентов, досрочное продление, опросы. Ответы бота и напоминания о записи не считаются.</span></label>
+      </fieldset>
       {err && <div className="err">{err}</div>}
-      <div><button className="btn pri">Сохранить</button></div>
     </form>
   );
 }

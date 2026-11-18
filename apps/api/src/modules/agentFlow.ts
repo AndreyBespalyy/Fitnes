@@ -29,7 +29,7 @@ function historyOf(f: Facts): FlowEvent[] {
   const ev: FlowEvent[] = [];
   for (const l of f.leads) ev.push({ at: l.at, kind: 'lead', title: `Обращение${l.source ? ` — ${l.source}` : ''}`,
     detail: [l.comment ? `«${cut(l.comment, 90)}»` : '', l.firstResponseMin != null ? `ответили через ${l.firstResponseMin} мин` : 'первого ответа не было'].filter(Boolean).join(', '),
-    bad: l.firstResponseMin == null || l.firstResponseMin > 15 });
+    bad: l.late ?? (l.firstResponseMin == null || l.firstResponseMin > 15) }); // норма ответа клуба (срок заявки), а не зашитые 15 мин
   for (const c of f.calls) ev.push({ at: c.at, kind: 'call', title: `${c.direction[0].toUpperCase()}${c.direction.slice(1)} звонок${c.manager ? ` · ${c.manager}` : ''}`,
     detail: cut([c.outcome ? `итог: ${c.outcome}` : '', c.essence ?? '', c.agreements ? `договорились: ${c.agreements}` : ''].filter(Boolean).join('; '), 160) || undefined,
     full: callFull(c) || undefined, bad: c.outcome === 'отказ', who: c.manager ? [c.manager] : undefined });
@@ -138,7 +138,7 @@ export function processFlow(p: Record<string, any>, steps: Record<string, any>[]
   const out: FlowStep[] = [];
   if (cur) out.push({ urgent: new Date(cur.due_at) < nowD, title: `Выполните шаг «${cut(cur.title, 70)}»`,
     detail: `${cur.assignee ? `Исполнитель — ${cur.assignee}. ` : ''}Срок — ${fmtDate(cur.due_at, tz)}${new Date(cur.due_at) < nowD ? ', уже прошёл' : ''}.`,
-    branches: [{ when: 'сделано', then: next ? `нажмите «Шаг выполнен» — помощник запустит «${cut(next.title, 60)}»` : 'нажмите «Шаг выполнен» — процесс завершится' },
+    branches: [{ when: 'сделано', then: next ? `нажмите «Шаг выполнен» — Дядя Витя запустит «${cut(next.title, 60)}»` : 'нажмите «Шаг выполнен» — процесс завершится' },
       { when: 'не получается в срок', then: 'напишите ответственному процесса и передайте шаг свободному сотруднику' }] });
   if (client) out.push(...situationFlow(client).steps.filter((x) => x.title !== 'Запишите итог').slice(0, 3));
   if (p.status === 'done') out.push({ title: 'Процесс завершён', detail: 'Проверьте, что клиент доволен, и при необходимости запустите следующий процесс.' });

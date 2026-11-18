@@ -91,7 +91,7 @@ async function sourceFor(db: Db, tenantId: string, kind: Kind) {
 }
 
 /** Подключения клуба настраивает администратор (источники) или управляющий своего клуба */
-const manager = (req: FastifyRequest) => { const ctx = requireCtx(req); if (!can(ctx, P.sourcesManage) && !can(ctx, P.configManage)) throw forbidden(); return ctx; };
+const manager = (req: FastifyRequest) => { const ctx = requireCtx(req); if (!can(ctx, P.sourcesManage) && !can(ctx, P.configManage) && !can(ctx, P.integrationsManage)) throw forbidden(); return ctx; };
 const newToken = () => `li_${randomBytes(24).toString('base64url')}`;
 const view = (r: Record<string, unknown>) => {
   const s = (r.settings ?? {}) as Record<string, unknown>;
@@ -172,7 +172,9 @@ export function leadIntakeRoutes(app: FastifyInstance, pool: pg.Pool, opts: { fe
       const list = (await db.query(`${LIST} where ($1::uuid is null or i.club_id = $1) order by i.created_at`, [q.clubId && q.clubId !== 'all' ? q.clubId : null])).rows.map(view);
       const log = (await db.query(`select l.at, l.status, l.message, l.lead_id as "leadId", i.name as intake, p.full_name as person, p.id as "personId"
         from lead_intake_log l join lead_intakes i on i.id = l.intake_id left join leads ld on ld.id = l.lead_id left join persons p on p.id = ld.person_id
-        where ($1::uuid is null or l.club_id = $1) order by l.at desc limit 50`, [q.clubId && q.clubId !== 'all' ? q.clubId : null])).rows;
+        where ($1::uuid is null or l.club_id = $1) order by l.at desc limit 50`, [q.clubId && q.clubId !== 'all' ? q.clubId : null])).rows
+        // Без права на клиентов — журнал без имён и текста заявки (в ошибке бывают телефон и имя из формы)
+        .map((r) => (can(ctx, P.personsView) ? r : { ...r, person: null, personId: null, message: r.status === 'ok' ? null : r.message?.replace(/\+?\d[\d\s()-]{8,}\d/g, '***') ?? null }));
       const sources = (await db.query(`select id, name from lead_sources where is_active order by name`)).rows;
       return { list, log, sources, kinds: KINDS.map((k) => ({ kind: k, name: NAMES[k] })) };
     });

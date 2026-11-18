@@ -19,6 +19,7 @@ import { seedDemoCalls } from './demoCalls.ts';
 const STAFF: [string, string, string, 'c1' | 'c2' | '*'][] = [
   ['a.bespalyy', 'Андрей Беспалый', 'owner', '*'],
   ['i.kotova', 'Ирина Котова', 'admin', '*'],
+  ['t.sokolov', 'Тимофей Соколов', 'techadmin', '*'],
   ['o.smirnov', 'Олег Смирнов', 'gm', 'c1'],
   ['o.astafeva', 'Ольга Астафьева', 'rop', 'c1'],
   ['m.volkova', 'Мария Волкова', 'manager', 'c1'],

@@ -109,7 +109,7 @@ export function BriefText({ text }: { text: string }) {
 export function SituationButton({ type, id, small = true, label = 'Коротко о ситуации' }: { type: 'task' | 'opportunity' | 'process' | 'person'; id: string; small?: boolean; label?: string }) {
   const [open, setOpen] = useState(false);
   return (<>
-    <button className={`btn ${small ? 'sm' : ''} brief-btn`} onClick={(e) => { e.stopPropagation(); setOpen(true); }} title="ИИ-помощник соберёт всё по этой ситуации: задачи, звонки, переписку, обсуждения">
+    <button className={`btn ${small ? 'sm' : ''} brief-btn`} onClick={(e) => { e.stopPropagation(); setOpen(true); }} title="Дядя Витя соберёт всё по этой ситуации: задачи, звонки, переписку, обсуждения">
       <span aria-hidden="true">✦</span> {label}</button>
     {open && <SituationDialog type={type} id={id} onClose={() => setOpen(false)} />}
   </>);
@@ -133,13 +133,13 @@ export function SituationDialog({ type, id, onClose }: { type: 'task' | 'opportu
       <div className="card modal" style={{ display: 'grid', gap: 10, maxWidth: 720 }}>
         <div className="row between"><h2 style={{ margin: 0 }}>✦ Коротко о ситуации</h2><button className="btn sm" onClick={onClose} aria-label="Закрыть">×</button></div>
         {err && <div className="err">{err}</div>}
-        {!b && !err && <p className="muted">ИИ-помощник собирает задачи, звонки, переписку и обсуждения…</p>}
+        {!b && !err && <p className="muted">Дядя Витя собирает задачи, звонки, переписку и обсуждения…</p>}
         {b?.flow && <div className="tabs" role="group" aria-label="Вид"><button aria-pressed={view === 'flow'} onClick={() => setView('flow')}>Схемой</button><button aria-pressed={view === 'text'} onClick={() => setView('text')}>Текстом</button></div>}
         {b && (b.flow && view === 'flow' ? <FlowView flow={b.flow} onGo={onClose} /> : <BriefText text={b.text} />)}
         {b?.note && <div className="small muted">{b.note}</div>}
         {b && s && (
           <div className="small muted">
-            {b.engine === 'yandexgpt' ? 'Составил ИИ-помощник (YandexGPT)' : 'Собрано по данным CRM без нейросети'} · {dt(b.createdAt)} ·
+            {b.engine === 'yandexgpt' ? 'Составил Дядя Витя (YandexGPT)' : 'Собрано по данным CRM без нейросети'} · {dt(b.createdAt)} ·
             учтено: задач {s.tasks}, звонков {s.calls}, сообщений клиента {s.clientMessages}, обсуждений в команде {s.team}{s.observations ? `, наблюдений ${s.observations}` : ''}
           </div>)}
         <div className="row"><button className="btn sm" disabled={busy} onClick={() => load(true)}>{busy ? 'Обновляю…' : 'Обновить'}</button>
@@ -150,29 +150,33 @@ export function SituationDialog({ type, id, onClose }: { type: 'task' | 'opportu
 
 /* ---------- Настройки ИИ-помощника клуба: лестница напоминаний и авто-передача заявок ---------- */
 type AgentSets = { enabled: boolean; taskRopMinutes: number; taskGmMinutes: number; taskOwnerMinutes: number; replyWaitMinutes: number;
-  leadReassignMinutes: number; quietFrom: number; quietTo: number; morningHints: boolean; morningHour: number; canEdit: boolean };
+  leadReassignMinutes: number; quietFrom: number; quietTo: number; morningHints: boolean; morningHour: number; canEdit: boolean; scope: 'all' | 'sales' | null };
 export function AgentSettingsCard({ clubId }: { clubId: string }) {
   const [f, setF] = useState<AgentSets | null>(null);
   const [err, setErr] = useState('');
   useEffect(() => { setF(null); api<AgentSets>('GET', `/api/agent/settings?clubId=${clubId}`).then(setF).catch((x) => setErr(errText(x))); }, [clubId]);
   if (!f) return err ? <div className="err">{err}</div> : null;
   const ro = !f.canEdit;
-  const num = (k: keyof AgentSets, label: string) => <label className="f">{label}<input type="number" disabled={ro} value={f[k] as number} onChange={(e) => setF({ ...f, [k]: Number(e.target.value) })} /></label>;
-  const save = async () => { setErr(''); try { const { canEdit: _c, ...b } = f; await api('PUT', '/api/agent/settings', { clubId, ...b }); toast('Сохранено'); } catch (x) { setErr(errText(x)); } };
+  // РОП меняет поля своего отдела, остальное — управляющий и собственник (повторная проверка CRM 18.11.2026, п. 10)
+  const SALES: (keyof AgentSets)[] = ['taskRopMinutes', 'replyWaitMinutes'];
+  const off = (k: keyof AgentSets) => ro || (f.scope === 'sales' && !SALES.includes(k));
+  const num = (k: keyof AgentSets, label: string) => <label className="f">{label}<input type="number" disabled={off(k)} value={f[k] as number} onChange={(e) => setF({ ...f, [k]: Number(e.target.value) })} /></label>;
+  const save = async () => { setErr(''); try { const { canEdit: _c, leadReassignMinutes: _l, ...b } = f; await api('PUT', '/api/agent/settings', { clubId, ...b }); toast('Сохранено'); } catch (x) { setErr(errText(x)); } };
   return (
     <div className="card" style={{ display: 'grid', gap: 10, maxWidth: 640 }}>
-      <h2 style={{ margin: 0 }}>✦ ИИ-помощник: напоминания</h2>
-      <p className="small muted" style={{ margin: 0 }}>Помощник присылает карточки с кнопками в колокольчик и на телефон. Если исполнитель не реагирует, сигнал поднимается выше по лестнице. Клиентам помощник сам не пишет.</p>
+      <h2 style={{ margin: 0 }}>✦ Дядя Витя: напоминания</h2>
+      <p className="small muted" style={{ margin: 0 }}>Дядя Витя присылает карточки с кнопками в колокольчик и на телефон. Если исполнитель не реагирует, сигнал поднимается выше по лестнице. Клиентам Дядя Витя сам не пишет.</p>
       {err && <div className="err">{err}</div>}
-      {ro && <p className="small muted" style={{ margin: 0 }}>Менять может управляющий или собственник.</p>}
-      <label className="row" style={{ gap: 8 }}><input type="checkbox" style={{ width: 'auto' }} disabled={ro} checked={f.enabled} onChange={(e) => setF({ ...f, enabled: e.target.checked })} />Напоминания и эскалация включены</label>
+      {ro && <p className="small muted" style={{ margin: 0 }}>Менять может управляющий, собственник или РОП.</p>}
+      {f.scope === 'sales' && <p className="small muted" style={{ margin: 0 }}>Вы меняете сроки своего отдела. Сигнал управляющему, тишину и утренние подсказки меняет управляющий.</p>}
+      <label className="row" style={{ gap: 8 }}><input type="checkbox" style={{ width: 'auto' }} disabled={off('enabled')} checked={f.enabled} onChange={(e) => setF({ ...f, enabled: e.target.checked })} />Напоминания и эскалация включены</label>
       <div className="grid2">
-        {num('taskRopMinutes', 'Просроченная задача → РОП, через мин')}{num('taskGmMinutes', '→ управляющий, через мин')}
-        {num('taskOwnerMinutes', '→ собственник, через мин')}{num('replyWaitMinutes', 'Клиент ждёт ответа в переписке, мин')}
-        {num('leadReassignMinutes', 'Передать заявку другому менеджеру, если не взяли за мин (0 — не передавать)')}
+        {num('taskRopMinutes', 'Просроченная задача → руководителю (продажи — РОПу, остальные — управляющему), через мин')}{num('taskGmMinutes', 'Задача продаж → управляющему, через мин')}
+        {num('replyWaitMinutes', 'Клиент ждёт ответа в переписке, мин')}
+        <p className="small muted" style={{ margin: 0, alignSelf: 'end' }}>Норма ответа на заявку и «передать другому» — в «Отдел продаж → Настройки → Ответ на заявку».</p>
         <div className="grid2">{num('quietFrom', 'Тишина с, ч')}{num('quietTo', 'до, ч')}</div>
       </div>
-      <label className="row" style={{ gap: 8 }}><input type="checkbox" style={{ width: 'auto' }} disabled={ro} checked={f.morningHints} onChange={(e) => setF({ ...f, morningHints: e.target.checked })} />Утром присылать каждому сотруднику «3 подсказки на сегодня»</label>
+      <label className="row" style={{ gap: 8 }}><input type="checkbox" style={{ width: 'auto' }} disabled={off('morningHints')} checked={f.morningHints} onChange={(e) => setF({ ...f, morningHints: e.target.checked })} />Утром присылать каждому сотруднику «3 подсказки на сегодня»</label>
       {f.morningHints && <div className="grid2">{num('morningHour', 'Во сколько присылать, ч (5–12, время клуба)')}</div>}
       {!ro && <div><button className="btn pri" onClick={save}>Сохранить</button></div>}
     </div>

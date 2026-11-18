@@ -356,9 +356,11 @@ async function employeeSection(db: Db, clubs: Club[], per: Period, who: Who): Pr
     const sold = (await salesFact(db, ids, per.from, per.to)).filter((x) => x.userId === who.id && !x.recurring).reduce((a, x) => a + x.kop, 0);
     lines.push(`Продал на **${rub(sold)}**, продаж: ${k.sales ?? 0}. Звонков: ${k.calls ?? 0}, сообщений клиентам: ${k.messages ?? 0}, встреч назначено/пришли: ${k.meetings_set ?? 0}/${k.meetings_done ?? 0}, отказов: ${k.refusals ?? 0}.`);
     if (k.first_response != null) lines.push(`Отвечает на новую заявку в среднем за ${k.first_response} мин.`);
-    if ((k.first_response ?? 0) > 15) {
-      tips.push(`${who.label} отвечает на заявки дольше 15 минут — за это время клиент уходит к конкурентам. Агент уже передаёт такие заявки другому, но стоит поговорить.`);
-      buttons.push({ label: `Чат: ${lastName(who.label)}`, chat: { userId: who.id, text: `Ответ на новую заявку у вас в среднем ${k.first_response} мин, норма — 5. Что мешает брать заявки сразу? Включены ли уведомления о заявках на телефоне?` } });
+    // Норма — срок ответа на заявку клуба (одна на клуб, повторная проверка CRM 18.11.2026, п. 3), а не зашитые 15 и 5 минут
+    const norm = Number((await db.query('select max(first_response_minutes) as m from clubs where id = any($1)', [ids])).rows[0]?.m ?? 5);
+    if ((k.first_response ?? 0) > norm) {
+      tips.push(`${who.label} отвечает на заявки дольше нормы клуба (${norm} мин) — за это время клиент уходит к конкурентам. Агент уже передаёт такие заявки другому, но стоит поговорить.`);
+      buttons.push({ label: `Чат: ${lastName(who.label)}`, chat: { userId: who.id, text: `Ответ на новую заявку у вас в среднем ${k.first_response} мин, норма — ${norm}. Что мешает брать заявки сразу? Включены ли уведомления о заявках на телефоне?` } });
     }
     if ((k.meetings_set ?? 0) > 0 && (k.meetings_done ?? 0) / (k.meetings_set ?? 1) < 0.5) {
       tips.push(`${who.label}: на встречи приходит меньше половины. Подтверждение встречи накануне и в день визита по скрипту обычно поднимает явку.`);

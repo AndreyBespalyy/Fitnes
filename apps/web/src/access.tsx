@@ -3,6 +3,7 @@
 import { useEffect, useState, type FormEvent } from 'react';
 import qrcode from 'qrcode-generator';
 import { api, can, type Club, type Me, type Person, navParams } from './api.ts';
+import { ownerOnly } from './roleMenu.ts';
 import { dt, errText, toast } from './ui.ts';
 import { Md } from './fiscal.tsx';
 import guide from '../../../docs/03_Инструкции/Турникеты_и_шлюз.md?raw';
@@ -26,8 +27,9 @@ const mins = (m: number | null) => (m == null ? '—' : m >= 60 ? `${Math.floor(
 export function AccessPage({ me, clubs, clubId, openPerson }: { me: Me; clubs: Club[]; clubId: string; openPerson: (id: string) => void }) {
   const [club, setClub] = useState(clubId !== 'all' ? clubId : clubs[0]?.id ?? '');
   useEffect(() => { if (clubId !== 'all') setClub(clubId); }, [clubId]);
+  // Собственнику — только настройка и отчёт, без экрана ресепшн (у него меню без операционки)
   const views: [string, string, boolean][] = [
-    ['desk', 'Ресепшн', can(me, 'acs.work')], ['report', 'Отчёт', can(me, 'acs.manage')], ['setup', 'Настройка', can(me, 'acs.manage')], ['guide', 'Инструкция', true]];
+    ['desk', 'Ресепшн', can(me, 'acs.work') && !ownerOnly(me)], ['report', 'Отчёт', can(me, 'acs.manage')], ['setup', 'Настройка', can(me, 'acs.manage')], ['guide', 'Инструкция', true]];
   const allowed = views.filter((v) => v[2]);
   const [view, setView] = useState(() => { const v = navParams('access').view; return allowed.some((a) => a[0] === v) ? v : allowed[0][0]; });
   if (!club) return <p className="muted">Клубов нет.</p>;
@@ -272,40 +274,43 @@ function Setup({ clubId }: { clubId: string }) {
 }
 
 /* ---------------- СКУД PocketKey ---------------- */
-type PkConn = { id: string; name: string; status: string; lastSeenAt: string | null; settings: { visitBy: 'event' | 'check'; allowedIps: string[] };
-  devices: { id: string; name: string; direction: string; externalId: string | null; isActive: boolean }[];
-  journal: { at: string; op: string; status: string; correlationId: string | null; device: string | null; codeTail: string | null; message: string | null; ms: number | null }[];
+type PkDev = { id: string; name: string; direction: string; externalId: string | null; isActive: boolean; ip: string | null; port: number | null; type: string; biometrics: boolean };
+type PkConn = { id: string; name: string; status: string; lastSeenAt: string | null; settings: { visitBy: 'event' | 'check'; allowedIps: string[]; lockerExit: 'allow' | 'deny' };
+  devices: PkDev[];
+  journal: { at: string; op: string; status: string; device: string | null; codeTail: string | null; message: string | null; ms: number | null }[];
   stats: { checks: number; events: number; errors: number } };
-type PkInfo = { connections: PkConn[]; unsupported: string[] };
+type PkInfo = { connections: PkConn[]; unsupported: string[]; ports: Record<string, number> };
 type PkKey = { id: string; token: string; urls: Record<string, string> };
-const PK_OP: Record<string, string> = { check: 'Проверка', event: 'Проход', identify: 'Опознание', health: 'Связь', devices: 'Устройства', sync: 'Выгрузка людей', auth: 'Вход' };
-const PK_URL: [string, string][] = [['check-access', 'Проверка права прохода'], ['event', 'Событие прохода'], ['identify', 'Опознание по карте'], ['devices', 'Список устройств'], ['health', 'Проверка связи']];
-const PK_ST: Record<string, [string, string]> = { allow: ['ok', 'пропуск'], deny: ['bad', 'отказ'], ok: ['ok', 'ок'], duplicate: ['', 'повтор'], error: ['bad', 'ошибка'], unsupported: ['', 'недоступно'] };
+const PK_OP: Record<string, string> = { check: 'Проверка', event: 'Проход', devices: 'Список терминалов', health: 'Связь', auth: 'Вход' };
+const PK_TYPE: Record<string, string> = { pocket: 'Pocketkey', jsp: 'Pocketface (лицо)' };
+const PK_ST: Record<string, [string, string]> = { allow: ['ok', 'пропуск'], deny: ['bad', 'отказ'], ok: ['ok', 'ок'], duplicate: ['', 'повтор'], error: ['bad', 'ошибка'] };
+const PK_NEW = { name: '', direction: 'in', ip: '', type: 'pocket', biometrics: false };
 
 function PocketKeySetup({ clubId }: { clubId: string }) {
   const [info, setInfo] = useState<PkInfo | null>(null);
   const [key, setKey] = useState<PkKey | null>(null);
   const [err, setErr] = useState('');
   const [ips, setIps] = useState<Record<string, string>>({});
-  const [tst, setTst] = useState({ op: 'check-access', device: '', code: '', direction: 'in' });
-  const [answer, setAnswer] = useState<string>('');
+  const [dev, setDev] = useState(PK_NEW);
+  const [tst, setTst] = useState({ op: 'checkaccess', device: '', code: '', cells: '' });
+  const [answer, setAnswer] = useState('');
   const load = () => api<PkInfo>('GET', `/api/acs/pocketkey?clubId=${clubId}`).then((r) => { setInfo(r); setIps(Object.fromEntries(r.connections.map((c) => [c.id, c.settings.allowedIps.join(', ')]))); }).catch((e) => setErr(errText(e)));
   useEffect(() => { load(); }, [clubId]);
   const act = async (fn: () => Promise<unknown>, ok: string) => { setErr(''); try { await fn(); toast(ok); load(); } catch (e) { setErr(errText(e)); } };
   const copy = (t: string) => { navigator.clipboard?.writeText(t).then(() => toast('Скопировано'), () => {}); };
+  const patchDev = (c: PkConn, d: PkDev, body: Record<string, unknown>) => act(() => api('PATCH', `/api/acs/pocketkey/${c.id}/devices/${d.id}`, body), 'Сохранено');
   if (!info) return err ? <p className="err">{err}</p> : null;
   return (
     <div className="card" style={{ display: 'grid', gap: 10 }}>
       <div className="row between"><b>СКУД PocketKey</b>
         {info.connections.length === 0 && <button className="btn sm" onClick={() => act(async () => setKey(await api('POST', '/api/acs/pocketkey', { clubId })), 'Подключение создано')}>Подключить PocketKey</button>}</div>
-      <span className="small">PocketKey сам спрашивает CRM, пускать ли человека, и сообщает о проходе. Решение принимает CRM по абонементу, оплате и часам, турникетами управляет PocketKey.
-        Адреса ниже передайте специалисту PocketKey: он впишет их в свой сервер.</span>
+      <span className="small">Сервис PocketKey в клубе сам спрашивает CRM, пускать ли человека по браслету, и сообщает о проходе. Решение принимает CRM (абонемент, оплата, часы),
+        на табло считывателя выводится короткая причина. Список терминалов PocketKey тоже берёт отсюда.</span>
       {err && <p className="err">{err}</p>}
       {key && <div className="note" style={{ display: 'grid', gap: 6 }}>
-        <b>Скопируйте сейчас: ключ входит в адреса, больше мы его не покажем</b>
-        {PK_URL.map(([k, t]) => <div key={k} style={{ display: 'grid', gap: 2 }}><span className="small">{t}</span>
-          <span className="row"><span className="secret" style={{ wordBreak: 'break-all' }}>{key.urls[k]}</span><button className="btn sm" onClick={() => copy(key.urls[k])}>Копировать</button></span></div>)}
-        <span className="small">Передавайте адреса только специалисту PocketKey, по почте или в кабинете поддержки. Если адрес попал не туда, нажмите «Новый ключ».</span>
+        <b>Адрес сервиса для PocketKey. Скопируйте сейчас: в нём ключ, больше мы его не покажем</b>
+        <span className="row"><span className="secret" style={{ wordBreak: 'break-all' }}>{key.urls.service}</span><button className="btn sm" onClick={() => copy(key.urls.service)}>Копировать</button></span>
+        <span className="small">Передайте его специалисту PocketKey: к нему сервис сам добавит /devices, /checkaccess и /event. Если адрес попал не туда — «Новый ключ и адрес», старый перестанет работать.</span>
         <div><button className="btn sm" onClick={() => setKey(null)}>Скопировал</button></div></div>}
       {info.connections.map((c) => <div key={c.id} style={{ display: 'grid', gap: 10 }}>
         <div className="row">
@@ -313,48 +318,67 @@ function PocketKeySetup({ clubId }: { clubId: string }) {
           <span className="small">За сутки: проверок {c.stats.checks}, проходов {c.stats.events}, ошибок {c.stats.errors}</span>
         </div>
         <div className="row">
-          <button className="btn sm" onClick={() => act(async () => setKey(await api('POST', `/api/acs/pocketkey/${c.id}/key`)), 'Выпущен новый ключ, старые адреса больше не действуют')}>Новый ключ и адреса</button>
+          <button className="btn sm" onClick={() => act(async () => setKey(await api('POST', `/api/acs/pocketkey/${c.id}/key`)), 'Выпущен новый ключ, старый адрес больше не действует')}>Новый ключ и адрес</button>
           <button className="btn sm" onClick={() => act(() => api('PATCH', `/api/acs/pocketkey/${c.id}`, { status: c.status === 'active' ? 'disabled' : 'active' }), 'Сохранено')}>{c.status === 'active' ? 'Отключить' : 'Включить'}</button>
         </div>
         <label className="row small">Посещение считать
           <select value={c.settings.visitBy} onChange={(e) => act(() => api('PATCH', `/api/acs/pocketkey/${c.id}`, { visitBy: e.target.value }), 'Сохранено')} style={{ width: 'auto' }}>
-            <option value="event">по событию прохода от PocketKey (надёжнее)</option>
-            <option value="check">сразу по разрешению (если PocketKey не присылает проходы)</option>
+            <option value="event">когда турникет провернулся (надёжнее)</option>
+            <option value="check">сразу по разрешению</option>
+          </select></label>
+        <label className="row small">Если на выходе у клиента закрыт шкафчик
+          <select value={c.settings.lockerExit} onChange={(e) => act(() => api('PATCH', `/api/acs/pocketkey/${c.id}`, { lockerExit: e.target.value }), 'Сохранено')} style={{ width: 'auto' }}>
+            <option value="allow">выпускать (шкафчик арендован или не важно)</option>
+            <option value="deny">не выпускать: «Сдайте ключ на ресепшн»</option>
           </select></label>
         <form className="row small" onSubmit={(e) => { e.preventDefault(); act(() => api('PATCH', `/api/acs/pocketkey/${c.id}`, { allowedIps: ips[c.id] ?? '' }), 'Сохранено'); }}>
           Принимать запросы только с адресов <input placeholder="пусто — с любых" value={ips[c.id] ?? ''} onChange={(e) => setIps({ ...ips, [c.id]: e.target.value })} style={{ flex: '1 1 180px' }} />
           <button className="btn sm">Сохранить</button></form>
 
-        <b className="small">Устройства PocketKey</b>
-        {c.devices.length === 0 ? <span className="small muted">Появятся сами при первом запросе от PocketKey.</span>
-          : <div className="tbl"><table><thead><tr><th>Номер в PocketKey</th><th>Название в CRM</th><th>Направление</th><th /></tr></thead>
-            <tbody>{c.devices.map((d) => <tr key={d.id} className={d.isActive ? '' : 'muted'}>
-              <td className="num">{d.externalId ?? '—'}</td>
-              <td><input defaultValue={d.name} aria-label="Название" onBlur={(e) => e.target.value.trim() && e.target.value !== d.name && act(() => api('PATCH', `/api/acs/pocketkey/${c.id}/devices/${d.id}`, { name: e.target.value }), 'Сохранено')} /></td>
-              <td><select aria-label="Направление" value={d.direction} onChange={(e) => act(() => api('PATCH', `/api/acs/pocketkey/${c.id}/devices/${d.id}`, { direction: e.target.value }), 'Сохранено')} style={{ width: 'auto' }}>
-                {Object.entries(DIR).map(([k, t]) => <option key={k} value={k}>{t}</option>)}</select></td>
-              <td><button className="btn sm" onClick={() => act(() => api('PATCH', `/api/acs/pocketkey/${c.id}/devices/${d.id}`, { isActive: !d.isActive }), 'Сохранено')}>{d.isActive ? 'Выключить' : 'Включить'}</button></td></tr>)}</tbody></table></div>}
+        <b className="small">Терминалы</b>
+        <span className="small muted">Номер терминала PocketKey передаёт в каждом запросе. Адрес и порт — терминала в сети клуба: их подскажет специалист PocketKey. Без адреса терминал не попадёт в список для PocketKey.</span>
+        {c.devices.length > 0 && <div className="tbl"><table><thead><tr><th>№</th><th>Название</th><th>Проход</th><th>Вид</th><th>Адрес в сети</th><th>Порт</th><th>Лицо</th><th /></tr></thead>
+          <tbody>{c.devices.map((d) => <tr key={d.id} className={d.isActive ? '' : 'muted'}>
+            <td className="num">{d.externalId ?? '—'}</td>
+            <td><input defaultValue={d.name} aria-label="Название" onBlur={(e) => e.target.value.trim() && e.target.value !== d.name && patchDev(c, d, { name: e.target.value })} /></td>
+            <td><select aria-label="Проход" value={d.direction === 'out' ? 'out' : 'in'} onChange={(e) => patchDev(c, d, { direction: e.target.value })} style={{ width: 'auto' }}>
+              <option value="in">вход</option><option value="out">выход</option></select></td>
+            <td><select aria-label="Вид" value={d.type} onChange={(e) => patchDev(c, d, { type: e.target.value })} style={{ width: 'auto' }}>
+              {Object.entries(PK_TYPE).map(([k, t]) => <option key={k} value={k}>{t}</option>)}</select></td>
+            <td><input defaultValue={d.ip ?? ''} placeholder="192.168.2.210" aria-label="Адрес" style={{ width: 130 }} onBlur={(e) => e.target.value !== (d.ip ?? '') && patchDev(c, d, { ip: e.target.value || null })} /></td>
+            <td><input defaultValue={d.port ?? ''} placeholder={String(info.ports[d.type] ?? '')} aria-label="Порт" style={{ width: 70 }} onBlur={(e) => e.target.value !== String(d.port ?? '') && patchDev(c, d, { port: e.target.value ? Number(e.target.value) : null })} /></td>
+            <td><input type="checkbox" aria-label="Распознавание лиц" checked={d.biometrics} onChange={(e) => patchDev(c, d, { biometrics: e.target.checked })} /></td>
+            <td><button className="btn sm" onClick={() => patchDev(c, d, { isActive: !d.isActive })}>{d.isActive ? 'Выключить' : 'Включить'}</button></td></tr>)}</tbody></table></div>}
+        <form className="row" onSubmit={(e) => { e.preventDefault(); act(async () => { await api('POST', `/api/acs/pocketkey/${c.id}/devices`, { ...dev, ip: dev.ip || null }); setDev(PK_NEW); }, 'Терминал добавлен'); }}>
+          <input placeholder="Название, например «Вход 1»" value={dev.name} onChange={(e) => setDev({ ...dev, name: e.target.value })} style={{ flex: '1 1 160px' }} />
+          <select aria-label="Проход" value={dev.direction} onChange={(e) => setDev({ ...dev, direction: e.target.value })} style={{ width: 'auto' }}><option value="in">вход</option><option value="out">выход</option></select>
+          <select aria-label="Вид" value={dev.type} onChange={(e) => setDev({ ...dev, type: e.target.value })} style={{ width: 'auto' }}>{Object.entries(PK_TYPE).map(([k, t]) => <option key={k} value={k}>{t}</option>)}</select>
+          <input placeholder="Адрес в сети" value={dev.ip} onChange={(e) => setDev({ ...dev, ip: e.target.value })} style={{ width: 130 }} />
+          <label className="row small"><input type="checkbox" checked={dev.biometrics} onChange={(e) => setDev({ ...dev, biometrics: e.target.checked })} /> лицо</label>
+          <button className="btn">Добавить терминал</button></form>
 
         <b className="small">Проверить без оборудования</b>
-        <form className="row" onSubmit={(e) => { e.preventDefault(); setErr(''); api<{ response: unknown }>('POST', `/api/acs/pocketkey/${c.id}/test`, { op: tst.op === 'event' ? 'event' : tst.op === 'identify' ? 'identify' : 'check', device: tst.device, code: tst.code, direction: tst.direction })
+        <form className="row" onSubmit={(e) => { e.preventDefault(); setErr(''); api<{ response: unknown }>('POST', `/api/acs/pocketkey/${c.id}/test`, { op: tst.op, device: tst.device, code: tst.code, cells: tst.cells })
           .then((r) => { setAnswer(JSON.stringify(r.response, null, 2)); load(); }).catch((x) => setErr(errText(x))); }}>
           <select aria-label="Запрос" value={tst.op} onChange={(e) => setTst({ ...tst, op: e.target.value })} style={{ width: 'auto' }}>
-            <option value="check-access">Проверка прохода</option><option value="event">Проход состоялся</option><option value="identify">Опознание</option></select>
-          <select aria-label="Устройство" value={tst.device} onChange={(e) => setTst({ ...tst, device: e.target.value })} style={{ width: 'auto' }}>
-            <option value="">Тестовое устройство</option>{c.devices.filter((d) => d.externalId).map((d) => <option key={d.id} value={d.externalId!}>{d.name}</option>)}</select>
-          <input placeholder="Номер карты" value={tst.code} onChange={(e) => setTst({ ...tst, code: e.target.value })} style={{ width: 140 }} />
-          <select aria-label="Направление" value={tst.direction} onChange={(e) => setTst({ ...tst, direction: e.target.value })} style={{ width: 'auto' }}><option value="in">вход</option><option value="out">выход</option></select>
+            <option value="checkaccess">Приложили браслет</option><option value="event">Турникет провернулся</option><option value="identify">Чей браслет</option><option value="devices">Список терминалов</option></select>
+          <select aria-label="Терминал" value={tst.device} onChange={(e) => setTst({ ...tst, device: e.target.value })} style={{ width: 'auto' }}>
+            <option value="">Терминал 1</option>{c.devices.filter((d) => d.externalId && d.externalId !== '1').map((d) => <option key={d.id} value={d.externalId!}>{d.externalId}. {d.name}</option>)}</select>
+          <input placeholder="Номер браслета" value={tst.code} onChange={(e) => setTst({ ...tst, code: e.target.value })} style={{ width: 140 }} />
+          <input placeholder="Шкафчики, напр. 1:12" value={tst.cells} onChange={(e) => setTst({ ...tst, cells: e.target.value })} style={{ width: 150 }} />
           <button className="btn">Отправить</button></form>
         {answer && <pre className="small" style={{ whiteSpace: 'pre-wrap', margin: 0 }}>{answer}</pre>}
 
         <b className="small">Журнал обмена (последние 50)</b>
         {c.journal.length === 0 ? <span className="small muted">Запросов ещё не было.</span>
-          : <div className="tbl"><table><thead><tr><th>Время</th><th>Запрос</th><th>Итог</th><th>Устройство</th><th>Карта</th><th>Подробности</th></tr></thead>
+          : <div className="tbl"><table><thead><tr><th>Время</th><th>Запрос</th><th>Итог</th><th>Терминал</th><th>Браслет</th><th>Подробности</th></tr></thead>
             <tbody>{c.journal.map((j, i) => <tr key={i}><td className="small">{dt(j.at)}</td><td>{PK_OP[j.op] ?? j.op}</td>
               <td><span className={`chip ${PK_ST[j.status]?.[0] ?? ''}`}>{PK_ST[j.status]?.[1] ?? j.status}</span></td>
               <td className="small">{j.device ?? '—'}</td><td className="num">{j.codeTail ?? '—'}</td><td className="small">{j.message ?? ''}{j.ms != null ? ` (${j.ms} мс)` : ''}</td></tr>)}</tbody></table></div>}
       </div>)}
-      <div className="small muted">Пока недоступно, ждём документацию PocketKey: {info.unsupported.join('; ')}.</div>
+      <div className="row small">PocketOffice (учёт рабочего времени): <a className="btn sm" href={`/api/acs/pocketoffice/staff.xml?clubId=${clubId}`} download>Скачать сотрудников в XML</a>
+        <span className="muted">Файл загружается в PocketOffice через «Импорт XML». Уволенные отмечены как «в архиве».</span></div>
+      <div className="small muted">В протоколе PocketKey нет, поэтому в CRM не делаем: {info.unsupported.join('; ')}.</div>
     </div>
   );
 }

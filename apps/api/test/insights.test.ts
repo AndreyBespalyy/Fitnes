@@ -86,25 +86,33 @@ test('AT31: невыполненная рекомендация видна РО�
   assert.ok(mine.length >= 1 && mine.every((x: { userId: string }) => x.userId === ids['m.volkova']));
 });
 
-test('AT32: стандарт продаж поменяли — старые оценки звонков остались по своей версии', async () => {
+test('AT32: один стандарт звонка — скрипт; поменяли скрипт или общие пункты — старые оценки остались по своей версии', async () => {
   const mkCall = async (daysAgo: number) => (await sql(`insert into calls(tenant_id, club_id, user_id, started_at, source, asr_status, duration_sec) values ($1,$2,$3, now() - make_interval(days => $4), 'upload', 'done', 120) returning id`,
     [tenant, centr, ids['m.volkova'], daysAgo]))[0].id as string;
   const old = await mkCall(3);
   const e0 = (await req('GET', `/api/calls/${old}/evaluation`, 'o.astafeva')).json();
   assert.equal(e0.standard.versionNo, 0);
+  assert.equal(e0.standard.title, 'Звонок по заявке');
+  // Список РОПа — этапы скрипта, пункты для всех звонков и «чего нельзя»
+  assert.ok(e0.standard.items.some((i: { id: string }) => i.id === 'contact'));
+  assert.ok(e0.standard.items.some((i: { id: string }) => i.id.startsWith('c_')));
+  assert.ok(e0.standard.items.some((i: { text: string }) => i.text.startsWith('Не прозвучало')));
   const items = e0.standard.items.map((i: { id: string }, k: number) => ({ id: i.id, ok: k % 2 === 0 }));
   const s0 = (await req('POST', `/api/calls/${old}/evaluation`, 'o.astafeva', { items })).json();
   assert.equal(s0.standardVersion, 0);
   assert.equal((await req('POST', `/api/calls/${old}/evaluation`, 'm.volkova', { items })).statusCode, 403);
-  // Публикуем новый стандарт из двух пунктов
-  const d = (await req('POST', '/api/config/versions', 'o.smirnov', { clubId: centr, changes: [{ path: 'sales.items', value: [{ id: 'a', text: 'Назвал цену', weight: 1 }, { id: 'b', text: 'Записал на визит', weight: 1 }] }] })).json();
-  await req('POST', `/api/config/versions/${d.id}/check`, 'o.smirnov');
-  assert.equal((await req('POST', `/api/config/versions/${d.id}/approve`, 'o.smirnov')).statusCode, 200);
-  assert.equal((await req('POST', `/api/config/versions/${d.id}/publish`, 'o.smirnov')).statusCode, 200);
+  // Скрипт «по заявке» поменяли: этапы пишутся один раз — что говорить и что проверять
+  const sv = await req('PUT', '/api/call-scripts', 'o.astafeva', { clubId: centr, code: 'lead', ifSays: [], never: 'цена до вопросов',
+    stages: [{ id: 'contact', stage: 'Контакт', say: '«Добрый день!»', check: 'Поздоровался и представился' }, { stage: 'Запись', say: '«Записываю на четверг»', check: 'Записал на визит' }] });
+  assert.equal(sv.statusCode, 200, sv.body);
+  assert.equal(sv.json().version, 1);
   const fresh = await mkCall(0);
   const e1 = (await req('GET', `/api/calls/${fresh}/evaluation`, 'o.astafeva')).json();
   assert.equal(e1.standard.versionNo, 1);
-  assert.equal(e1.standard.items.length, 2);
+  assert.ok(e1.standard.items.some((i: { text: string }) => i.text === 'Записал на визит'));
+  const book = (await req('GET', `/api/call-scripts?clubId=${centr}`, 'o.astafeva')).json().items.find((x: { code: string }) => x.code === 'lead');
+  assert.deepEqual(book.lines, [['Контакт', '«Добрый день!»'], ['Запись', '«Записываю на четверг»']]);
+  assert.equal(book.version, 1);
   // Старый звонок по-прежнему по версии 0, оценка та же; переоценка тоже идёт по версии 0
   const again = (await req('GET', `/api/calls/${old}/evaluation`, 'o.astafeva')).json();
   assert.equal(again.evaluations[0].standardVersion, 0);
@@ -113,6 +121,7 @@ test('AT32: стандарт продаж поменяли — старые оц
   await assert.rejects(sql(`update call_evaluations set standard_version = 1 where call_id = $1`, [old]), /версии стандарта/);
   const q = (await req('GET', `/api/quality?clubId=${centr}`, 'o.astafeva')).json();
   assert.ok(q.byUser.some((u: { userId: string; n: number }) => u.userId === ids['m.volkova'] && u.n >= 1));
+  await req('DELETE', `/api/call-scripts?clubId=${centr}&code=lead`, 'o.astafeva');
 });
 
 test('обзор менеджера: показатели, сравнение с отделом, сильные и слабые места, рекомендации с данными и уверенностью', async () => {

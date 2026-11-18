@@ -1,6 +1,7 @@
 // Отдел продаж: заявки и скорость ответа, списки обзвона, окно продлений, новички, воронка «где теряем», стоп-лист, дубли, настройки.
 // Плюс блок «Обзвон» в карточке клиента (стоп-лист и теги) и кнопка «Беру в работу».
 import { useEffect, useState } from 'react';
+import { ToConfig } from './toConfig.tsx';
 import { useClubPick } from './clubPick.tsx';
 import { api, can, type Club, type Me, navParams } from './api.ts';
 import { dt, errText, toast } from './ui.ts';
@@ -34,7 +35,9 @@ export function SalesOpsPage({ me, clubs, clubId, openPerson }: { me: Me; clubs:
       {view === 'scripts' && <CallScripts clubId={club} />}
       {view === 'funnel' && <Funnel clubId={club} />}
       {view === 'base' && <BaseCleanup clubId={club} openPerson={openPerson} />}
-      {view === 'settings' && <><Settings clubId={club} /><AgentSettingsCard clubId={club} /></>}
+      {view === 'settings' && (can(me, 'config.manage') || can(me, 'sales.manage')
+        ? <ToConfig view="sales" text="Правила отдела продаж — норма ответа на заявку, обзвон, нормы KPI и Дядя Витя — собраны в «Настройки клуба → Продажи»." />
+        : <><Settings clubId={club} /><AgentSettingsCard clubId={club} /></>)}
     </div>
   );
 }
@@ -64,7 +67,7 @@ export function TakeLeadButton({ leadId, onDone, small = true }: { leadId: strin
   return <button className={`btn pri ${small ? 'sm' : ''}`} onClick={take}>Беру в работу</button>;
 }
 
-function LeadsSpeed({ clubId, openPerson }: { clubId: string; openPerson: (id: string) => void }) {
+export function LeadsSpeed({ clubId, openPerson }: { clubId: string; openPerson: (id: string) => void }) {
   const [day, setDay] = useState('');
   const { data, err, load } = useLoad<LeadsData>(`/api/sales-ops/leads?clubId=${clubId}${day ? `&day=${day}` : ''}`, [clubId, day]);
   useEffect(() => { const t = setInterval(load, 30_000); return () => clearInterval(t); }, [clubId, day]);
@@ -267,7 +270,7 @@ function BaseCleanup({ clubId, openPerson }: { clubId: string; openPerson: (id: 
             <tbody>{dups.data.pairs.map((x) => <tr key={x.main.id + x.dup.id}><td><P p={x.main} /></td><td><P p={x.dup} /></td><td className="small">{x.why}</td>
               <td><div className="row" style={{ gap: 4 }}>
                 <button className="btn sm pri" disabled={busy} onClick={() => confirm(`Склеить «${x.dup.name}» в «${x.main.name}»? Отменить нельзя.`) && act(() => api('POST', '/api/sales-ops/merge', { mainId: x.main.id, dupId: x.dup.id }), 'Карточки склеены')}>Склеить</button>
-                <button className="btn sm" disabled={busy} onClick={() => act(() => api('POST', '/api/sales-ops/merge', { mainId: x.dup.id, dupId: x.main.id }), 'Карточки склеены')} title="Оставить основной вторую карточку">Наоборот</button>
+                <button className="btn sm" disabled={busy} onClick={() => confirm(`Склеить «${x.main.name}» в «${x.dup.name}»? Отменить нельзя.`) && act(() => api('POST', '/api/sales-ops/merge', { mainId: x.dup.id, dupId: x.main.id }), 'Карточки склеены')} title="Оставить основной вторую карточку">Наоборот</button>
                 <button className="btn sm" disabled={busy} onClick={() => act(() => api('POST', '/api/sales-ops/not-duplicate', { a: x.main.id, b: x.dup.id }), 'Больше не предложим')}>Разные люди</button>
               </div></td></tr>)}</tbody></table></div>))}
       </div>
@@ -291,20 +294,32 @@ function BaseCleanup({ clubId, openPerson }: { clubId: string; openPerson: (id: 
 }
 
 /* ---------- Настройки ---------- */
+// Ответ на заявку — одно место (повторная проверка CRM 18.11.2026, п. 3): норма клуба, напоминание, передача другому, сигнал РОПу.
+// Эти же цифры берут экран заявок, KPI «Первый ответ», рейтинг менеджеров, Дядя Витя и сводки.
 type Sets = { remindMinutes: number; escalateMinutes: number; newbieDays: number; newbieMinVisits: number; excludeLowVisits: boolean };
-function Settings({ clubId }: { clubId: string }) {
-  const { data, err, setErr } = useLoad<{ settings: Sets; canManage: boolean }>(`/api/sales-ops/settings?clubId=${clubId}`, [clubId]);
-  const [f, setF] = useState<Sets | null>(null);
-  useEffect(() => { if (data) setF(data.settings); }, [data]);
+type Resp = { firstResponseMinutes: number; leadReassignMinutes: number };
+export function Settings({ clubId }: { clubId: string }) {
+  const { data, err, setErr } = useLoad<{ settings: Sets; response: Resp; canManage: boolean }>(`/api/sales-ops/settings?clubId=${clubId}`, [clubId]);
+  const [f, setF] = useState<(Sets & Resp) | null>(null);
+  useEffect(() => { if (data) setF({ ...data.settings, ...data.response }); }, [data]);
   if (!data || !f) return err ? <div className="err">{err}</div> : <p className="muted">Загрузка…</p>;
   const ro = !data.canManage;
-  const num = (k: keyof Sets, label: string) => <label className="f">{label}<input type="number" disabled={ro} value={f[k] as number} onChange={(e) => setF({ ...f, [k]: Number(e.target.value) })} /></label>;
+  const num = (k: keyof (Sets & Resp), label: string, hint?: string) => <label className="f">{label}<input type="number" disabled={ro} value={f[k] as number} onChange={(e) => setF({ ...f, [k]: Number(e.target.value) })} />{hint && <span className="small muted">{hint}</span>}</label>;
   const save = async () => { setErr(''); try { await api('PUT', '/api/sales-ops/settings', { clubId, ...f }); toast('Сохранено'); } catch (x) { setErr(errText(x)); } };
   return (
-    <div className="card" style={{ display: 'grid', gap: 10, maxWidth: 640 }}>
+    <div className="card" style={{ display: 'grid', gap: 10, maxWidth: 680 }}>
       {err && <div className="err">{err}</div>}
-      {ro && <p className="small muted" style={{ margin: 0 }}>Менять может управляющий или собственник.</p>}
-      <div className="grid2">{num('remindMinutes', 'Напоминание менеджеру, мин')}{num('escalateMinutes', 'Сигнал РОПу, мин')}{num('newbieDays', 'Новички: за сколько дней')}{num('newbieMinVisits', 'Новички: визитов в 1-й месяц меньше')}</div>
+      {ro && <p className="small muted" style={{ margin: 0 }}>Менять могут РОП, управляющий или собственник.</p>}
+      <h2 style={{ margin: 0 }}>Ответ на заявку</h2>
+      <p className="small muted" style={{ margin: 0 }}>Одна норма для всего клуба: по ней считаются «вовремя / опоздал» в заявках, KPI «Первый ответ», рейтинг менеджеров и подсказки Дяди Вити.</p>
+      <div className="grid2">
+        {num('firstResponseMinutes', 'Норма ответа, мин', 'за сколько минут менеджер должен связаться с новой заявкой')}
+        {num('remindMinutes', 'Напомнить менеджеру через, мин')}
+        {num('leadReassignMinutes', 'Передать другому через, мин', '0 — не передавать')}
+        {num('escalateMinutes', 'Сигнал РОПу через, мин')}
+      </div>
+      <h2 style={{ margin: 0 }}>Обзвон базы</h2>
+      <div className="grid2">{num('newbieDays', 'Новички: за сколько дней')}{num('newbieMinVisits', 'Новички: визитов в первый месяц')}</div>
       <label className="row" style={{ gap: 8 }}><input type="checkbox" disabled={ro} checked={f.excludeLowVisits} onChange={(e) => setF({ ...f, excludeLowVisits: e.target.checked })} />Не звонить членам клуба с 0–2 посещениями за всё время</label>
       {!ro && <div><button className="btn pri" onClick={save}>Сохранить</button></div>}
     </div>

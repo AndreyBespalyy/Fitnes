@@ -91,6 +91,8 @@ test('досрочное продление: предложение за 30 дн
   const m = await sold('Месяц безлимит', 10, false); // заканчивается через ~20 дней
   const noPhone = await sold('Месяц безлимит', 12, false);
   await sql(`update persons set messaging_opt_out = true where id = $1`, [noPhone.personId]);
+  // Одно правило продления: «за сколько дней» — из «Напомнить о продлении за N дн.» (настройки абонементов)
+  await sql(`update club_membership_settings set renewal_reminder_days = 30 where club_id = $1`, [centr]);
   const cnt = await asOwner((c) => earlyRenewals(c as never, null, { tenantId: tenant, userId: null }, centr, today));
   assert.ok(cnt >= 2);
   const offer = (await sql(`select * from renewal_offers where membership_id = $1`, [m.membershipId]))[0];

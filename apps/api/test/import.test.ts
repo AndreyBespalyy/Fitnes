@@ -330,3 +330,97 @@ test('шестой отчёт «Задачи»: открытые — в рабо
   assert.equal((await api('POST', `/api/import/batches/${b.id}/rollback`, owner, { password: PASSWORD })).statusCode, 200);
   assert.equal(await owner$(async (c) => Number((await c.query('select count(*) from tasks where import_batch_id = $1', [b.id])).rows[0].count)), 0);
 });
+
+test('седьмой отчёт «Сотрудники»: вход с ролью по должности, задачи им, догрузка отдельным переносом, отмена', async () => {
+  const mgr = await owner$(async (c) => (await c.query(`select u.full_name from users u join user_assignments a on a.user_id = u.id
+    where a.club_id = $1 and a.role_code in ('manager', 'rop') and u.status = 'active' order by u.full_name limit 1`, [c2])).rows[0]);
+  const staffFile = (rows: string[][]) => xlsx([['Сотрудники'], ['Код', 'Сотрудник', 'Должность', 'Телефон', 'Дата увольнения', 'Роль'], ...rows]);
+  const b = (await api('POST', '/api/import/batches', owner, { clubId: c2 })).json();
+  await uploadAll(b.id, owner);
+  const up = await api('POST', `/api/import/batches/${b.id}/files`, owner, { fileName: 'Сотрудники_Север.xlsx', dataBase64: staffFile([
+    ['000001', 'Соколова Анна Петровна', 'Менеджер отдела продаж', '+7 916 111-22-33', '', ''],
+    ['000002', 'Орлов Пётр Ильич', 'Инструктор тренажёрного зала', '89162223344', '', ''],
+    ['000003', 'Белова Ирина', 'Администратор', '', '', ''],
+    ['000004', 'Уволенный Иван', 'Менеджер', '', '01.02.2024', ''],
+    ['000005', 'Непонятная Должность', 'Техник', '', '', ''],
+    ['000006', 'Техник С Ролью', 'Техник', '', '', 'ресепшн'],
+    ['000007', mgr.full_name, 'Менеджер', '', '', ''],
+  ]).toString('base64') });
+  assert.equal(up.statusCode, 201, up.body);
+  assert.equal(up.json().reportType, 'staff');
+  const tasks = xlsx([['Номер', 'Клиент.Код', 'Клиент', 'Вид', 'Тема', 'Срок', 'Ответственный'],
+    ['501', 'К-0001', 'Иванова Мария Сергеевна', 'Звонок', 'Продление', '25.12.2030 15:00', 'Соколова Анна Петровна']]);
+  assert.equal((await api('POST', `/api/import/batches/${b.id}/files`, owner, { fileName: 'Задачи.xlsx', dataBase64: tasks.toString('base64') })).statusCode, 201);
+  await confirmAll(b.id, owner);
+  await api('POST', `/api/import/batches/${b.id}/check`, owner);
+  await api('POST', `/api/import/batches/${b.id}/resolve-conflicts`, owner, { resolution: 'new' });
+  const rep = (await api('POST', `/api/import/batches/${b.id}/check`, owner)).json();
+  assert.equal(rep.canApply, true, JSON.stringify(rep.blockers));
+  assert.equal(rep.counts.staff.load, 4, JSON.stringify(rep.counts.staff));
+  assert.equal(rep.counts.staff.excluded, 1, 'техник без роли');
+  assert.equal(rep.completeness.staffNew, 4);
+  assert.ok(rep.completeness.staffRoles.some((x: { position: string; role: string }) => x.position === 'Менеджер отдела продаж' && x.role === 'manager'));
+  const ap = await api('POST', `/api/import/batches/${b.id}/apply`, owner, { password: PASSWORD });
+  assert.equal(ap.statusCode, 200, ap.body);
+  const creds = ap.json().staffCredentials as { fullName: string; login: string; tempPassword: string; role: string }[];
+  assert.equal(creds.length, 4);
+  assert.deepEqual(Object.fromEntries(creds.map((c) => [c.fullName, c.role])),
+    { 'Соколова Анна Петровна': 'manager', 'Орлов Пётр Ильич': 'trainer', 'Белова Ирина': 'desk', 'Техник С Ролью': 'desk' });
+  assert.ok(creds.every((c) => c.login && c.tempPassword));
+  assert.ok(!JSON.stringify(await owner$(async (c) => (await c.query('select report from import_batches where id = $1', [b.id])).rows[0])).includes(creds[0].tempPassword),
+    'временные пароли не хранятся в отчёте');
+  // Новый сотрудник входит со своим временным паролем, задача из 1С уже у него
+  const sok = creds.find((c) => c.fullName.startsWith('Соколова'))!;
+  const lg = await t.app.inject({ method: 'POST', url: '/api/auth/login', payload: { login: sok.login, password: sok.tempPassword } });
+  assert.equal(lg.statusCode, 200, lg.body);
+  const task = await owner$(async (c) => (await c.query(`select u.full_name from tasks t join users u on u.id = t.assignee_id where t.import_batch_id = $1`, [b.id])).rows[0]);
+  assert.equal(task.full_name, 'Соколова Анна Петровна');
+
+  // Догрузка: второй перенос только с сотрудниками — остальные отчёты уже перенесены
+  const b2 = (await api('POST', '/api/import/batches', owner, { clubId: c2 })).json();
+  assert.equal((await api('POST', `/api/import/batches/${b2.id}/files`, owner, { fileName: 'Сотрудники_доп.xlsx', dataBase64: staffFile([
+    ['000001', 'Соколова Анна Петровна', 'Менеджер отдела продаж', '', '', ''],
+    ['000008', 'Новикова Ольга', 'Управляющий клубом', '', '', ''],
+  ]).toString('base64') })).statusCode, 201);
+  await confirmAll(b2.id, owner);
+  const rep2 = (await api('POST', `/api/import/batches/${b2.id}/check`, owner)).json();
+  assert.equal(rep2.canApply, true, JSON.stringify(rep2.blockers));
+  assert.equal(rep2.counts.staff.load, 1, 'Соколова уже перенесена');
+  const ap2 = await api('POST', `/api/import/batches/${b2.id}/apply`, owner, { password: PASSWORD });
+  assert.equal(ap2.statusCode, 200, ap2.body);
+  assert.equal(ap2.json().staffCredentials[0].role, 'gm');
+
+  // Отмена убирает созданные учётные записи
+  for (const id of [b2.id, b.id]) assert.equal((await api('POST', `/api/import/batches/${id}/rollback`, owner, { password: PASSWORD })).statusCode, 200);
+  assert.equal(await owner$(async (c) => Number((await c.query('select count(*) from users where import_batch_id = any($1::uuid[])', [[b.id, b2.id]])).rows[0].count)), 0);
+});
+
+test('демо-данные клуба: предпросмотр и удаление, данные из 1С не трогаются, только собственник', async () => {
+  const b = (await api('POST', '/api/import/batches', owner, { clubId: c2 })).json();
+  await uploadAll(b.id, owner);
+  await confirmAll(b.id, owner);
+  await api('POST', `/api/import/batches/${b.id}/check`, owner);
+  await api('POST', `/api/import/batches/${b.id}/resolve-conflicts`, owner, { resolution: 'new' });
+  await api('POST', `/api/import/batches/${b.id}/check`, owner);
+  assert.equal((await api('POST', `/api/import/batches/${b.id}/apply`, owner, { password: PASSWORD })).statusCode, 200);
+  const q = (sql: string) => owner$(async (c) => Number((await c.query(sql, [c2])).rows[0].count));
+  const importedBefore = await q('select count(*) from persons where home_club_id = $1 and import_batch_id is not null');
+  const membershipsBefore = await q('select count(*) from memberships where club_id = $1 and import_batch_id is not null');
+  const demoBefore = await q('select count(*) from persons where home_club_id = $1 and import_batch_id is null');
+  assert.ok(demoBefore > 0 && importedBefore > 0);
+
+  assert.equal((await api('POST', '/api/import/demo-cleanup/preview', gm, { clubId: c2 })).statusCode, 403, 'управляющему нельзя');
+  const pre = await api('POST', '/api/import/demo-cleanup/preview', owner, { clubId: c2 });
+  assert.equal(pre.statusCode, 200, pre.body);
+  assert.equal(pre.json().counts.persons, demoBefore);
+  assert.equal(pre.json().imported, importedBefore);
+  assert.equal(await q('select count(*) from persons where home_club_id = $1 and import_batch_id is null'), demoBefore, 'предпросмотр ничего не удаляет');
+
+  assert.equal((await api('POST', '/api/import/demo-cleanup', owner, { clubId: c2, password: 'неверный' })).statusCode, 400);
+  const del = await api('POST', '/api/import/demo-cleanup', owner, { clubId: c2, password: PASSWORD });
+  assert.equal(del.statusCode, 200, del.body);
+  assert.equal(await q('select count(*) from persons where home_club_id = $1 and import_batch_id is null'), 0);
+  assert.equal(await q('select count(*) from persons where home_club_id = $1 and import_batch_id is not null'), importedBefore);
+  assert.equal(await q('select count(*) from memberships where club_id = $1 and import_batch_id is not null'), membershipsBefore);
+  assert.equal(await q('select count(*) from memberships where club_id = $1 and import_batch_id is null'), 0, 'демо-абонементы ушли вместе с клиентами');
+});

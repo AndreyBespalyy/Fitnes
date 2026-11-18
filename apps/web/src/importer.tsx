@@ -1,7 +1,7 @@
 // Шаг 9. Раздел «Перенос из 1С»: загрузка пяти отчётов, карта полей, пробный перенос с отчётом сверки,
 // решение конфликтов, перенос с паролем, принятие или отмена.
 import { useEffect, useState, type FormEvent } from 'react';
-import { api, type Club } from './api.ts';
+import { api, can, type Club, type Me } from './api.ts';
 import { dt, errText, toast } from './ui.ts';
 import { rub } from './memberships.tsx';
 import { readFile } from './contracts.tsx';
@@ -10,23 +10,28 @@ type FieldDef = { key: string; label: string; required: boolean };
 type TypeDef = { type: string; name: string; fields: FieldDef[] };
 type Batch = { id: string; clubId: string; clubName: string; status: string; createdAt: string; checkedAt: string | null; appliedAt: string | null; acceptedAt: string | null;
   rolledBackAt: string | null; createdByName: string | null; canApply?: boolean; applied?: Applied | null };
-type Applied = { persons: number; merged: number; memberships: number; contracts: number; payments: number; visits: number; debts: number; products: number; tasks?: number; taskHistory?: number };
+type Applied = { persons: number; merged: number; memberships: number; contracts: number; payments: number; visits: number; debts: number; products: number; tasks?: number; taskHistory?: number; staff?: number };
 type IFile = { id: string; fileName: string; reportType: string | null; detectedType: string; confidence: number; headers: string[]; headerRow: number;
   mapping: Record<string, { col: number; confidence: number } | null>; mappingConfirmed: boolean; mappingVersion: number | null; rowCount: number; sample: string[][] };
 type Count = { name: string; files: number; source: number; load: number; warning: number; excluded: number; conflict: number; skipped: number; earlier: number };
 type Month = { month: string; inSourceKop: number; inLoadKop: number; outSourceKop: number; outLoadKop: number };
 type Issue = { type: string; status: string; group: string; count: number; examples: { rowNo: number; file: string; issue: string }[] };
+// money = null и dataHidden — у технического администратора: суммы и данные клиентов скрыты, видны счётчики и ошибки
 type Report = { generatedAt: string; mode: 'check' | 'applied'; canApply: boolean; blockers: string[]; counts: Record<string, Count>;
-  money: { months: Month[]; totals: Omit<Month, 'month'>; paymentsFooterKop: number | null; debts: { sourceKop: number; loadKop: number };
+  dataHidden?: { people: boolean; money: boolean };
+  money: null | { months: Month[]; totals: Omit<Month, 'month'>; paymentsFooterKop: number | null; debts: { sourceKop: number; loadKop: number };
     advances: { sourceKop: number; count: number }; memberships: { loadKop: number; footerKop: number | null } };
   completeness: { clientsWithoutPhone: number; clientsWithoutBirthDate: number; clientsWithoutEmail: number; membershipsWithoutContract: number; membershipsActive: number;
-    paymentsWithoutMembership: number; tasksOpen?: number; tasksHistory?: number; notTransferred: string[] };
+    paymentsWithoutMembership: number; tasksOpen?: number; tasksHistory?: number;
+    staffNew?: number; staffRoles?: { position: string; role: string | null; count: number }[]; notTransferred: string[] };
   issues: Issue[]; applied?: Applied };
 type BatchFull = Batch & { report: Report | null; files: IFile[]; statusCounts: Record<string, number> };
-type IRow = { id: string; rowNo: number; cells: string[]; status: string; issue: string | null; conflictWith: string | null; resolution: string | null; fileName: string; headers: string[] };
+type IRow = { id: string; rowNo: number; cells: string[] | null; status: string; issue: string | null; conflictWith: string | null; resolution: string | null; fileName: string; headers: string[] };
 
-const ORDER = ['clients', 'memberships', 'payments', 'visits', 'balances', 'tasks'];
-const OPTIONAL = ['tasks'];
+const ORDER = ['clients', 'memberships', 'payments', 'visits', 'balances', 'tasks', 'staff'];
+const OPTIONAL = ['tasks', 'staff'];
+const ROLE_NAMES: Record<string, string> = { gm: 'Управляющий', rop: 'Руководитель ОП', manager: 'Менеджер ОП', desk: 'Администратор ресепшн', trainer: 'Тренер', fin: 'Финансист' };
+type Credential = { fullName: string; login: string; tempPassword: string; role: string; position: string };
 const STATUS: Record<string, [string, string]> = {
   draft: ['Подготовка', 'acc'], checked: ['Проверен', 'acc'], applied: ['Перенесён, ждёт принятия', 'warn'], accepted: ['Принят', 'ok'], rolled_back: ['Отменён', 'bad'],
 };
@@ -34,7 +39,7 @@ const ISSUE_STATUS: Record<string, [string, string]> = { conflict: ['Конфл�
 const monthName = (m: string) => new Date(`${m}-01T00:00:00`).toLocaleDateString('ru-RU', { month: 'long', year: 'numeric' });
 const pct = (x: number) => `${Math.round(x * 100)} %`;
 
-export function ImportPage({ clubs, clubId }: { clubs: Club[]; clubId: string }) {
+export function ImportPage({ me, clubs, clubId }: { me: Me; clubs: Club[]; clubId: string }) {
   const [club, setClub] = useState(clubId !== 'all' ? clubId : clubs[0]?.id ?? '');
   useEffect(() => { if (clubId !== 'all') setClub(clubId); }, [clubId]);
   const [list, setList] = useState<Batch[]>([]);
@@ -60,7 +65,7 @@ export function ImportPage({ clubs, clubId }: { clubs: Club[]; clubId: string })
       </div>
       {err && <div className="err">{err}</div>}
       <div className="note">
-        Нужны пять отчётов из 1С по клубу: <b>клиенты</b>, <b>абонементы и договоры</b>, <b>платежи</b>, <b>посещения</b>, <b>остатки и долги</b>, в Excel (.xlsx) или CSV. Шестой — <b>задачи и звонки</b> — по желанию: открытые задачи перейдут в работу, выполненные — в историю клиента.
+        Нужны пять отчётов из 1С по клубу: <b>клиенты</b>, <b>абонементы и договоры</b>, <b>платежи</b>, <b>посещения</b>, <b>остатки и долги</b>, в Excel (.xlsx) или CSV. Шестой — <b>задачи и звонки</b> — по желанию: открытые задачи перейдут в работу, выполненные — в историю клиента. Седьмой — <b>сотрудники</b> — по желанию: каждому создаётся вход в систему с ролью по должности. Пропущенное (сотрудников, недостающих клиентов) можно догрузить позже отдельным переносом.
         Система сама узнаёт отчёт и колонки, вы проверяете карту полей. Пробный перенос ничего не меняет в базе и показывает отчёт сверки.
         Перенос можно отменить, пока вы его не приняли. Повторная загрузка тех же данных не создаёт дублей.
       </div>
@@ -78,8 +83,55 @@ export function ImportPage({ clubs, clubId }: { clubs: Club[]; clubId: string })
             </tbody>
           </table>)}
       </div>
+      {can(me, '*') && club && <DemoCleanup clubId={club} clubName={clubs.find((x) => x.id === club)?.name ?? ''} />}
     </>
   );
+}
+
+// Названия таблиц для предпросмотра удаления демо-данных; остальные показываются как есть
+const TABLE_NAMES: Record<string, string> = {
+  persons: 'Клиенты', person_contacts: 'Телефоны и почта', memberships: 'Абонементы', membership_operations: 'Операции по абонементам', payments: 'Оплаты',
+  visits: 'Посещения', charges: 'Начисления и долги', contracts: 'Договоры', tasks: 'Задачи', calls: 'Звонки', leads: 'Заявки', opportunities: 'Сделки',
+  opportunity_stage_history: 'История сделок', class_bookings: 'Записи на занятия', messages: 'Сообщения', conversations: 'Переписки', access_credentials: 'Карты доступа',
+  person_payment_methods: 'Привязанные карты', consents: 'Согласия', surveys: 'Опросы', survey_responses: 'Ответы на опросы', receipts: 'Чеки',
+};
+
+/** Удаление выдуманных клиентов клуба после переноса настоящей базы (решение Андрея 18.11.2026) */
+function DemoCleanup({ clubId, clubName }: { clubId: string; clubName: string }) {
+  const [pre, setPre] = useState<{ counts: Record<string, number>; imported: number } | null>(null);
+  const [password, setPassword] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState('');
+  useEffect(() => { setPre(null); setErr(''); setPassword(''); }, [clubId]);
+  const preview = async () => {
+    setBusy(true); setErr('');
+    try { setPre(await api('POST', '/api/import/demo-cleanup/preview', { clubId })); } catch (e) { setErr(errText(e)); } finally { setBusy(false); }
+  };
+  const run = async (e: FormEvent) => {
+    e.preventDefault(); setBusy(true); setErr('');
+    try {
+      const r = await api<{ counts: Record<string, number> }>('POST', '/api/import/demo-cleanup', { clubId, password });
+      toast(`Удалено демо-клиентов: ${r.counts.persons ?? 0}`); setPre(null); setPassword('');
+    } catch (x) { setErr(errText(x)); } finally { setBusy(false); }
+  };
+  const rows = pre ? Object.entries(pre.counts).sort((a, b) => (a[0] === 'persons' ? -1 : b[0] === 'persons' ? 1 : b[1] - a[1])) : [];
+  return (
+    <div className="card" style={{ display: 'grid', gap: 8 }}>
+      <h2>Демо-данные клуба</h2>
+      <p className="small" style={{ margin: 0 }}>Удаляет из клуба «{clubName}» всех клиентов, которые не перенесены из 1С (тестовое наполнение и заведённые вручную), вместе с их абонементами, оплатами, посещениями, задачами, звонками и перепиской. Данные из 1С не затрагиваются: если удаление их заденет, оно не выполнится. Отменить удаление нельзя.</p>
+      {err && <div className="err">{err}</div>}
+      {!pre && <div className="row"><button className="btn" disabled={busy} onClick={preview}>{busy ? 'Считаю…' : 'Показать, что удалится'}</button></div>}
+      {pre && (rows.length === 0 ? <p className="muted">Демо-клиентов в этом клубе нет.</p> : (
+        <>
+          <p style={{ margin: 0 }}>Клиентов из 1С останется: <b>{pre.imported}</b>. Будет удалено:</p>
+          <div className="tbl"><table><tbody>{rows.map(([k, n]) => <tr key={k}><td>{TABLE_NAMES[k] ?? k}</td><td className="num">{n}</td></tr>)}</tbody></table></div>
+          <form onSubmit={run} className="row">
+            <label className="f">Ваш пароль для подтверждения<input type="password" autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} /></label>
+            <button className="btn pri" disabled={!password || busy}>{busy ? 'Удаляю…' : 'Удалить демо-данные'}</button>
+            <button type="button" className="btn" onClick={() => setPre(null)}>Отмена</button>
+          </form>
+        </>))}
+    </div>);
 }
 
 function BatchView({ id, types, back }: { id: string; types: TypeDef[]; back: () => void }) {
@@ -206,7 +258,7 @@ function FileCard({ f, types, editable, reload }: { f: IFile; types: TypeDef[]; 
 
 function ReportView({ r }: { r: Report }) {
   const m = r.money;
-  const rowsSum = m.totals.inSourceKop - m.totals.outSourceKop;
+  const rowsSum = m ? m.totals.inSourceKop - m.totals.outSourceKop : 0;
   return (
     <>
       <div className="card" style={{ display: 'grid', gap: 10 }}>
@@ -226,7 +278,10 @@ function ReportView({ r }: { r: Report }) {
         </table></div>
       </div>
 
-      <div className="card" style={{ display: 'grid', gap: 10 }}>
+      {r.dataHidden && (
+        <div className="note">Данные клиентов{r.dataHidden.money ? ' и суммы' : ''} скрыты: у вашей роли нет к ним доступа. Видны счётчики, ошибки и номера строк в файлах 1С.
+          {r.dataHidden.money && ' Сверку денег после переноса проверяет собственник или финансист в этом же разделе.'}</div>)}
+      {m && <div className="card" style={{ display: 'grid', gap: 10 }}>
         <h2>Деньги: сверка с 1С без округлений</h2>
         {m.paymentsFooterKop !== null && (
           <div className={`note ${m.paymentsFooterKop === rowsSum ? 'ok-msg' : ''}`}>
@@ -250,7 +305,7 @@ function ReportView({ r }: { r: Report }) {
           <span>Авансы клиентов в 1С</span><span className="num">{rub(m.advances.sourceKop)} у {m.advances.count} клиентов (показаны здесь, лицевого счёта пока нет)</span>
           <span>Стоимость абонементов</span><span className="num">{rub(m.memberships.loadKop)}</span>
         </div>
-      </div>
+      </div>}
 
       <div className="card" style={{ display: 'grid', gap: 8 }}>
         <h2>Полнота данных</h2>
@@ -264,7 +319,18 @@ function ReportView({ r }: { r: Report }) {
           {r.completeness.tasksOpen !== undefined && (r.counts.tasks?.files ?? 0) > 0 && <>
             <span>Открытых задач и звонков</span><span className="num">{r.completeness.tasksOpen}</span>
             <span>Выполненных задач (история в карточке)</span><span className="num">{r.completeness.tasksHistory}</span></>}
+          {(r.counts.staff?.files ?? 0) > 0 && <><span>Новых сотрудников</span><span className="num">{r.completeness.staffNew ?? 0}</span></>}
         </div>
+        {(r.counts.staff?.files ?? 0) > 0 && !!r.completeness.staffRoles?.length && (
+          <div style={{ display: 'grid', gap: 4 }}>
+            <h3 style={{ margin: 0 }}>Роли по должностям из 1С</h3>
+            <p className="small" style={{ margin: 0 }}>Проверьте, какую роль получит каждая должность. Чтобы поменять роль, впишите её в колонку «Роль» в файле и загрузите файл заново, или поправьте роль после переноса в «Персонале».</p>
+            <div className="tbl"><table>
+              <thead><tr><th>Должность в 1С</th><th>Роль в системе</th><th className="num">Человек</th></tr></thead>
+              <tbody>{r.completeness.staffRoles.map((x) => <tr key={x.position}><td>{x.position}</td>
+                <td>{x.role ? ROLE_NAMES[x.role] ?? x.role : <span className="chip bad">не определена, не переносится</span>}</td><td className="num">{x.count}</td></tr>)}</tbody>
+            </table></div>
+          </div>)}
         <ul className="small" style={{ margin: 0, paddingLeft: 18 }}>{r.completeness.notTransferred.map((x) => <li key={x}>{x}</li>)}</ul>
       </div>
     </>
@@ -282,6 +348,7 @@ function Conflicts({ batchId, reload }: { batchId: string; reload: () => void })
   };
   const LBL: Record<string, string> = { merge: 'объединить', new: 'отдельный клиент', skip: 'не переносить' };
   const open = rows.filter((r) => !r.resolution).length;
+  const hidden = rows.some((r) => r.cells === null);
   const resolveAll = async (resolution: 'new' | 'skip') => {
     const what = resolution === 'new' ? 'создать отдельными клиентами' : 'не переносить';
     if (!window.confirm(`Все нерешённые конфликты (${open}) — ${what}? Решение по отдельной строке потом можно поменять.`)) return;
@@ -298,13 +365,15 @@ function Conflicts({ batchId, reload }: { batchId: string; reload: () => void })
           <button className="btn sm pri" onClick={() => resolveAll('new')}>Всех создать отдельными клиентами</button>
           <button className="btn sm" onClick={() => resolveAll('skip')}>Всех не переносить</button>
         </div>)}
+      {hidden && <p className="small" style={{ margin: 0 }}>Содержимое строк скрыто: у вашей роли нет доступа к данным клиентов. Решите конфликты кнопкой для всех
+        или по номеру строки в файле 1С; объединить с существующим клиентом может собственник или управляющий.</p>}
       {rows.map((r) => (
         <div key={r.id} className="item" style={{ display: 'grid', gap: 6 }}>
           <div className="small">{r.fileName}, строка {r.rowNo}</div>
-          <div>{r.cells.filter(Boolean).slice(0, 5).join(' · ')}</div>
-          <div className="small bad">{r.conflictWith}</div>
+          {r.cells && <div>{r.cells.filter(Boolean).slice(0, 5).join(' · ')}</div>}
+          {r.conflictWith && <div className="small bad">{r.conflictWith}</div>}
           <div className="row">
-            {(['merge', 'new', 'skip'] as const).map((k) => (
+            {(hidden ? ['new', 'skip'] as const : ['merge', 'new', 'skip'] as const).map((k) => (
               <button key={k} className={`btn sm ${r.resolution === k ? 'pri' : ''}`} onClick={() => resolve(r.id, k)}>
                 {k === 'merge' ? 'Это один человек: объединить' : k === 'new' ? 'Разные люди: создать отдельно' : 'Не переносить'}</button>))}
             {r.resolution && <span className="chip ok">решено: {LBL[r.resolution]}</span>}
@@ -329,7 +398,7 @@ function IssueRows({ batchId }: { batchId: string }) {
         <div className="tbl"><table>
           <thead><tr><th>Файл</th><th>Строка</th><th>Данные</th><th>Причина</th></tr></thead>
           <tbody>{rows.map((r) => <tr key={r.id}><td className="small">{r.fileName}</td><td className="num">{r.rowNo}</td>
-            <td className="small">{r.cells.filter(Boolean).slice(0, 6).join(' · ')}</td><td>{r.issue}</td></tr>)}</tbody>
+            <td className="small">{r.cells ? r.cells.filter(Boolean).slice(0, 6).join(' · ') : 'скрыто'}</td><td>{r.issue ?? ISSUE_STATUS[r.status]?.[0] ?? r.status}</td></tr>)}</tbody>
         </table></div>) : <p className="muted">Таких строк нет.</p>)}
     </details>
   );
@@ -340,10 +409,12 @@ function Actions({ b, reload }: { b: BatchFull; reload: () => void }) {
   const [password, setPassword] = useState('');
   const [err, setErr] = useState('');
   const [busy, setBusy] = useState(false);
+  const [creds, setCreds] = useState<Credential[]>([]);
   const run = async (e: FormEvent) => {
     e.preventDefault(); setErr(''); setBusy(true);
     try {
-      await api('POST', `/api/import/batches/${b.id}/${act}`, { password });
+      const res = await api<{ staffCredentials?: Credential[] }>('POST', `/api/import/batches/${b.id}/${act}`, { password });
+      if (act === 'apply' && res.staffCredentials?.length) setCreds(res.staffCredentials);
       toast(act === 'apply' ? 'Данные перенесены' : act === 'accept' ? 'Перенос принят' : 'Перенос отменён');
       setAct(null); setPassword(''); reload();
     } catch (x) { setErr(errText(x)); } finally { setBusy(false); }
@@ -364,8 +435,10 @@ function Actions({ b, reload }: { b: BatchFull; reload: () => void }) {
           <span>Посещений</span><span className="num">{applied.visits}</span>
           <span>Долгов</span><span className="num">{applied.debts}</span>
           {applied.tasks !== undefined && (applied.tasks || applied.taskHistory) ? <><span>Задач и звонков</span><span className="num">{applied.tasks} открытых, {applied.taskHistory} в истории</span></> : null}
+          {applied.staff ? <><span>Сотрудников</span><span className="num">{applied.staff}</span></> : null}
           <span>Тарифов из 1С</span><span className="num">{applied.products} (в прайс не попадают)</span>
         </div>)}
+      {creds.length > 0 && <StaffCredentials list={creds} />}
       <div className="row">
         {b.status === 'checked' && <button className="btn pri" disabled={!b.report?.canApply} onClick={() => setAct('apply')}>Перенести в систему</button>}
         {b.status === 'draft' && b.report && <span className="small">Есть изменения после проверки: запустите пробный перенос.</span>}
@@ -385,3 +458,18 @@ function Actions({ b, reload }: { b: BatchFull; reload: () => void }) {
   );
 }
 
+/** Логины и временные пароли новых сотрудников: показываются один раз, сразу после переноса */
+function StaffCredentials({ list }: { list: Credential[] }) {
+  const text = list.map((c) => `${c.fullName}\t${ROLE_NAMES[c.role] ?? c.role}\tлогин: ${c.login}\tвременный пароль: ${c.tempPassword}`).join('\n');
+  const copy = () => navigator.clipboard.writeText(`Вход: ${location.origin}\n${text}`).then(() => toast('Скопировано')).catch(() => toast('Не удалось скопировать: выделите таблицу вручную'));
+  return (
+    <div className="item" style={{ display: 'grid', gap: 8 }}>
+      <b>Учётные записи сотрудников: {list.length}</b>
+      <p className="small" style={{ margin: 0 }}>Сохраните или раздайте эти данные сейчас: временные пароли показываются только один раз. При первом входе каждый задаст свой пароль. Потерянный пароль можно сбросить в «Персонале».</p>
+      <div className="tbl"><table>
+        <thead><tr><th>Сотрудник</th><th>Роль</th><th>Логин</th><th>Временный пароль</th></tr></thead>
+        <tbody>{list.map((c) => <tr key={c.login}><td>{c.fullName}<div className="small muted">{c.position}</div></td><td>{ROLE_NAMES[c.role] ?? c.role}</td><td><code>{c.login}</code></td><td><code>{c.tempPassword}</code></td></tr>)}</tbody>
+      </table></div>
+      <div className="row"><button type="button" className="btn" onClick={copy}>Скопировать всё</button><button type="button" className="btn" onClick={() => window.print()}>Распечатать</button></div>
+    </div>);
+}

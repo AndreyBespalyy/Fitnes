@@ -24,7 +24,9 @@ export function LearnPage({ clubs, clubId }: { clubs: Club[]; clubId: string }) 
   const [days, setDays] = useState(30);
   const [r, setR] = useState<Report | null>(null);
   const [role, setRole] = useState('');
-  const club = clubId === 'all' ? '' : clubId;
+  // «Все клубы» вверху: клуб выбирается кнопками на странице (повторная проверка CRM 18.11.2026, п. 15)
+  const [sel, setSel] = useState('');
+  const club = clubId === 'all' ? sel : clubId;
   const load = () => api<Report>('GET', `/api/agent/learning?days=${days}${club ? `&clubId=${club}` : ''}`).then(setR).catch((e) => toast(errText(e)));
   useEffect(() => { setR(null); void load(); }, [club, days]);
   const setMode = async (x: Row, mode: string) => {
@@ -43,15 +45,17 @@ export function LearnPage({ clubs, clubId }: { clubs: Club[]; clubId: string }) 
     <div style={{ display: 'grid', gap: 12 }}>
       <div className="card row" style={{ gap: 12, flexWrap: 'wrap', alignItems: 'center' }}>
         <div style={{ flex: 1, minWidth: 260 }}>
-          <b>✦ Чему научился ИИ-помощник</b>
-          <p className="small muted" style={{ margin: '4px 0 0' }}>Под каждой подсказкой помощника есть кнопки «Полезно» и «Не то». Помощник ещё и сам смотрит, что сделали после подсказки: закрыли задачу, позвонили, написали клиенту, продали — или проигнорировали. Полезное он показывает чаще, лишнее — реже, совсем бесполезное выключает на месяц, а удачные ответы берёт за образец.</p>
+          <b>✦ Чему научился Дядя Витя</b>
+          <p className="small muted" style={{ margin: '4px 0 0' }}>Под каждой подсказкой Дяди Вити есть кнопки «Полезно» и «Не то». Дядя Витя ещё и сам смотрит, что сделали после подсказки: закрыли задачу, позвонили, написали клиенту, продали — или проигнорировали. Полезное он показывает чаще, лишнее — реже, совсем бесполезное выключает на месяц, а удачные ответы берёт за образец.</p>
         </div>
         <label className="f" style={{ minWidth: 140 }}>Период
           <select value={days} onChange={(e) => setDays(Number(e.target.value))}><option value={7}>7 дней</option><option value={30}>30 дней</option><option value={90}>90 дней</option></select>
         </label>
         {r?.canEdit && <label className="row" style={{ gap: 6, alignItems: 'center' }}><input type="checkbox" checked={r.learning} onChange={(e) => void setLearning(e.target.checked)} /> Учиться на отзывах</label>}
       </div>
-      {clubId === 'all' && <p className="small muted" style={{ margin: 0 }}>Показаны все клубы вместе. Чтобы менять решения по подсказкам, выберите клуб вверху.</p>}
+      {clubId === 'all' && clubs.length > 1 && <div className="tabs" role="group" aria-label="Клуб"><button aria-pressed={!sel} onClick={() => setSel('')}>Все клубы</button>
+        {clubs.map((c) => <button key={c.id} aria-pressed={sel === c.id} onClick={() => setSel(c.id)}>{c.name}</button>)}</div>}
+      {clubId === 'all' && !sel && <p className="small muted" style={{ margin: 0 }}>Показаны все клубы вместе. Чтобы менять решения по подсказкам, выберите клуб кнопкой выше.</p>}
       {!r && <p className="muted">Загружаю…</p>}
       {r && s && <>
         <div className="wk-tiles">
@@ -65,7 +69,7 @@ export function LearnPage({ clubs, clubId }: { clubs: Club[]; clubId: string }) 
           <Tile label="Проигнорировали" v={s.ignored} />
         </div>
         <div className="card">
-          <b>Что помощник понял</b>
+          <b>Что Дядя Витя понял</b>
           <ul className="learn-lessons">{r.lessons.map((l, i) => <li key={i}>{l}</li>)}</ul>
         </div>
         <div className="card">
@@ -73,9 +77,9 @@ export function LearnPage({ clubs, clubId }: { clubs: Club[]; clubId: string }) 
             <b>Подсказки по типам</b>
             {roles.length > 1 && <select value={role} onChange={(e) => setRole(e.target.value)} aria-label="Роль"><option value="">Все роли</option>{roles.map((x) => <option key={x}>{x}</option>)}</select>}
           </div>
-          {!rows.length ? <p className="muted small" style={{ margin: '8px 0 0' }}>Пока подсказок не было. Они появятся с утренними «3 подсказками», карточками в колокольчике и ответами помощника в чате.</p> : (
+          {!rows.length ? <p className="muted small" style={{ margin: '8px 0 0' }}>Пока подсказок не было. Они появятся с утренними «3 подсказками», карточками в колокольчике и ответами Дяди Вити в чате.</p> : (
             <div className="tbl" style={{ marginTop: 8 }}><table>
-              <thead><tr><th>Подсказка</th><th>Кому</th><th className="num">Показано</th><th className="num">👍</th><th className="num">👎</th><th className="num">Сделали</th><th className="num">Продажи</th><th className="num">Игнор</th><th className="num">Польза</th><th>Что делает помощник</th>{r.canEdit && <th>Решение</th>}</tr></thead>
+              <thead><tr><th>Подсказка</th><th>Кому</th><th className="num">Показано</th><th className="num">👍</th><th className="num">👎</th><th className="num">Сделали</th><th className="num">Продажи</th><th className="num">Игнор</th><th className="num">Польза</th><th>Что делает Дядя Витя</th>{r.canEdit && <th>Решение</th>}</tr></thead>
               <tbody>{rows.map((x) => (
                 <tr key={`${x.kind}|${x.role}`}>
                   <td>{x.name}</td><td>{x.roleName}</td><td className="num">{x.shown}</td><td className="num">{x.likes}</td><td className="num">{x.dislikes}</td>
@@ -83,7 +87,7 @@ export function LearnPage({ clubs, clubId }: { clubs: Club[]; clubId: string }) 
                   <td className="num">{x.usefulPct == null ? '—' : `${x.usefulPct} %`}</td>
                   <td><span className={`learn-st ${STATUS[x.status][1]}`}>{STATUS[x.status][0]}</span></td>
                   {r.canEdit && <td>{x.role ? <select value={x.mode} aria-label="Решение" onChange={(e) => void setMode(x, e.target.value)}>
-                    <option value="auto">Как решит помощник</option><option value="boost">Показывать чаще</option><option value="off">Не показывать</option></select> : '—'}</td>}
+                    <option value="auto">Как решит Дядя Витя</option><option value="boost">Показывать чаще</option><option value="off">Не показывать</option></select> : '—'}</td>}
                 </tr>))}</tbody>
             </table></div>)}
         </div>
@@ -100,8 +104,8 @@ export function LearnPage({ clubs, clubId }: { clubs: Club[]; clubId: string }) 
           </div>
           <div className="card">
             <b>Образцы удачных ответов</b>
-            <p className="small muted" style={{ margin: '4px 0 8px' }}>Ответы, которые сотрудники отметили «Полезно». Нейросеть помощника получает их как пример, каким должен быть ответ.</p>
-            {!r.examples.length ? <p className="muted small">Пока нет — появятся, когда руководители оценят ответы помощника в чате.</p>
+            <p className="small muted" style={{ margin: '4px 0 8px' }}>Ответы, которые сотрудники отметили «Полезно». Нейросеть Дяди Вити получает их как пример, каким должен быть ответ.</p>
+            {!r.examples.length ? <p className="muted small">Пока нет — появятся, когда руководители оценят ответы Дяди Вити в чате.</p>
               : <ul className="learn-comments">{r.examples.map((e, i) => <li key={i}><div className="small muted">{dt(e.at)} · {e.user}</div><div><b>Вопрос:</b> {e.question}</div><div className="small">{plain(e.body)}</div></li>)}</ul>}
           </div>
         </div>

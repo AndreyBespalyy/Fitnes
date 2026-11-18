@@ -6,10 +6,11 @@ import { audit, withCtx, type Ctx } from '../db.ts';
 import { badRequest, forbidden } from '../errors.ts';
 import { hashPassword, tempPassword } from '../passwords.ts';
 import { PERMISSIONS as P } from '../roles.ts';
+import { assertCanManageUser } from './roleAdmin.ts';
 
-/** Настройка сети: только собственник или администратор сети */
+/** Настройка сети: только собственник, администратор сети или технический администратор */
 function networkAdmin(ctx: Ctx) {
-  if (!ctx.allClubs || !(can(ctx, '*') || ctx.roles.includes('admin'))) throw forbidden('Защитой входа управляет собственник или администратор сети');
+  if (!ctx.allClubs || !(can(ctx, '*') || ctx.roles.includes('admin') || ctx.roles.includes('techadmin'))) throw forbidden('Защитой входа управляет собственник или администратор сети');
 }
 
 export function loginSecurityRoutes(app: FastifyInstance, pool: pg.Pool) {
@@ -58,6 +59,8 @@ export function loginSecurityRoutes(app: FastifyInstance, pool: pg.Pool) {
         const u = (await db.query(`select u.id, u.full_name, u.login, u.status,
             exists (select 1 from user_assignments a where a.user_id = u.id and a.role_code = 'owner') as owner from users u where u.id = $1`, [id])).rows[0];
         if (!u || u.status !== 'active' || (u.owner && !can(ctx, '*'))) continue;
+        // Пароль можно выдать только тому, чью роль сам мог бы назначить: иначе это вход в чужие права
+        try { await assertCanManageUser(db, ctx, id); } catch { continue; }
         const pw = tempPassword();
         await db.query(`update users set password_hash = $2, must_change_password = true, failed_attempts = 0, locked_until = null, updated_at = now() where id = $1`,
           [id, await hashPassword(pw)]);

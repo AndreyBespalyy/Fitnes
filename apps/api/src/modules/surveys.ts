@@ -3,11 +3,12 @@
 // Низкая оценка — задача управляющему со сроком, высокая — просьба оставить отзыв на Яндекс Картах или в 2ГИС. Индекс по клубу и сотрудникам.
 import type { FastifyInstance } from 'fastify';
 import type pg from 'pg';
+import { staffOf } from './salesOps.ts';
 import { requirePerm } from '../auth.ts';
 import { audit, withCtx, type Db } from '../db.ts';
 import { badRequest } from '../errors.ts';
 import { PERMISSIONS as P } from '../roles.ts';
-import { conversationFor, deliver, firstName, queueMessage, renderTemplate } from './messaging.ts';
+import { autoLimitReason, conversationFor, deliver, firstName, queueMessage, renderTemplate } from './messaging.ts';
 import type { Fetch } from './msgProviders.ts';
 
 type Actor = { tenantId: string; userId: string | null };
@@ -68,6 +69,7 @@ export async function sendSurveys(db: Db, f: Fetch | null, actor: Actor, clubId:
     if ((await db.query(`select 1 from surveys where person_id = $1 and created_at > now() - interval '30 days'`, [d.personId])).rowCount) continue;
     const p = (await db.query('select messaging_opt_out from persons where id = $1 and merged_into_id is null', [d.personId])).rows[0];
     if (!p || p.messaging_opt_out) continue;
+    if (await autoLimitReason(db, d.personId, clubId)) continue; // общий недельный лимит автосообщений — спросим в другой день
     const conv = await conversationFor(db, actor, d.personId, clubId, true);
     if (!conv || conv === 'new') continue;
     const text = await renderTemplate(db, s.question, d.personId, clubId);
@@ -101,11 +103,12 @@ export async function collectAnswers(db: Db, f: Fetch | null, actor: Actor, club
     const name = firstName(sv.full_name);
     const reply = async (text: string) => { const mid = await queueMessage(db, actor, sv.conversation_id, text, { auto: true }); if (f) await deliver(db, f, mid); };
     if (res.score <= s.lowMax) {
-      const gm = (await db.query(`select u.id from users u join user_assignments a on a.user_id = u.id where a.club_id = $1 and a.role_code = 'gm' and u.status = 'active' limit 1`, [clubId])).rows[0]?.id ?? null;
+      // Управляющий клуба; нет управляющего — РОП, нет и его — собственник (повторная проверка CRM 18.11.2026, п. 11): иначе задача без исполнителя
+      const gm = ((await staffOf(db, clubId, ['gm']))[0] ?? (await staffOf(db, clubId, ['rop']))[0] ?? (await staffOf(db, clubId, ['owner']))[0])?.id ?? null;
       const tid = (await db.query(`insert into tasks(tenant_id, club_id, assignee_id, person_id, kind, title, due_at) values ($1,$2,$3,$4,'call',$5, now() + make_interval(hours => $6::int)) returning id`,
         [actor.tenantId, clubId, gm, sv.person_id, `Низкая оценка клуба: ${res.score} из 10. Связаться и разобраться${comment ? `: «${comment.slice(0, 200)}»` : ''}`, s.taskHours])).rows[0].id;
       await db.query('update surveys set task_id = $2 where id = $1', [sv.id, tid]);
-      await reply(`${name}, спасибо за честный ответ. Нам жаль, что что-то пошло не так — управляющий клуба свяжется с вами и разберётся.`);
+      await reply(`${name}, спасибо за честный ответ. Нам жаль, что что-то пошло не так — руководитель клуба свяжется с вами и разберётся.`);
     } else if (res.score >= s.highMin) {
       const links = [s.yandexUrl && `Яндекс Карты: ${s.yandexUrl}`, s.gisUrl && `2ГИС: ${s.gisUrl}`].filter(Boolean);
       if (links.length) {

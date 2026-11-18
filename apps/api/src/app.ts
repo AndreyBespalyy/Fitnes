@@ -11,6 +11,7 @@ import { personRoutes } from './modules/persons.ts';
 import { crmRoutes } from './modules/crm.ts';
 import { pipelineRoutes } from './modules/pipelines.ts';
 import { staffRoutes } from './modules/staff.ts';
+import { roleAdminRoutes } from './modules/roleAdmin.ts';
 import { membershipRoutes } from './modules/memberships.ts';
 import { contractRoutes } from './modules/contracts.ts';
 import { siteRoutes } from './modules/site.ts';
@@ -18,6 +19,8 @@ import { fiscalRoutes, startFiscalWorker } from './modules/fiscal.ts';
 import { financeRoutes } from './modules/finance.ts';
 import { importRoutes } from './modules/import.ts';
 import { messagingRoutes, startMessagingWorker } from './modules/messaging.ts';
+import { startTgUserHub, tgUserRoutes } from './modules/tgUser.ts';
+import { startChatAiWorker } from './modules/chatAi.ts';
 import { acsRoutes } from './modules/acs.ts';
 import { pocketkeyRoutes } from './modules/pocketkey.ts';
 import { billingRoutes, startBillingWorker } from './modules/billing.ts';
@@ -134,6 +137,7 @@ export async function buildApp(pool: pg.Pool, opts: { webDist?: string; secureCo
   authRoutes(app, pool, { secureCookie: !!opts.secureCookie });
   clubRoutes(app, pool);
   staffRoutes(app, pool);
+  roleAdminRoutes(app, pool);
   personRoutes(app, pool);
   crmRoutes(app, pool);
   pipelineRoutes(app, pool);
@@ -146,6 +150,7 @@ export async function buildApp(pool: pg.Pool, opts: { webDist?: string; secureCo
   financeRoutes(app, pool);
   importRoutes(app, pool);
   messagingRoutes(app, pool, { fetch: opts.fetch });
+  tgUserRoutes(app, pool);
   acsRoutes(app, pool);
   pocketkeyRoutes(app, pool);
   billingRoutes(app, pool, { fetch: opts.fetch });
@@ -215,6 +220,8 @@ export async function buildApp(pool: pg.Pool, opts: { webDist?: string; secureCo
   if (opts.monitorWorker) { const stop = startMonitorWorker(pool, monitorOpts); app.addHook('onClose', async () => stop()); }
   // Фоновая отправка чеков в облачную кассу (в тестах выключена, там вызывается напрямую)
   if (opts.messagingWorker) { const stop = startMessagingWorker(pool, opts.fetch); app.addHook('onClose', async () => stop()); }
+  // Свой модуль Telegram: живые соединения с аккаунтами клубов держит только фоновый процесс
+  if (opts.messagingWorker) { const stop = startTgUserHub(pool, opts.fetch); app.addHook('onClose', async () => stop()); }
   if (opts.billingWorker) { const stop = startBillingWorker(pool, opts.fetch); app.addHook('onClose', async () => stop()); }
   if (opts.scheduleWorker) { const stop = startScheduleWorker(pool, opts.fetch ?? fetch); app.addHook('onClose', async () => stop()); }
   if (opts.staffBotWorker) { const stop = startStaffBotWorker(pool, opts.fetch ?? fetch); app.addHook('onClose', async () => stop()); }
@@ -227,6 +234,8 @@ export async function buildApp(pool: pg.Pool, opts: { webDist?: string; secureCo
   if (opts.pushWorker) { const stop = startPushWorker(pool, opts.fetch ?? fetch); app.addHook('onClose', async () => stop()); }
   if (opts.scoringWorker) { const stop = startScoringWorker(pool); app.addHook('onClose', async () => stop()); }
   if (opts.aiWorker) { const stop = startAiWorker(pool, ai, storage); app.addHook('onClose', async () => stop()); }
+  // Разбор переписки с клиентами — так же, как разбор записей звонков
+  if (opts.aiWorker) { const stop = startChatAiWorker(pool, ai); app.addHook('onClose', async () => stop()); }
   // Записи разговоров из АТС забираются вместе с работой ИИ (тот же флаг фоновой работы)
   if (opts.aiWorker) { const stop = startPbxWorker(pool, storage, opts.fetch ?? fetch, !!ai); app.addHook('onClose', async () => stop()); }
   if (opts.insightsWorker) { const stop = startInsightsWorker(pool, ai); app.addHook('onClose', async () => stop()); }

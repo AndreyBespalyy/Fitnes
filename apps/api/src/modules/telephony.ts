@@ -8,7 +8,7 @@
 import { randomBytes } from 'node:crypto';
 import type { FastifyInstance } from 'fastify';
 import type pg from 'pg';
-import { requireCtx, requirePerm } from '../auth.ts';
+import { requireAnyPerm, requireCtx, requirePerm } from '../auth.ts';
 import { audit, withCtx, type Ctx, type Db } from '../db.ts';
 import { badRequest, notFound } from '../errors.ts';
 import { PERMISSIONS as P } from '../roles.ts';
@@ -284,7 +284,7 @@ export function telephonyRoutes(app: FastifyInstance, pool: pg.Pool, opts: { fet
 
   // Настройки телефонии клуба: подключение, адрес для событий, внутренние номера сотрудников
   app.get('/api/pbx', async (req) => {
-    const ctx = requirePerm(req, P.planManage);
+    const ctx = requireAnyPerm(req, P.planManage, P.integrationsManage);
     const { clubId } = req.query as { clubId?: string };
     return withCtx(pool, ctx, async (db) => {
       if (!(await db.query(`select 1 from clubs where id = $1`, [clubId ?? null])).rowCount) throw notFound('Клуб не найден');
@@ -299,7 +299,7 @@ export function telephonyRoutes(app: FastifyInstance, pool: pg.Pool, opts: { fet
   });
 
   app.put('/api/pbx', async (req) => {
-    const ctx = requirePerm(req, P.planManage);
+    const ctx = requireAnyPerm(req, P.planManage, P.integrationsManage);
     const b = (req.body ?? {}) as { clubId?: string; kind?: string; domain?: string; apiKey?: string; status?: string };
     if (!b.clubId) throw badRequest('Выберите клуб');
     if (!KINDS[b.kind ?? '']) throw badRequest('Выберите АТС');
@@ -323,7 +323,7 @@ export function telephonyRoutes(app: FastifyInstance, pool: pg.Pool, opts: { fet
   });
 
   app.post('/api/pbx/:id/test', async (req) => {
-    const ctx = requirePerm(req, P.planManage);
+    const ctx = requireAnyPerm(req, P.planManage, P.integrationsManage);
     const { id } = req.params as { id: string };
     return withCtx(pool, ctx, async (db) => {
       const c = await loadConn(db, id);
@@ -343,7 +343,7 @@ export function telephonyRoutes(app: FastifyInstance, pool: pg.Pool, opts: { fet
   });
 
   app.put('/api/pbx/:id/extensions', async (req) => {
-    const ctx = requirePerm(req, P.planManage);
+    const ctx = requireAnyPerm(req, P.planManage, P.integrationsManage);
     const { id } = req.params as { id: string };
     const items = ((req.body ?? {}) as { items?: { userId?: string; ext?: string }[] }).items ?? [];
     const clean = items.map((i) => ({ userId: i.userId ?? '', ext: String(i.ext ?? '').trim() })).filter((i) => i.userId && i.ext);

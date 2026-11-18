@@ -151,7 +151,7 @@ const docsList = (t: string, v: PageData) => v.docs.length
 /* ---------- маршруты ---------- */
 export function contractSmsRoutes(app: FastifyInstance, pool: pg.Pool, storage: string, opts: { fetch?: Fetch } = {}) {
   const f = opts.fetch ?? fetch;
-  const net = (ctx: Ctx) => { if (!ctx.allClubs || !(can(ctx, '*') || can(ctx, P.contractsManage))) throw forbidden('СМС настраивает собственник или администратор сети'); };
+  const net = (ctx: Ctx) => { if (!ctx.allClubs || !(can(ctx, '*') || can(ctx, P.contractsManage) || can(ctx, P.integrationsManage))) throw forbidden('СМС настраивает собственник или администратор сети'); };
 
   app.get('/api/sms/settings', async (req) => {
     const ctx = requireCtx(req); net(ctx);
@@ -159,7 +159,8 @@ export function contractSmsRoutes(app: FastifyInstance, pool: pg.Pool, storage: 
       const s = (await db.query('select provider, sender, login, secret_enc is not null as "hasSecret", updated_at as "updatedAt" from sms_settings')).rows[0]
         ?? { provider: 'test', sender: null, login: null, hasSecret: false, updatedAt: null };
       const outbox = (await db.query(`select to_phone as phone, text, provider, status, error, created_at as "at" from sms_outbox order by created_at desc limit 20`)).rows
-        .map((r) => ({ ...r, phone: mask(r.phone) }));
+        // Текст СМС (коды подписания, имена) — только тем, кто видит клиентов; техническому администратору — состояние отправки
+        .map((r) => ({ ...r, phone: mask(r.phone), text: can(ctx, P.personsView) ? r.text : null }));
       return { ...s, outbox };
     });
   });

@@ -119,7 +119,7 @@ test('«Показать скрипт звонка»: тема по данным
   const s1 = (await req('GET', `/api/agent/call-script/person/${lead}`, 'm.volkova')).json();
   assert.equal(s1.code, 'lead', JSON.stringify(s1));
   assert.equal(s1.title, 'Звонок по заявке');
-  assert.equal(s1.lines[0].text, '«Сергей, добрый день! Это Мария из Сандов Фитнес. Вы оставляли заявку — спасибо. Удобно две минуты?»');
+  assert.equal(s1.lines[0].text, '«Сергей, добрый день! Это Мария из клуба «Центр». Вы оставляли заявку — спасибо. Удобно две минуты?»');
   assert.match(s1.lines.find((l: { stage: string }) => l.stage === 'День и время').text, /Тогда (в|во) \S+ в 19:00 — записываю/);
   assert.ok(s1.ifSays.some((x: { q: string }) => x.q === '«Дорого»'));
   assert.match(s1.never, /вам актуально/);
@@ -136,4 +136,20 @@ test('«Показать скрипт звонка»: тема по данным
   const s3 = (await req('GET', `/api/agent/call-script/task/${task}?as=base`, 'm.volkova')).json();
   assert.equal(s3.code, 'base');
   assert.match(s3.lines[0].text, /мы с вами раньше общались — вы оставляли заявку\./);
+});
+
+test('обращение к клиенту: имя и отчество, без фамилии', async () => {
+  const { nameParts, addressName } = await import('../src/lib/names.ts');
+  assert.equal(addressName('Иванова Мария Сергеевна'), 'Мария Сергеевна');
+  assert.equal(addressName('Мария Сергеевна Иванова'), 'Мария Сергеевна');
+  assert.equal(addressName('Екатерина Егорова'), 'Екатерина');
+  assert.equal(addressName('Егорова Екатерина'), 'Екатерина');
+  assert.equal(addressName('Громов Алексей'), 'Алексей');
+  assert.equal(addressName('Павел Рябов'), 'Павел');
+  assert.deepEqual(nameParts('Заявкин Сергей'), { first: 'Сергей', middle: null });
+  // В скрипте — имя и отчество
+  const p = (await req('POST', '/api/leads', 'm.volkova', { clubId: centr, fullName: 'Отчествова Анна Петровна', phone: '+79007770031', sourceCode: 'walk_in' })).json().personId;
+  const s = (await req('GET', `/api/agent/call-script/person/${p}`, 'm.volkova')).json();
+  assert.match(s.lines[0].text, /^«Анна Петровна, добрый день! Это Мария из клуба «Центр»/);
+  assert.doesNotMatch(JSON.stringify(s.lines), /Отчествова/);
 });

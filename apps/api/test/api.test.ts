@@ -98,7 +98,9 @@ test('новый сотрудник получает временный паро
   assert.equal(ch.statusCode, 200);
   assert.equal((await get('/api/clubs', first.cookie)).statusCode, 200);
   // Сетевой роли клуб не нужен, клубной — обязателен
-  assert.equal((await post('/api/staff', { fullName: 'Без Клуба', role: 'rop' }, adm.cookie)).statusCode, 400);
+  assert.equal((await post('/api/staff', { fullName: 'Без Клуба', role: 'desk' }, adm.cookie)).statusCode, 400);
+  // Роль с отчётами и деньгами (РОП, финансист, управляющий) администратор системы не выдаёт — её прав у него нет (18.11.2026)
+  assert.equal((await post('/api/staff', { fullName: 'Новый РОП', role: 'rop', clubId: clubs[0].id }, adm.cookie)).statusCode, 403);
   // Администратор не может назначить собственника
   assert.equal((await post('/api/staff', { fullName: 'Второй Собственник', role: 'owner' }, adm.cookie)).statusCode, 403);
 });

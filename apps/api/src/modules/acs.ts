@@ -5,7 +5,7 @@
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import type pg from 'pg';
 import { createHash, randomBytes } from 'node:crypto';
-import { requirePerm } from '../auth.ts';
+import { can, requirePerm } from '../auth.ts';
 import { audit, withCtx, type Ctx, type Db } from '../db.ts';
 import { badRequest, notFound } from '../errors.ts';
 import { PERMISSIONS as P } from '../roles.ts';
@@ -496,7 +496,8 @@ export function acsRoutes(app: FastifyInstance, pool: pg.Pool) {
         where club_id = $1 and ${inRange('visited_at')} group by 1 order by 1`, range)).rows;
       const manual = (await db.query(`select e.happened_at as at, e.direction, e.reason, e.manual_reason as "manualReason", mb.full_name as "manualBy", p.full_name as person, pt.name as point
         from access_events e left join users mb on mb.id = e.manual_by left join persons p on p.id = e.person_id left join access_points pt on pt.id = e.point_id
-        where e.club_id = $1 and e.mode = 'manual' and ${inRange('e.happened_at')} order by e.happened_at desc`, range)).rows;
+        where e.club_id = $1 and e.mode = 'manual' and ${inRange('e.happened_at')} order by e.happened_at desc`, range)).rows
+        .map((r) => (can(ctx, P.personsView) ? r : { ...r, person: null }));
       const denials = (await db.query(`select reason_code as "reasonCode", count(*)::int as n, count(distinct coalesce(person_id::text, code))::int as people
         from access_events where club_id = $1 and decision = 'deny' and ${inRange('happened_at')} group by 1 order by 2 desc`, range)).rows
         .map((r) => ({ ...r, title: REASON_TITLES[r.reasonCode] ?? r.reasonCode }));

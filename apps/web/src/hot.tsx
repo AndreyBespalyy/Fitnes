@@ -1,6 +1,6 @@
 // Шаг 15. ИИ-помощник продаж: план дня, горячий список с предложением, теневой режим.
 import { HintLine, UpsellList, useUpsell, type Hint } from './upsell.tsx';
-import { DialButton } from './mobile.tsx';
+import { ContactButtons } from './mobile.tsx';
 import { useEffect, useState } from 'react';
 import { api, can, type Club, type Me, navParams } from './api.ts';
 import { dt, errText, toast } from './ui.ts';
@@ -21,9 +21,9 @@ export function HotPage({ me, clubs, clubId, openPerson }: { me: Me; clubs: Club
   const club = clubId !== 'all' ? clubId : clubs[0]?.id ?? '';
   return (
     <>
-      <div className="tabs" role="group" aria-label="ИИ-помощник">{tabs.filter((t) => t[2]).map(([k, t]) => <button key={k} aria-pressed={tab === k} onClick={() => setTab(k)}>{t}</button>)}</div>
+      <div className="tabs" role="group" aria-label="Дядя Витя">{tabs.filter((t) => t[2]).map(([k, t]) => <button key={k} aria-pressed={tab === k} onClick={() => setTab(k)}>{t}</button>)}</div>
       <p className="small muted" style={{ margin: 0 }}>Рекомендации ИИ: основание, период и уверенность указаны. Цены — по действующему прейскуранту клуба, ИИ их не меняет.</p>
-      {tab === 'day' && club && <DayPlan clubId={club} openPerson={openPerson} />}
+      {tab === 'day' && club && <DayPlan me={me} clubId={club} openPerson={openPerson} />}
       {tab === 'list' && <HotList me={me} clubId={clubId} openPerson={openPerson} />}
       {tab === 'shadow' && <Shadow clubId={clubId} />}
       {tab === 'upsell' && club && <UpsellList clubId={club} openPerson={openPerson} />}
@@ -43,7 +43,7 @@ function Take({ row, onDone }: { row: HotRow; onDone: () => void }) {
   return <button className="btn sm pri" onClick={take}>Взять в работу</button>;
 }
 
-function HotItem({ r, openPerson, reload, showOwner, hints }: { r: HotRow; openPerson: (id: string) => void; reload: () => void; showOwner?: boolean; hints?: Hint[] }) {
+function HotItem({ me, r, openPerson, reload, showOwner, hints }: { me: Me; r: HotRow; openPerson: (id: string) => void; reload: () => void; showOwner?: boolean; hints?: Hint[] }) {
   return (
     <div className="item" style={{ display: 'grid', gap: 4 }}>
       <div className="row between">
@@ -55,7 +55,7 @@ function HotItem({ r, openPerson, reload, showOwner, hints }: { r: HotRow; openP
       {r.offer?.text && <div className="small"><b>Предложение:</b> {r.offer.text}</div>}
       {hints && <HintLine hints={hints} />}
       <div className="small muted">{r.phone ?? 'телефона нет'}{r.lastContactAt ? ` · последний контакт ${dt(r.lastContactAt)}` : ' · ещё не общались'}{r.nextTaskAt ? ` · задача на ${dt(r.nextTaskAt)}` : ''}{showOwner ? ` · ${r.ownerName ?? 'общий список клуба'}` : ''}</div>
-      <div className="row">{r.segment !== 'excluded' && <Take row={r} onDone={reload} />}{r.phone && r.segment !== 'excluded' && <DialButton personId={r.personId} />}<button className="btn sm" onClick={() => openPerson(r.personId)}>Карточка</button></div>
+      <div className="row">{r.segment !== 'excluded' && <Take row={r} onDone={reload} />}{r.phone && r.segment !== 'excluded' && <ContactButtons me={me} personId={r.personId} clubId={r.clubId} />}<button className="btn sm" onClick={() => openPerson(r.personId)}>Карточка</button></div>
     </div>
   );
 }
@@ -66,7 +66,7 @@ type Day = {
   targets: { calls: number | null; meetings: number | null }; tasks: { overdue: number; today: number; reviews: number }; meetings: { at: string; name: string }[];
   callFirst: HotRow[]; byKind: Record<string, number>; blocks: { from: string; to: string; title: string; detail: string }[]; basis: string[]; confidence: string; own: boolean;
 };
-function DayPlan({ clubId, openPerson }: { clubId: string; openPerson: (id: string) => void }) {
+export function DayPlan({ me, clubId, openPerson }: { me: Me; clubId: string; openPerson: (id: string) => void }) {
   const [d, setD] = useState<Day | null>(null);
   const [err, setErr] = useState('');
   const hintsOf = useUpsell(d?.callFirst);
@@ -88,7 +88,7 @@ function DayPlan({ clubId, openPerson }: { clubId: string; openPerson: (id: stri
       </div>
       <div className="card" style={{ display: 'grid', gap: 8 }}><h2>Звонить первым</h2>
         {d.callFirst.length === 0 ? <p className="muted" style={{ margin: 0 }}>Горячих клиентов сейчас нет: посмотрите тёплых в горячем списке.</p>
-          : <div className="list">{d.callFirst.map((r) => <HotItem key={r.kind + r.personId} r={r} openPerson={openPerson} reload={load} hints={hintsOf(r.clubId, r.personId)} />)}</div>}
+          : <div className="list">{d.callFirst.map((r) => <HotItem key={r.kind + r.personId} me={me} r={r} openPerson={openPerson} reload={load} hints={hintsOf(r.clubId, r.personId)} />)}</div>}
       </div>
       <p className="small muted" style={{ margin: 0 }}>Основание: {d.basis.join('; ')}. Уверенность: {d.confidence}.</p>
     </>
@@ -107,8 +107,10 @@ function HotList({ me, clubId, openPerson }: { me: Me; clubId: string; openPerso
   };
   useEffect(() => { load(); }, [clubId, kind, seg, mine]);
   const recompute = async () => {
-    if (clubId === 'all') { toast('Выберите клуб'); return; }
-    try { await api('POST', '/api/ai/scores/recompute', { clubId }); toast('Оценки пересчитаны'); load(); } catch (x) { toast(errText(x)); }
+    // «Все клубы»: пересчитываем каждый клуб, а не просим выбрать вверху (повторная проверка CRM 18.11.2026, п. 15)
+    try {
+      const ids = clubId === 'all' ? (await api<{ id: string }[]>('GET', '/api/clubs')).map((c) => c.id) : [clubId];
+      for (const id of ids) await api('POST', '/api/ai/scores/recompute', { clubId: id }); toast('Оценки пересчитаны'); load(); } catch (x) { toast(errText(x)); }
   };
   const model = d?.models.find((m) => m.clubId === clubId) ?? d?.models[0];
   const hintsOf = useUpsell(d?.rows);
@@ -124,7 +126,7 @@ function HotList({ me, clubId, openPerson }: { me: Me; clubId: string; openPerso
       {!d ? <p className="muted">Загрузка…</p> : (<>
         <p className="small muted" style={{ margin: 0 }}>Список собран за {d.ms} мс, оценки обновлены {d.computedAt ? dt(d.computedAt) : '—'} (пересчёт каждые 15 минут). Модель: {model ? `${model.version}${model.metrics.aucModel ? `, качество на проверке AUC ${model.metrics.aucModel}` : ''}` : 'правила'}{model?.metrics.note ? `. ${model.metrics.note}` : ''}. {mine ? 'Ваши клиенты и общий список клуба.' : ''}</p>
         {d.rows.length === 0 ? <div className="card"><p className="muted" style={{ margin: 0 }}>Клиентов в этом списке нет.</p></div>
-          : <div className="list">{d.rows.map((r) => <HotItem key={r.kind + r.personId} r={r} openPerson={openPerson} reload={load} showOwner={!mine} hints={hintsOf(r.clubId, r.personId)} />)}</div>}
+          : <div className="list">{d.rows.map((r) => <HotItem key={r.kind + r.personId} me={me} r={r} openPerson={openPerson} reload={load} showOwner={!mine} hints={hintsOf(r.clubId, r.personId)} />)}</div>}
       </>)}
     </>
   );

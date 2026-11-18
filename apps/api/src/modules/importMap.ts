@@ -3,12 +3,12 @@
 import { createHash } from 'node:crypto';
 import { normalizePhone } from './crm.ts';
 
-export type ReportType = 'clients' | 'memberships' | 'payments' | 'visits' | 'balances' | 'tasks';
-export const REPORT_TYPES: ReportType[] = ['clients', 'memberships', 'payments', 'visits', 'balances', 'tasks'];
-/** Без этих отчётов перенос не начинается; «Задачи» — по желанию. */
+export type ReportType = 'clients' | 'memberships' | 'payments' | 'visits' | 'balances' | 'tasks' | 'staff';
+export const REPORT_TYPES: ReportType[] = ['clients', 'memberships', 'payments', 'visits', 'balances', 'tasks', 'staff'];
+/** Без этих отчётов перенос не начинается; «Задачи» и «Сотрудники» — по желанию. */
 export const REQUIRED_REPORTS: ReportType[] = ['clients', 'memberships', 'payments', 'visits', 'balances'];
 export const REPORT_NAMES: Record<ReportType, string> = {
-  clients: 'Клиенты', memberships: 'Абонементы и договоры', payments: 'Платежи', visits: 'Посещения', balances: 'Остатки и долги', tasks: 'Задачи и звонки',
+  clients: 'Клиенты', memberships: 'Абонементы и договоры', payments: 'Платежи', visits: 'Посещения', balances: 'Остатки и долги', tasks: 'Задачи и звонки', staff: 'Сотрудники',
 };
 
 type Kind = 'text' | 'date' | 'datetime' | 'money' | 'int' | 'phone' | 'email';
@@ -88,6 +88,19 @@ export const FIELDS: Record<ReportType, FieldDef[]> = {
     { key: 'result', label: 'Результат', kind: 'text', weight: 2, syn: ['результат', 'итог', 'результат выполнения', 'результат взаимодействия', 'исход'] },
     { key: 'assignee', label: 'Ответственный', kind: 'text', weight: 2, syn: ['ответственный', 'исполнитель', 'сотрудник', 'менеджер', 'ответственный сотрудник'] },
   ],
+  // Сотрудники клуба (18.11.2026): учётная запись в системе, роль подбирается по должности, человек проверяет до переноса
+  staff: [
+    { key: 'ext_id', label: 'Код сотрудника', kind: 'text', weight: 0.5, syn: ['код', 'код сотрудника', 'табельный номер', 'таб номер', 'id сотрудника', 'сотрудник код'] },
+    { key: 'full_name', label: 'ФИО', kind: 'text', required: true, weight: 2, syn: ['фио', 'сотрудник', 'наименование', 'фамилия имя отчество', 'физическое лицо', 'работник', 'сотрудник наименование'] },
+    { key: 'position', label: 'Должность', kind: 'text', required: true, weight: 4, syn: ['должность', 'должность сотрудника', 'сотрудник должность', 'позиция', 'специальность', 'должность наименование'] },
+    { key: 'role', label: 'Роль в новой системе', kind: 'text', weight: 1, syn: ['роль', 'роль в новой системе', 'роль в crm', 'роль в системе'] },
+    { key: 'phone', label: 'Телефон', kind: 'phone', weight: 1, syn: ['телефон', 'мобильный телефон', 'сотовый телефон', 'контактный телефон', 'телефон сотрудника', 'сотрудник телефон'] },
+    { key: 'email', label: 'Эл. почта', kind: 'email', weight: 0.5, syn: ['email', 'e mail', 'электронная почта', 'почта', 'эл почта'] },
+    { key: 'hired_on', label: 'Дата приёма', kind: 'date', weight: 1, syn: ['дата приема', 'принят', 'дата приема на работу', 'дата начала работы'] },
+    { key: 'fired_on', label: 'Дата увольнения', kind: 'date', weight: 2, syn: ['дата увольнения', 'уволен', 'дата окончания работы'] },
+    { key: 'status', label: 'Статус (работает / уволен)', kind: 'text', weight: 1, syn: ['статус', 'состояние', 'работает', 'статус сотрудника', 'архив', 'недействителен'] },
+    { key: 'unit', label: 'Клуб (структурная единица)', kind: 'text', weight: 0.5, syn: ['структурная единица', 'подразделение', 'клуб', 'филиал', 'организация'] },
+  ],
 };
 
 const FILE_HINTS: [ReportType, RegExp][] = [
@@ -97,6 +110,7 @@ const FILE_HINTS: [ReportType, RegExp][] = [
   ['visits', /посещ|визит|проход|visit/i],
   ['balances', /долг|остат|задолж|баланс|balance|debt/i],
   ['tasks', /задач|взаимодейств|звонк|task/i],
+  ['staff', /сотрудн|персонал|кадр|штат|staff/i],
 ];
 
 export const normHeader = (s: string) => s.toLowerCase().replace(/ё/g, 'е').replace(/[^a-zа-я0-9]+/g, ' ').trim();
@@ -250,6 +264,23 @@ export function taskKindOf(raw: string): 'call' | 'meeting' | 'message' | 'other
   if (/встреч|визит|экскурс|пробн|консультац/.test(s)) return 'meeting';
   if (/сообщ|смс|sms|письм|почт|whatsapp|telegram|мессендж|рассыл/.test(s)) return 'message';
   return 'other';
+}
+
+/** Роль в системе по должности из 1С (или по колонке «Роль»). null — не распознали, человек назначит сам; 'owner' — собственник, не переносим. */
+export function roleOfPosition(raw: string): 'gm' | 'rop' | 'manager' | 'desk' | 'trainer' | 'fin' | 'owner' | null {
+  const s = raw.toLowerCase().replace(/ё/g, 'е').trim();
+  if (!s) return null;
+  const byCode: Record<string, 'gm' | 'rop' | 'manager' | 'desk' | 'trainer' | 'fin'> = { gm: 'gm', rop: 'rop', manager: 'manager', desk: 'desk', trainer: 'trainer', fin: 'fin' };
+  if (byCode[s]) return byCode[s];
+  if (/собственник|учредител|владел|генеральн/.test(s)) return 'owner';
+  if (/управляющ|директор|руководитель клуба|заведующ/.test(s)) return 'gm';
+  if (/руководитель (отдела )?продаж|руководитель оп|начальник отдела продаж|^роп\b|старший менеджер/.test(s)) return 'rop';
+  if (/бухгалтер|финанс|экономист|кассир/.test(s)) return 'fin';
+  if (/систем|программист|\bит\b|it /.test(s)) return null;
+  if (/администратор|ресепш|рецепц|reception|front/.test(s)) return 'desk';
+  if (/менеджер|продаж|консультант|sales/.test(s)) return 'manager';
+  if (/тренер|инструктор|фитнес|йог|пилатес|массаж|coach|преподават/.test(s)) return 'trainer';
+  return null;
 }
 
 export const isFooter = (cells: string[]) => /^(итог|всего)/i.test(cells.find((c) => c !== '') ?? '');

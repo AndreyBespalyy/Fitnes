@@ -35,14 +35,14 @@ export function usePersonSearch(club: string | null) {
 type Dep = { balanceKop: number; balances: { clubId: string; clubName: string; balanceKop: number }[]; canTopup: boolean; canRefund: boolean;
   moves: { id: string; kind: string; amountKop: number; method: string | null; comment: string | null; createdAt: string; by: string | null; clubName: string; certCode: string | null }[] };
 
-export function DepositBlock({ personId, clubId }: { personId: string; clubId: string | null }) {
+export function DepositBlock({ personId, clubId, readOnly }: { personId: string; clubId: string | null; readOnly?: boolean }) {
   const [d, setD] = useState<Dep | null>(null);
   const [mode, setMode] = useState<'' | 'topup' | 'cert' | 'refund'>('');
   const [sum, setSum] = useState('');
   const [code, setCode] = useState('');
   const [reason, setReason] = useState('');
   const [err, setErr] = useState('');
-  const load = () => api<Dep>('GET', `/api/persons/${personId}/deposit${clubId ? `?clubId=${clubId}` : ''}`).then(setD).catch((x) => setErr(errText(x)));
+  const load = () => api<Dep>('GET', `/api/persons/${personId}/deposit${clubId ? `?clubId=${clubId}` : ''}`).then((x) => setD(readOnly ? { ...x, canTopup: false, canRefund: false } : x)).catch((x) => setErr(errText(x)));
   useEffect(() => { load(); }, [personId]);
   if (!d) return err ? <div className="card err">{err}</div> : null;
   const run = async (f: () => Promise<unknown>, ok: string) => { setErr(''); try { await f(); toast(ok); setMode(''); setSum(''); setCode(''); setReason(''); load(); } catch (x) { setErr(errText(x)); } };

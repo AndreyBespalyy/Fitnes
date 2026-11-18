@@ -27,7 +27,7 @@ const facts = (): Facts => ({
   leads: [{ at: d(200), source: 'Сайт', comment: 'Хочу абонемент', firstResponseMin: 40 }],
   meetings: [],
   calls: [{ at: d(150), direction: 'исходящий', manager: 'Мария Волкова', durationSec: 120, essence: 'Интересуется годовым', need: null, objections: ['дорого'], agreements: null, outcome: 'думает', nextStep: 'Прислать цены', transcript: null }],
-  clientMessages: [{ at: d(2), from: 'клиент', text: 'А скидка будет?' }], waitingReplySince: d(2),
+  clientMessages: [{ at: d(2), from: 'клиент', text: 'А скидка будет?' }], chats: [], waitingReplySince: d(2),
   memberships: [], debts: [], visits: { last: null, last30: 0, recent: [] }, classes: [], team: [], observations: [],
 });
 

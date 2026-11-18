@@ -1,6 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import type pg from 'pg';
-import { requirePerm } from '../auth.ts';
+import { can, requirePerm } from '../auth.ts';
 import { audit, withCtx } from '../db.ts';
 import { badRequest, forbidden, notFound } from '../errors.ts';
 import { PERMISSIONS as P } from '../roles.ts';
@@ -61,6 +61,8 @@ export function clubRoutes(app: FastifyInstance, pool: pg.Pool) {
       if (b.timezone !== undefined && !TZ.includes(b.timezone)) throw badRequest('Неизвестный часовой пояс');
       if (b.name !== undefined && !b.name.trim()) throw badRequest('Название не может быть пустым');
       const frm = b.firstResponseMinutes;
+      // Норму ответа на заявку задают в «Отдел продаж → Настройки» (повторная проверка CRM 18.11.2026, п. 3) — РОП, управляющий, собственник
+      if (frm !== undefined && !can(ctx, P.configManage) && !can(ctx, P.salesManage)) throw forbidden('Норму ответа на заявку меняют РОП и управляющий в «Отдел продаж → Настройки»');
       if (frm !== undefined && (!Number.isInteger(frm) || frm < 1 || frm > 1440)) throw badRequest('Норма первого ответа: от 1 до 1440 минут');
       await db.query(
         `update clubs set name = coalesce($2, name), address = coalesce($3, address), timezone = coalesce($4, timezone),

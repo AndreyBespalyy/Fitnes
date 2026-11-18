@@ -173,7 +173,7 @@ function EarlyView({ club, openPerson }: { club: string; openPerson: (id: string
         <h2>Досрочное продление</h2>
         <p className="small muted" style={{ margin: 0 }}>За выбранное число дней до конца абонемента клиенту приходит предложение продлиться по текущей цене. Цена держится до конца абонемента, даже если тариф подорожает: при продлении система сама поставит цену из предложения.</p>
         <label className="row" style={{ gap: 8 }}><input type="checkbox" style={{ width: "auto" }} checked={s.enabled} onChange={(x) => setS({ ...s, enabled: x.target.checked })} /> Предлагать досрочное продление</label>
-        <label className="f">За сколько дней до конца<input type="number" min={7} max={90} value={s.days} onChange={(x) => setS({ ...s, days: Number(x.target.value) })} /></label>
+        <label className="f">За сколько дней до конца<input type="number" min={7} max={90} value={s.days} onChange={(x) => setS({ ...s, days: Number(x.target.value) })} /><span className="small muted">Это и есть «Напомнить о продлении за N дн.» из настроек абонементов — одно правило. Автосообщение «Окончание абонемента» не придёт тому, кому уже ушло это предложение.</span></label>
         <label className="row" style={{ gap: 8 }}><input type="checkbox" style={{ width: "auto" }} checked={s.callWithoutMessenger} onChange={(x) => setS({ ...s, callWithoutMessenger: x.target.checked })} /> Без мессенджера — задача менеджеру позвонить</label>
         <label className="f">Текст<textarea rows={5} value={s.template} onChange={(x) => setS({ ...s, template: x.target.value })} /></label>
         <button className="btn pri" onClick={save}>Сохранить</button>

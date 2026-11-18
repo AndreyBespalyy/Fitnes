@@ -62,5 +62,5 @@ export const REASON_TITLES: Record<string, string> = {
   no_membership: 'Нет абонемента', other_club: 'Абонемент другого клуба', expired: 'Абонемент закончился', frozen: 'Заморожен',
   not_started: 'Ещё не начался', used_up: 'Посещения закончились', debt: 'Долг', unsigned: 'Договор не подписан', cancelled: 'Расторгнут',
   wrong_time: 'Не то время', club_closed: 'Клуб закрыт', staff_other_club: 'Сотрудник другого клуба', staff_inactive: 'Сотрудник отключён',
-  point_off: 'Устройство выключено', acs_allowed: 'Пропустила СКУД', acs_denied: 'Отказала СКУД',
+  point_off: 'Устройство выключено', locker: 'Не сдан ключ шкафчика', acs_allowed: 'Пропустила СКУД', acs_denied: 'Отказала СКУД',
 };

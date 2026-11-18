@@ -10,6 +10,7 @@ import { PERMISSIONS as P } from '../roles.ts';
 import { receiptForRefund } from './fiscal.ts';
 import { addDays, clubToday, daysBetween } from './memberships.ts';
 import { applyDiscountDecision, discountLimit } from './promos.ts';
+import { notifyApprovalDecided, notifyApprovalRequested } from './approvalNotes.ts';
 
 type Actor = Pick<Ctx, 'tenantId' | 'userId' | 'ip'> & Partial<Pick<Ctx, 'permissions' | 'roles'>>;
 const rubs = (kop: number) => `${(kop / 100).toLocaleString('ru-RU')} ₽`;
@@ -61,6 +62,7 @@ async function requestApproval(db: Db, ctx: Actor, a: { clubId: string; kind: 'r
      values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) returning id`,
     [ctx.tenantId, a.clubId, a.kind, a.objectId, a.amountKop, a.summary, auto ? 'approved' : 'pending', ctx.userId, auto, auto ? ctx.userId : null, auto ? new Date() : null])).rows[0].id as string;
   await audit(db, ctx, auto ? 'approval.auto_approved' : 'approval.requested', 'approval', id, null, { kind: a.kind, amountKop: a.amountKop, limitKop: lim });
+  if (!auto) await notifyApprovalRequested(db, { clubId: a.clubId, kind: a.kind, amountKop: a.amountKop, summary: a.summary, requestedBy: ctx.userId });
   return { id, approved: auto };
 }
 
@@ -225,6 +227,7 @@ export function financeRoutes(app: FastifyInstance, pool: pg.Pool) {
       await db.query(`update approvals set status = $2, decided_by = $3, decided_at = now(), decision_comment = $4 where id = $1`, [id, approved ? 'approved' : 'rejected', ctx.userId, comment?.trim() || null]);
       await applyDecision(db, ctx, ap, approved);
       await audit(db, ctx, approved ? 'approval.approved' : 'approval.rejected', 'approval', id, { status: 'pending' }, { status: approved ? 'approved' : 'rejected', comment: comment ?? null });
+      await notifyApprovalDecided(db, ap, approved, comment?.trim() || null, ctx.userId);
       return { ok: true, status: approved ? 'approved' : 'rejected' };
     });
   });

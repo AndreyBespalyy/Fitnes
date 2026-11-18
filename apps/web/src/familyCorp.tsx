@@ -80,13 +80,13 @@ type Fam = {
     due: { id: string; title: string; amountKop: number; dueOn: string; person: string }[] };
 };
 
-export function FamilyBlock({ me, personId, clubId, openPerson }: { me: Me; personId: string; clubId: string | null; openPerson?: (id: string) => void }) {
+export function FamilyBlock({ me, personId, clubId, openPerson, readOnly }: { me: Me; personId: string; clubId: string | null; openPerson?: (id: string) => void; readOnly?: boolean }) {
   const [d, setD] = useState<Fam | null>(null);
   const [adding, setAdding] = useState(false);
   const [relation, setRelation] = useState('');
   const [err, setErr] = useState('');
   const who = usePersonSearch(clubId);
-  const load = () => clubId ? api<Fam>('GET', `/api/persons/${personId}/family?clubId=${clubId}`).then(setD).catch((x) => setErr(errText(x))) : undefined;
+  const load = () => clubId ? api<Fam>('GET', `/api/persons/${personId}/family?clubId=${clubId}`).then((x) => setD(readOnly ? { ...x, canManage: false } : x)).catch((x) => setErr(errText(x))) : undefined;
   useEffect(() => { load(); }, [personId, clubId]);
   if (!clubId || !d) return null;
   const run = async (f: () => Promise<unknown>, ok: string) => { setErr(''); try { await f(); toast(ok); setAdding(false); setRelation(''); who.reset(); load(); } catch (x) { setErr(errText(x)); } };

@@ -56,6 +56,7 @@ const ImportPage = page(() => import('./importer.tsx'), 'ImportPage');
 const AccessPage = page(() => import('./access.tsx'), 'AccessPage');
 const ChatsPage = page(() => import('./chat.tsx'), 'ChatsPage');
 const MessagingAdmin = page(() => import('./chat.tsx'), 'MessagingAdmin');
+const RolesPage = page(() => import('./roles.tsx'), 'RolesPage');
 const StaffTimePage = page(() => import('./staff.tsx'), 'StaffTimePage');
 const ProblemsPage = page(() => import('./problems.tsx'), 'ProblemsPage');
 const LoginSecurity = page(() => import('./loginSecurity.tsx'), 'LoginSecurity');
@@ -156,7 +157,7 @@ function ChangePassword({ me, forced, onDone, onLogout }: { me: Me; forced?: boo
   );
 }
 
-type Tab = 'dash' | 'hot' | 'calls' | 'leads' | 'board' | 'tasks' | 'home' | 'clubs' | 'tariffs' | 'contracts' | 'site' | 'fiscal' | 'finance' | 'import' | 'chats' | 'access' | 'messaging' | 'pipelines' | 'staff' | 'stafftime' | 'config' | 'reviews' | 'onboarding' | 'privacy' | 'system' | 'help' | 'schedule' | 'retention' | 'shop' | 'corp' | 'trainer' | 'desk' | 'load' | 'cohorts' | 'pnl' | 'usage' | 'intake' | 'sales' | 'processes' | 'weekly' | 'learn' | 'team' | 'notes' | 'profile' | 'problems' | 'payouts' | 'activity' | 'telephony';
+type Tab = 'dash' | 'hot' | 'calls' | 'leads' | 'board' | 'tasks' | 'home' | 'clubs' | 'tariffs' | 'contracts' | 'site' | 'fiscal' | 'finance' | 'import' | 'chats' | 'access' | 'messaging' | 'pipelines' | 'staff' | 'stafftime' | 'config' | 'reviews' | 'onboarding' | 'privacy' | 'system' | 'help' | 'schedule' | 'retention' | 'shop' | 'corp' | 'trainer' | 'desk' | 'load' | 'cohorts' | 'pnl' | 'usage' | 'intake' | 'sales' | 'processes' | 'weekly' | 'learn' | 'team' | 'notes' | 'profile' | 'problems' | 'payouts' | 'activity' | 'telephony' | 'roles';
 
 function Shell({ me, onLogout }: { me: Me; onLogout: () => void }) {
   // Главный экран роли (проверка CRM, п. 11): ресепшн начинает с «Ресепшна», тренер — с «Моего дня», остальные — с рабочего стола
@@ -174,7 +175,7 @@ function Shell({ me, onLogout }: { me: Me; onLogout: () => void }) {
   const [more, setMore] = useState(false);
   const [cmdk, setCmdk] = useState(false);
   const [personId, setPersonId] = useState<string | null>(init.person);
-  const [teamKey, setTeamKey] = useState(0); // «ИИ-помощник» в шапке: заново открыть мессенджер на чате помощника
+  const [teamKey, setTeamKey] = useState(0); // «Дядя Витя» в шапке: заново открыть мессенджер на чате Дяди Вити
   const href = (t: string, p: Record<string, string> = {}, person?: string | null) => {
     const q = new URLSearchParams({ tab: t, ...p }); if (person) q.set('person', person); return `/?${q}`;
   };
@@ -263,16 +264,18 @@ function Shell({ me, onLogout }: { me: Me; onLogout: () => void }) {
     ['payouts', 'Выплаты', can(me, 'payroll.manage')],
     // Ресепшну здесь только журнал чеков — «Касса смены» у него в «Финансах»
     ['fiscal', can(me, 'fiscal.manage') ? 'Касса и чеки' : 'Чеки', can(me, 'fiscal.manage') || can(me, 'memberships.manage')],
-    ['messaging', 'Сообщения', can(me, 'messages.manage')],
+    // Технический администратор видит здесь только подключение каналов и СМС, без шаблонов и автосообщений клиентам
+    ['messaging', can(me, 'messages.manage') ? 'Сообщения' : 'Мессенджеры и СМС', can(me, 'messages.manage') || can(me, 'integrations.manage')],
     ['import', 'Перенос из 1С', can(me, 'import.manage')],
     ['pipelines', 'Воронки', can(me, 'pipelines.manage')],
-    ['intake', 'Приём заявок', can(me, 'sources.manage') || can(me, 'config.manage')],
+    ['intake', 'Приём заявок', can(me, 'sources.manage') || can(me, 'config.manage') || can(me, 'integrations.manage')],
     ['staff', 'Сотрудники', can(me, 'staff.view')],
+    ['roles', 'Роли и права', can(me, 'roles.manage')],
     ['retention', 'Возврат клиентов', can(me, 'retention.manage')],
     ['reviews', 'Обзоры', can(me, 'crm.work') || can(me, 'dash.view') || can(me, 'ai.review')],
     ['stafftime', 'График и зарплата', true],
-    ['config', 'Настройки клуба', can(me, 'config.manage')],
-    ['telephony', 'Телефония', can(me, 'plan.manage')],
+    ['config', 'Настройки клуба', can(me, 'config.manage') || can(me, 'sales.manage')],
+    ['telephony', 'Телефония', can(me, 'plan.manage') || can(me, 'integrations.manage')],
     ['onboarding', 'Подключение клубов', can(me, 'clubs.manage')],
     ['notes', 'Журнал замечаний', can(me, '*')],
     ['activity', 'Статистика сотрудников', (me.allClubs && can(me, '*')) || (!me.allClubs && me.roles.some((r) => r.code === 'gm'))],
@@ -285,6 +288,8 @@ function Shell({ me, onLogout }: { me: Me; onLogout: () => void }) {
   // Право на раздел (t[2]) — можно открыть по ссылке и из отчёта; в меню — только разделы своей роли (roleMenu.ts)
   const allowed = tabs.filter((t) => t[2]);
   const visible = allowed.filter((t) => inRoleMenu(me, t[0]));
+  // Открыт ли раздел этой роли: кнопки «Открыть …» на чужой раздел не показываем (повторная проверка CRM 18.11.2026, п. 11)
+  const canTab = (t: string) => allowed.some((x) => x[0] === t);
   const tabLabel = tabs.find((t) => t[0] === tab)?.[1] ?? tab;
   // Статистика использования: какой раздел открыли (без содержимого экрана)
   useEffect(() => { api('POST', '/api/usage/view', { tab, label: tabLabel }).catch(() => null); }, [tab]);
@@ -293,7 +298,7 @@ function Shell({ me, onLogout }: { me: Me; onLogout: () => void }) {
   const ROLE_BOTTOM: Record<string, Tab[]> = {
     owner: ['dash', 'problems', 'finance', 'pnl'], gm: ['dash', 'problems', 'tasks', 'finance'], fin: ['dash', 'finance', 'problems', 'pnl'],
     rop: ['dash', 'sales', 'tasks', 'chats'], manager: ['dash', 'hot', 'tasks', 'chats'], desk: ['desk', 'chats', 'home', 'tasks'],
-    trainer: ['trainer', 'schedule', 'home', 'tasks'], admin: ['dash', 'access', 'staff', 'system'],
+    trainer: ['trainer', 'schedule', 'home', 'tasks'], admin: ['dash', 'access', 'staff', 'system'], techadmin: ['access', 'import', 'staff', 'system'],
   };
   const PRIMARY: Tab[] = (me.roles.length === 1 && ROLE_BOTTOM[me.roles[0].code]) || ['dash', 'desk', 'trainer', 'hot', 'tasks', 'chats', 'home', 'schedule', 'access', 'problems', 'finance', 'pnl'];
   const bottom = PRIMARY.filter((k) => visible.some((v) => v[0] === k)).slice(0, 4);
@@ -312,7 +317,7 @@ function Shell({ me, onLogout }: { me: Me; onLogout: () => void }) {
   return (
     <>
       <div className="shell">
-      <SideNav items={visible.map(([k, t]) => [k, t])} groupOf={ownerOnly(me) ? { tariffs: 'setup', shop: 'setup', load: 'money' } : undefined} tab={tab} setTab={(t) => setTab(t as Tab)} open={more}
+      <SideNav items={visible.map(([k, t]) => [k, t])} groupOf={ownerOnly(me) ? { tariffs: 'setup', shop: 'setup', access: 'setup', load: 'money' } : undefined} tab={tab} setTab={(t) => setTab(t as Tab)} open={more}
         brand={<div className="brand"><i />Клубная ОС</div>}
         club={clubs.length === 1 && !me.allClubs ? clubPick('club-pick') : null} />
       <div className="main-col">
@@ -334,7 +339,7 @@ function Shell({ me, onLogout }: { me: Me; onLogout: () => void }) {
         {tab === 'sales' && <SalesOpsPage me={me} clubs={clubs} clubId={clubId} openPerson={openPerson} />}
         {tab === 'weekly' && <WeeklyPage clubs={clubs} clubId={clubId} />}
         {tab === 'learn' && <LearnPage clubs={clubs} clubId={clubId} />}
-        {tab === 'processes' && <ProcessesPage me={me} clubs={clubs} clubId={clubId} openPerson={openPerson} go={go} />}
+        {tab === 'processes' && <ProcessesPage me={me} clubs={clubs} clubId={clubId} openPerson={openPerson} go={go} canTab={canTab} />}
         {tab === 'calls' && <CallsPage me={me} clubs={clubs} clubId={clubId} openPerson={openPerson} />}
         {tab === 'tasks' && <TasksPage key={ver} me={me} clubId={clubId} openPerson={openPerson} />}
         {tab === 'leads' && <LeadsPage key={ver} me={me} clubs={clubs} clubId={clubId} openPerson={openPerson} />}
@@ -347,7 +352,7 @@ function Shell({ me, onLogout }: { me: Me; onLogout: () => void }) {
         {tab === 'chats' && <ChatsPage me={me} clubs={clubs} clubId={clubId} openPerson={openPerson} />}
         {tab === 'access' && <AccessPage me={me} clubs={clubs} clubId={clubId} openPerson={openPerson} />}
         {tab === 'messaging' && <MessagingAdmin me={me} clubs={clubs} clubId={clubId} />}
-        {tab === 'import' && <ImportPage clubs={clubs} clubId={clubId} />}
+        {tab === 'import' && <ImportPage me={me} clubs={clubs} clubId={clubId} />}
         {tab === 'pnl' && <PnlPage me={me} clubs={clubs} clubId={clubId} />}
         {tab === 'intake' && <IntakePage me={me} clubs={clubs} clubId={clubId} openPerson={openPerson} />}
         {tab === 'activity' && <ActivityPage />}
@@ -362,6 +367,7 @@ function Shell({ me, onLogout }: { me: Me; onLogout: () => void }) {
         {tab === 'home' && <Home key={ver} me={me} clubs={clubs} clubId={clubId} openPerson={openPerson} />}
         {tab === 'clubs' && <Clubs me={me} clubs={clubs} reload={reloadClubs} />}
         {tab === 'staff' && <StaffPage me={me} clubs={clubs} />}
+        {tab === 'roles' && <RolesPage />}
         {tab === 'stafftime' && <StaffTimePage me={me} clubs={clubs} clubId={clubId} />}
         {tab === 'payouts' && <StaffTimePage key="payouts" me={me} clubs={clubs} clubId={clubId} only="payroll" />}
         {tab === 'problems' && <ProblemsPage me={me} clubs={clubs} clubId={clubId} go={go} canGo={(t: string) => allowed.some((v) => v[0] === t)} openPerson={openPerson} />}
@@ -369,7 +375,7 @@ function Shell({ me, onLogout }: { me: Me; onLogout: () => void }) {
         {tab === 'telephony' && <PbxSettings clubs={clubs} clubId={clubId} />}
         {tab === 'schedule' && <SchedulePage me={me} clubs={clubs} clubId={clubId} openPerson={openPerson} />}
         {tab === 'retention' && <RetentionPage me={me} clubs={clubs} clubId={clubId} openPerson={openPerson} />}
-        {tab === 'onboarding' && <OnboardingPage me={me} clubId={clubId} go={(t) => setTab(t as Tab)} reloadClubs={reloadClubs} />}
+        {tab === 'onboarding' && <OnboardingPage me={me} clubId={clubId} go={(t) => setTab(t as Tab)} canTab={canTab} reloadClubs={reloadClubs} />}
         {tab === 'privacy' && <PrivacyPage me={me} clubs={clubs} clubId={clubId} openPerson={openPerson} />}
         {tab === 'system' && <SystemPage />}
         {tab === 'help' && <HelpPage me={me} clubs={clubs} clubId={clubId} page={tab} tabs={visible.map((v) => v[0])} />}
@@ -442,10 +448,6 @@ function Clubs({ me, clubs, reload }: { me: Me; clubs: Club[]; reload: () => voi
     setErr('');
     try { await api('PATCH', `/api/clubs/${c.id}`, { salesModel: model }); alertOk(`Модель продаж «${c.name}»: ${MODEL[model]}`); reload(); } catch (x) { setErr(errText(x)); }
   };
-  const saveNorm = async (c: Club, v: number) => {
-    setErr('');
-    try { await api('PATCH', `/api/clubs/${c.id}`, { firstResponseMinutes: v }); alertOk(`Норма первого ответа: ${v} мин`); reload(); } catch (x) { setErr(errText(x)); }
-  };
   if (wiz) return <Wizard onClose={(created) => { setWiz(false); if (created) reload(); }} />;
   return (
     <>
@@ -465,9 +467,7 @@ function Clubs({ me, clubs, reload }: { me: Me; clubs: Club[]; reload: () => voi
               </select>
             </label>
             <p className="small">При смене модели действующие договоры сохраняют условия, новый набор плана применяется со следующего периода.</p>
-            <label className="f" style={{ marginTop: 8 }}>Норма первого ответа новому лиду, минут
-              <input type="number" min={1} max={1440} defaultValue={c.firstResponseMinutes} style={{ maxWidth: 140 }}
-                onBlur={(e) => { const v = Number(e.target.value); if (v !== c.firstResponseMinutes) saveNorm(c, v); }} /></label>
+            <p className="small muted" style={{ marginTop: 8 }}>Норма ответа на заявку: {c.firstResponseMinutes} мин. Её задают РОП и управляющий в «Отдел продаж → Настройки».</p>
           </div>
         ))}
       </div>
@@ -528,13 +528,15 @@ function StaffPage({ me, clubs }: { me: Me; clubs: Club[] }) {
   const [roles, setRoles] = useState<RoleDef[]>([]);
   const [fullName, setFullName] = useState('');
   const [login, setLogin] = useState('');
-  const [role, setRole] = useState('manager');
+  const [role, setRole] = useState('');
   const [clubId, setClubId] = useState('');
   const [err, setErr] = useState('');
   const [issued, setIssued] = useState<{ name: string; login: string; password: string } | null>(null);
   const [sess, setSess] = useState<Staff | null>(null);
   const reload = () => api<Staff[]>('GET', '/api/staff').then(setStaff).catch((x) => setErr(errText(x)));
-  useEffect(() => { reload(); api<RoleDef[]>('GET', '/api/roles').then(setRoles).catch(() => {}); }, []);
+  useEffect(() => { reload(); api<RoleDef[]>('GET', '/api/roles').then((r) => { setRoles(r); setRole((cur) => cur || (r.find((x) => x.code === 'manager' && x.canAssign) ?? r.find((x) => x.canAssign))?.code || ''); }).catch(() => {}); }, []);
+  // Учётной записью управляет только тот, кто мог бы выдать все её роли (техадмин — только технические)
+  const manageable = (s: Staff) => s.assignments.every((a) => roles.find((r) => r.code === a.role)?.canAssign);
   useEffect(() => { if (!clubId && clubs[0]) setClubId(clubs[0].id); }, [clubs]);
   const roleDef = roles.find((r) => r.code === role);
   const add = async (e: FormEvent) => {
@@ -571,10 +573,10 @@ function StaffPage({ me, clubs }: { me: Me; clubs: Club[] }) {
             <label className="f">ФИО<input value={fullName} onChange={(e) => setFullName(e.target.value)} placeholder="Иван Иванов" /></label>
             <label className="f">Логин (необязательно)<input value={login} onChange={(e) => setLogin(e.target.value)} placeholder="создастся сам" /></label>
             <label className="f">Роль<select className="f" value={role} onChange={(e) => setRole(e.target.value)}>
-              {roles.filter((r) => (r.code !== 'owner' || can(me, '*')) && (!r.networkWide || me.allClubs)).map((r) => <option key={r.code} value={r.code}>{r.name}</option>)}</select></label>
+              {roles.filter((r) => r.canAssign && (r.code !== 'owner' || can(me, '*')) && (!r.networkWide || me.allClubs)).map((r) => <option key={r.code} value={r.code}>{r.name}</option>)}</select></label>
             <label className="f">Клуб<select className="f" value={roleDef?.networkWide ? '' : clubId} disabled={roleDef?.networkWide} onChange={(e) => setClubId(e.target.value)}>
               {roleDef?.networkWide ? <option value="">Вся сеть</option> : clubs.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}</select></label>
-            <button className="btn pri" disabled={!fullName.trim()}>Добавить</button>
+            <button className="btn pri" disabled={!fullName.trim() || !role}>Добавить</button>
           </div>
         </form>
       )}
@@ -588,7 +590,7 @@ function StaffPage({ me, clubs }: { me: Me; clubs: Club[] }) {
             <td>{s.assignments.map((a) => a.roleName).join(', ')}</td>
             <td>{s.assignments.map((a) => a.clubName ?? 'Вся сеть').join(', ')}</td>
             <td>{s.status === 'active' ? <span className="chip ok">{s.mustChangePassword ? 'ждёт смены пароля' : 'активен'}</span> : <span className="chip bad">заблокирован</span>}</td>
-            {manage && <td className="r">{s.id !== me.id && !s.assignments.some((a) => a.role === 'owner') && (
+            {manage && <td className="r">{s.id !== me.id && !s.assignments.some((a) => a.role === 'owner') && manageable(s) && (
               <span className="row" style={{ justifyContent: 'flex-end' }}>
                 {s.status === 'active' && <button className="btn sm" onClick={() => setSess(s)}>Устройства</button>}
                 <button className="btn sm" onClick={() => act(s, 'reset-password')}>Новый пароль</button>
