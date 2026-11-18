@@ -37,7 +37,10 @@ export async function notifyPerson(db: Db, f: Fetch | null, actor: Actor, person
   return true;
 }
 
-const SESSION = `select s.id, s.club_id as "clubId", s.type_id as "typeId", t.name as "typeName", t.kind, s.room_id as "roomId", r.name as "roomName",
+/** Подразделение: «ТЗ», «ГП», «БК» или своё название, до 40 знаков */
+const dept = (v: unknown, def: string | null) => { const x = String(v ?? '').replace(/\s+/g, ' ').trim().slice(0, 40); return x || def; };
+
+const SESSION = `select s.id, s.club_id as "clubId", s.type_id as "typeId", t.name as "typeName", t.kind, t.department, s.room_id as "roomId", r.name as "roomName",
   s.trainer_id as "trainerId", u.full_name as "trainerName", s.starts_at as "startsAt", s.ends_at as "endsAt",
   to_char(s.starts_at at time zone c.timezone, 'YYYY-MM-DD"T"HH24:MI') as "localStart", to_char(s.ends_at at time zone c.timezone, 'HH24:MI') as "localEnd",
   s.capacity, s.status, s.series_id as "seriesId", s.note, s.cancel_reason as "cancelReason",
@@ -257,7 +260,7 @@ export function scheduleRoutes(app: FastifyInstance, pool: pg.Pool, opts: { fetc
       await clubOf(db, clubId);
       return {
         rooms: (await db.query(`select id, name, capacity, is_active as "isActive" from rooms where club_id = $1 order by name`, [clubId])).rows,
-        types: (await db.query(`select id, name, kind, duration_min as "durationMin", capacity, description, is_active as "isActive" from class_types where club_id = $1 order by kind, name`, [clubId])).rows,
+        types: (await db.query(`select id, name, kind, department, duration_min as "durationMin", capacity, description, is_active as "isActive" from class_types where club_id = $1 order by kind, name`, [clubId])).rows,
         trainers: (await db.query(`select distinct u.id, u.full_name as name from users u join user_assignments a on a.user_id = u.id
           where u.status = 'active' and a.role_code = 'trainer' and a.club_id = $1 order by name`, [clubId])).rows,
         settings: await classSettings(db, clubId!),
@@ -279,10 +282,27 @@ export function scheduleRoutes(app: FastifyInstance, pool: pg.Pool, opts: { fetc
     reply.code(201); return r;
   });
 
+  // Подразделение занятия (замечание №37): поменять у уже заведённого вида занятий
+  app.patch('/api/schedule/types/:id', async (req) => {
+    const ctx = requirePerm(req, P.scheduleManage);
+    const { id } = req.params as { id: string };
+    const b = (req.body ?? {}) as { department?: string };
+    if (!uuid(id)) throw notFound('Занятие не найдено');
+    const dep = dept(b.department, null);
+    if (!dep) throw badRequest('Укажите подразделение: ТЗ, ГП, БК или своё');
+    return withCtx(pool, ctx, async (db) => {
+      const t = (await db.query('update class_types set department = $2 where id = $1 returning id, department', [id, dep])).rows[0];
+      if (!t) throw notFound('Занятие не найдено');
+      await audit(db, ctx, 'schedule.type_department', 'class_type', id, null, { department: dep });
+      return t;
+    });
+  });
+
   app.post('/api/schedule/types', async (req, reply) => {
     const ctx = requirePerm(req, P.scheduleManage);
-    const b = (req.body ?? {}) as { clubId?: string; name?: string; kind?: string; durationMin?: number; capacity?: number; description?: string };
+    const b = (req.body ?? {}) as { clubId?: string; name?: string; kind?: string; durationMin?: number; capacity?: number; description?: string; department?: string };
     if (!b.name?.trim()) throw badRequest('Укажите название занятия');
+    const dep = dept(b.department, b.kind === 'personal' ? 'ТЗ' : 'ГП');
     if (!['group', 'personal'].includes(b.kind ?? '')) throw badRequest('Выберите: групповое или персональное');
     const dur = Number(b.durationMin ?? 60); const cap = b.kind === 'personal' ? Number(b.capacity ?? 1) : Number(b.capacity ?? 15);
     if (!(dur >= 10 && dur <= 480)) throw badRequest('Длительность от 10 до 480 минут');
@@ -290,8 +310,8 @@ export function scheduleRoutes(app: FastifyInstance, pool: pg.Pool, opts: { fetc
     const r = await withCtx(pool, ctx, async (db) => {
       await clubOf(db, b.clubId);
       if ((await db.query('select 1 from class_types where club_id = $1 and lower(name) = lower($2)', [b.clubId, b.name!.trim()])).rowCount) throw badRequest('Такое занятие уже есть');
-      const row = (await db.query(`insert into class_types(tenant_id, club_id, name, kind, duration_min, capacity, description) values ($1,$2,$3,$4,$5,$6,$7)
-        returning id, name, kind, duration_min as "durationMin", capacity`, [ctx.tenantId, b.clubId, b.name!.trim(), b.kind, dur, cap, b.description?.trim() || null])).rows[0];
+      const row = (await db.query(`insert into class_types(tenant_id, club_id, name, kind, duration_min, capacity, description, department) values ($1,$2,$3,$4,$5,$6,$7,$8)
+        returning id, name, kind, department, duration_min as "durationMin", capacity`, [ctx.tenantId, b.clubId, b.name!.trim(), b.kind, dur, cap, b.description?.trim() || null, dep])).rows[0];
       await audit(db, ctx, 'schedule.type_created', 'class_type', row.id, null, row);
       return row;
     });

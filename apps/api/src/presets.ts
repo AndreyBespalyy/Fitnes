@@ -6,6 +6,9 @@ type Q = Pick<pg.ClientBase, 'query'>;
 type StageDef = [name: string, kind: 'open' | 'won' | 'lost'];
 type PipelineDef = { name: string; purpose: string; isDefault?: boolean; stages: StageDef[] };
 
+// «Тренер хаб» (замечание №34, пояснение Андрея 18.11.2026): отдельная воронка продаж персональных тренировок, как «Новые клиенты» и «Продления»
+export const TRAINER_HUB: PipelineDef = { name: 'Тренер хаб', purpose: 'custom', stages: [['Передан тренеру', 'open'], ['Вводная назначена', 'open'], ['Вводная проведена', 'open'], ['Купил персональные', 'won'], ['Отказ', 'lost']] };
+
 const NEW_STAGES: StageDef[] = [['Новый лид', 'open'], ['Дозвонились', 'open'], ['Встреча назначена', 'open'], ['Пришёл на встречу', 'open'], ['Купил', 'won'], ['Отказ', 'lost']];
 
 export const PIPELINE_PRESETS: Record<'term' | 'subscription', PipelineDef[]> = {
@@ -13,12 +16,14 @@ export const PIPELINE_PRESETS: Record<'term' | 'subscription', PipelineDef[]> = 
     { name: 'Новые клиенты', purpose: 'new', isDefault: true, stages: NEW_STAGES },
     { name: 'Продление', purpose: 'renewal', stages: [['Скоро окончание', 'open'], ['Связались', 'open'], ['Предложение сделано', 'open'], ['Продлил', 'won'], ['Не продлил', 'lost']] },
     { name: 'Возобновление бывших', purpose: 'former', stages: [['В работе', 'open'], ['Связались', 'open'], ['Пришёл в клуб', 'open'], ['Вернулся', 'won'], ['Отказ', 'lost']] },
+    TRAINER_HUB,
   ],
   subscription: [
     { name: 'Новые подписки', purpose: 'new', isDefault: true, stages: NEW_STAGES.map(([n, k]) => [n === 'Купил' ? 'Оформил подписку' : n, k] as StageDef) },
     { name: 'Неуспешное списание', purpose: 'billing_failed', stages: [['Списание не прошло', 'open'], ['Связались', 'open'], ['Оплатил', 'won'], ['Отписался', 'lost']] },
     { name: 'Риск отписки', purpose: 'churn_risk', stages: [['Давно не был', 'open'], ['Связались', 'open'], ['Вернулся к посещениям', 'won'], ['Отписался', 'lost']] },
     { name: 'Отписавшиеся', purpose: 'churned', stages: [['В работе', 'open'], ['Связались', 'open'], ['Подписался снова', 'won'], ['Отказ', 'lost']] },
+    TRAINER_HUB,
   ],
 };
 

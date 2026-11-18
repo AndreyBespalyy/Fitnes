@@ -87,7 +87,7 @@ function SettingsForm({ club, manage }: { club: Club; manage: boolean }) {
       <div className="small"><b>Заморозка:</b> {s.freezeEnabled ? `до ${s.freezeMaxDaysPerYear} дн. в год, не больше ${s.freezeMaxTimesPerYear} раз, от ${s.freezeMinDays} дн.${s.freezePaid ? `, платная — ${rub(s.freezePriceKop)}` : ', бесплатно'}` : 'нет'}</div>
       <div className="small"><b>Рассрочка:</b> {s.installmentsEnabled ? `до ${s.installmentsMaxPayments} платежей, раз в месяц` : 'нет'}. Проход закрывается при просрочке больше {s.overdueBlockAfterDays} дн.; напоминание о продлении за {s.renewalReminderDays} дн.</div>
       <div className="small"><b>Семья:</b> скидка второму и следующим {s.familyDiscountPercent} %, до {s.familyMaxMembers} человек.{s.contractRequiredForAccess ? ' Без подписанного договора в клуб не пускаем.' : ''}</div>
-      {sub && <div className="small"><b>Подписка:</b> повторных попыток списания {s.subscriptionRetryAttempts}, раз в {s.subscriptionRetryIntervalDays} дн.</div>}
+      {<div className="small"><b>Подписка:</b> повторных попыток списания {s.subscriptionRetryAttempts}, раз в {s.subscriptionRetryIntervalDays} дн.</div>}
     </div>);
   return (
     <form className="card" onSubmit={save} style={{ display: 'grid', gap: 14 }}>
@@ -113,8 +113,8 @@ function SettingsForm({ club, manage }: { club: Club; manage: boolean }) {
           <Num label="Скидка второму и следующим членам семьи, %" value={s.familyDiscountPercent} onChange={set('familyDiscountPercent')} disabled={ro} hint="От 0 до 50 %. Действует, пока у кого-то из семьи есть действующий абонемент" />
           <Num label="Человек в семье, не больше" value={s.familyMaxMembers} onChange={set('familyMaxMembers')} disabled={ro} />
         </fieldset>
-        {sub && (
-          <fieldset className="item" style={{ display: 'grid', gap: 8 }}><b>Подписка</b>
+        {(
+          <fieldset className="item" style={{ display: 'grid', gap: 8 }}><b>Подписка{sub ? '' : ' (если в клубе есть подписочные тарифы)'}</b>
             <Num label="Повторных попыток списания" value={s.subscriptionRetryAttempts} onChange={set('subscriptionRetryAttempts')} disabled={ro} />
             <Num label="Интервал между попытками, дней" value={s.subscriptionRetryIntervalDays} onChange={set('subscriptionRetryIntervalDays')} disabled={ro} hint="Автосписание заработает с подключением эквайринга" />
           </fieldset>)}
@@ -130,7 +130,8 @@ function Products({ club, manage }: { club: Club; manage: boolean }) {
   const [edit, setEdit] = useState<string | null>(null);
   const [price, setPrice] = useState('');
   const [hist, setHist] = useState<string | null>(null);
-  const kinds = club.salesModel === 'term' ? ['term', 'visits', 'personal', 'guest'] : ['subscription', 'visits', 'personal', 'guest'];
+  // В клубе «на срок» можно завести и подписку с автосписанием рядом с абонементами (замечание №49)
+  const kinds = club.salesModel === 'term' ? ['term', 'subscription', 'visits', 'personal', 'guest'] : ['subscription', 'visits', 'personal', 'guest'];
   const [f, setF] = useState({ kind: kinds[0], name: '', price: '', durationDays: 30, visitsCount: 10, validityDays: 60, installmentsAllowed: false, freezeAllowed: true, networkAccess: false, accessFrom: '', accessTo: '', familySeats: 0 });
   // Кто не меняет тарифы (менеджер, ресепшн), видит только то, что сейчас в продаже (замечание №36)
   const reload = () => api<Product[]>('GET', `/api/products?clubId=${club.id}${manage ? '' : '&active=1'}`).then(setList).catch((x) => setErr(errText(x)));

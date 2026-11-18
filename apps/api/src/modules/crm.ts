@@ -166,6 +166,18 @@ async function checkWonPaid(db: Db, ctx: Ctx, o: { id: string; club_id: string; 
 }
 
 type NextTask = { title?: string; dueAt?: string; kind?: string };
+
+/** Работает ли сотрудник в этот день по графику клуба (замечание №46). null — график на него не ведётся, проверять нечем. */
+export async function worksOn(db: Db, userId: string, clubId: string, day: string): Promise<{ ok: boolean | null; why: string | null }> {
+  const abs = (await db.query(`select kind from staff_absences where user_id = $1 and $2::date between date_from and date_to limit 1`, [userId, day])).rows[0];
+  if (abs) return { ok: false, why: abs.kind === 'vacation' ? 'в отпуске' : abs.kind === 'sick' ? 'на больничном' : 'выходной' };
+  const kept = (await db.query(`select 1 from staff_shifts where user_id = $1 and club_id = $2 and day between $3::date - 31 and $3::date + 31 limit 1`, [userId, clubId, day])).rowCount;
+  if (!kept) return { ok: null, why: null };
+  const on = (await db.query(`select 1 from staff_shifts where user_id = $1 and club_id = $2 and day = $3 limit 1`, [userId, clubId, day])).rowCount;
+  return on ? { ok: true, why: null } : { ok: false, why: 'не работает в этот день по графику' };
+}
+const clubDay = async (db: Db, clubId: string, at: Date) =>
+  (await db.query(`select to_char(($1::timestamptz at time zone coalesce((select timezone from clubs where id = $2), 'Europe/Moscow'))::date, 'YYYY-MM-DD') as d`, [at, clubId])).rows[0].d as string;
 async function addTask(db: Db, ctx: Ctx, o: { id: string; club_id: string; person_id: string; owner_id: string | null }, t: NextTask) {
   const title = t.title?.trim();
   if (!title) throw badRequest('Укажите, что нужно сделать');
@@ -355,14 +367,19 @@ export function crmRoutes(app: FastifyInstance, pool: pg.Pool) {
   // Кому можно поставить задачу: активные сотрудники клуба (и сетевые руководители)
   app.get('/api/tasks/assignees', async (req) => {
     const ctx = requireCtx(req);
-    const { clubId } = req.query as { clubId?: string };
+    const { clubId, day } = req.query as { clubId?: string; day?: string };
     if (!clubId) throw badRequest('Выберите клуб');
-    return withCtx(pool, ctx, async (db) => (await db.query(
-      `select distinct on (u.id) u.id, u.full_name as name, r.name as role, a.role_code as code from users u
-         join user_assignments a on a.user_id = u.id join roles r on r.code = a.role_code
-        where u.status = 'active' and not u.is_bot and (a.club_id = $1 or a.club_id is null) and a.role_code <> 'admin'
-          and a.active_from <= current_date and (a.active_to is null or a.active_to >= current_date)
-        order by u.id, r.sort`, [clubId])).rows.sort((x, y) => (x.id === ctx.userId ? -1 : y.id === ctx.userId ? 1 : x.name.localeCompare(y.name))));
+    return withCtx(pool, ctx, async (db) => {
+      const rows = (await db.query(
+        `select distinct on (u.id) u.id, u.full_name as name, r.name as role, a.role_code as code from users u
+           join user_assignments a on a.user_id = u.id join roles r on r.code = a.role_code
+          where u.status = 'active' and not u.is_bot and (a.club_id = $1 or a.club_id is null) and a.role_code <> 'admin'
+            and a.active_from <= current_date and (a.active_to is null or a.active_to >= current_date)
+          order by u.id, r.sort`, [clubId])).rows.sort((x, y) => (x.id === ctx.userId ? -1 : y.id === ctx.userId ? 1 : x.name.localeCompare(y.name)));
+      // С днём — отмечаем, кто в этот день не работает по графику (замечание №46)
+      if (day && /^\d{4}-\d{2}-\d{2}$/.test(day)) for (const r of rows) { const w = await worksOn(db, r.id, clubId, day); r.works = w.ok; r.why = w.why; }
+      return rows;
+    });
   });
 
   app.post('/api/tasks', async (req, reply) => {
@@ -380,6 +397,11 @@ export function crmRoutes(app: FastifyInstance, pool: pg.Pool) {
         const ok = (await db.query(`select 1 from users u join user_assignments a on a.user_id = u.id where u.id = $1 and u.status = 'active'
           and (a.club_id = $2 or a.club_id is null) and (a.active_to is null or a.active_to >= current_date)`, [to, b.clubId])).rowCount;
         if (!ok) throw badRequest('Этот сотрудник не работает в выбранном клубе');
+        // Коллеге — только на день, когда он работает по графику (замечание №46)
+        if (to !== ctx.userId) {
+          const w = await worksOn(db, to, b.clubId!, await clubDay(db, b.clubId!, due));
+          if (w.ok === false) throw badRequest(`Сотрудник ${w.why}. Выберите другой день или другого сотрудника`, 'not_on_shift');
+        }
         const kind = ['call', 'meeting', 'message', 'other'].includes(b.kind ?? '') ? b.kind : (b.personId ? 'call' : 'other');
         const tid = (await db.query(`insert into tasks(tenant_id, club_id, assignee_id, person_id, kind, title, due_at, created_by) values ($1,$2,$3,$4,$5,$6,$7,$8) returning id`,
           [ctx.tenantId, b.clubId, to, b.personId || null, kind, title.slice(0, 300), due, ctx.userId])).rows[0].id as string;

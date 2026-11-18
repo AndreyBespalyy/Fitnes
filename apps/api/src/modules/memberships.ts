@@ -401,8 +401,9 @@ export function membershipRoutes(app: FastifyInstance, pool: pg.Pool) {
     const res = await withCtx(pool, ctx, async (db) => {
       const club = (await db.query('select sales_model from clubs where id = $1', [b.clubId])).rows[0];
       if (!club) throw badRequest('Клуб не найден');
-      if ((b.kind === 'term' && club.sales_model === 'subscription') || (b.kind === 'subscription' && club.sales_model === 'term')) {
-        throw badRequest(`Клуб работает по модели «${club.sales_model === 'term' ? 'абонементы на срок' : 'подписка'}». Смените модель клуба или выберите другой тип тарифа`);
+      // Подписку (автосписание раз в месяц) можно продавать и в клубе «абонементы на срок» рядом с абонементами (решение Андрея, замечание №49)
+      if (b.kind === 'term' && club.sales_model === 'subscription') {
+        throw badRequest('Клуб работает по модели «подписка». Смените модель клуба или выберите другой тип тарифа');
       }
       if ((await db.query('select 1 from products where club_id = $1 and lower(name) = lower($2)', [b.clubId, b.name!.trim()])).rowCount) throw badRequest('Тариф с таким названием уже есть');
       const id = (await db.query(

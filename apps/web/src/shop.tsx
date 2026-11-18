@@ -13,6 +13,8 @@ type Report = {
 };
 const rub = (k: number) => `${Math.round(k / 100).toLocaleString('ru-RU')} ₽`;
 const toKop = (s: string) => Math.round(Number(s.replace(',', '.').replace(/\s/g, '')) * 100);
+// Сервисные услуги клуба (замечание №38): продаются рядом с товарами, без остатков
+const SERVICES = ['Аренда шкафчика', 'Замена браслета', 'Парковка', 'Переоформление абонемента'];
 const METHOD: Record<string, string> = { cash: 'Наличные', card_terminal: 'Карта', on_account: 'На счёт', deposit: 'С депозита', points: 'Баллами' };
 
 export function ShopPage({ me: _me, clubs, clubId, openPerson }: { me: Me; clubs: Club[]; clubId: string; openPerson: (id: string) => void }) {
@@ -28,7 +30,7 @@ export function ShopPage({ me: _me, clubs, clubId, openPerson }: { me: Me; clubs
       <div className="row between" style={{ flexWrap: 'wrap', gap: 8 }}>
         <div className="tabs" role="group" aria-label="Товары">
           {data?.canSell && <button aria-pressed={view === 'sell'} onClick={() => setView('sell')}>Продажа</button>}
-          <button aria-pressed={view === 'stock'} onClick={() => setView('stock')}>Товары и остатки</button>
+          <button aria-pressed={view === 'stock'} onClick={() => setView('stock')}>Товары, услуги и остатки</button>
           <button aria-pressed={view === 'report'} onClick={() => setView('report')}>Отчёт</button>
           <button aria-pressed={view === 'gifts'} onClick={() => setView('gifts')}>Сертификаты</button>
         </div>
@@ -67,20 +69,22 @@ function Sell({ club, manage, items, onSold }: { club: string; manage: boolean; 
       setCart({}); setPerson(null); setQ(''); onSold();
     } catch (x) { setErr(errText(x)); } finally { setBusy(false); }
   };
-  const cats = [...new Set(items.map((g) => g.category ?? 'Без категории'))];
+  // Сервисные услуги (шкаф, браслет, парковка, переоформление) — отдельным блоком над товарами (замечание №38)
+  const groups: [string, Goods[]][] = [['Сервисные услуги', items.filter((g) => g.kind === 'service')], ['Товары', items.filter((g) => g.kind === 'goods')]];
   return (
     <div className="grid2" style={{ alignItems: 'start' }}>
       <div className="card" style={{ display: 'grid', gap: 10 }}>
         {items.length === 0 && <p className="muted" style={{ margin: 0 }}>{manage ? 'Товаров пока нет. Добавьте их во вкладке «Товары и остатки».' : 'Товаров пока нет. Товары и услуги добавляет управляющий клуба — напишите ему в мессенджере, что нужно продавать.'}</p>}
-        {cats.map((c) => (
+        {groups.filter(([, list]) => list.length).map(([title, list]) => <Fragment key={title}><h3 style={{ margin: '4px 0 0' }}>{title}</h3>
+        {[...new Set(list.map((g) => g.category ?? 'Без категории'))].map((c) => (
           <div key={c} style={{ display: 'grid', gap: 6 }}>
             <span className="small muted">{c}</span>
-            <div className="row" style={{ flexWrap: 'wrap', gap: 8 }}>{items.filter((g) => (g.category ?? 'Без категории') === c).map((g) => {
+            <div className="row" style={{ flexWrap: 'wrap', gap: 8 }}>{list.filter((g) => (g.category ?? 'Без категории') === c).map((g) => {
               const out = g.kind === 'goods' && (g.stock ?? 0) <= (cart[g.id] ?? 0);
               return <button key={g.id} className="btn" disabled={out} onClick={() => add(g, 1)} style={{ minHeight: 56, minWidth: 140, display: 'grid', textAlign: 'left' }}>
                 <b>{g.name}</b><span className="small">{rub(g.priceKop)}{g.kind === 'goods' ? ` · ${g.stock ?? 0} шт.` : ''}</span></button>;
             })}</div>
-          </div>))}
+          </div>))}</Fragment>)}
       </div>
       <div className="card" style={{ display: 'grid', gap: 8 }}>
         <h2>Чек</h2>
@@ -136,6 +140,9 @@ function Stock({ club, items, manage, reload }: { club: string; items: Goods[]; 
     <div className="card" style={{ display: 'grid', gap: 10 }}>
       <div className="row between"><h2>Товары и услуги</h2>{manage && !open && <button className="btn sm pri" onClick={() => setOpen(true)}>+ Добавить</button>}</div>
       {err && <div className="err">{err}</div>}
+      {manage && !open && (
+        <div className="row small" style={{ gap: 6, flexWrap: 'wrap' }}><span className="muted">Типовые услуги:</span>
+          {SERVICES.filter((n) => !items.some((g) => g.name === n)).map((n) => <button key={n} className="btn sm" onClick={() => { setF({ ...empty, name: n, kind: 'service', category: 'Сервисные услуги' }); setOpen(true); }}>+ {n}</button>)}</div>)}
       {open && (
         <div className="item grid2">
           <label className="f">Название<input value={f.name} onChange={(e) => setF({ ...f, name: e.target.value })} placeholder="Вода 0,5 л" /></label>

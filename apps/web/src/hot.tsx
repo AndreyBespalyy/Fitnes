@@ -1,6 +1,7 @@
 // Шаг 15. ИИ-помощник продаж: план дня, горячий список с предложением, теневой режим.
 import { HintLine, UpsellList, useUpsell, type Hint } from './upsell.tsx';
 import { ContactButtons } from './mobile.tsx';
+import { CallsPage } from './calls.tsx';
 import { useEffect, useState } from 'react';
 import { api, can, type Club, type Me, navParams } from './api.ts';
 import { dt, errText, toast } from './ui.ts';
@@ -16,16 +17,17 @@ const SEG: Record<string, [string, string]> = { hot: ['звонить первы
 const KINDS: [string, string][] = [['', 'Все задачи'], ['purchase', 'Покупка'], ['renewal', 'Продление'], ['return', 'Возврат'], ['churn', 'Удержание']];
 
 export function HotPage({ me, clubs, clubId, openPerson }: { me: Me; clubs: Club[]; clubId: string; openPerson: (id: string) => void }) {
-  const tabs: [string, string, boolean][] = [['day', 'План дня', true], ['list', 'Горячий список', true], ['upsell', 'Допродажи', clubId !== 'all' || clubs.length > 0], ['shadow', 'Теневой режим', can(me, 'ai.review')]];
+  const tabs: [string, string, boolean][] = [['day', 'План дня', true], ['list', 'Горячий список', true], ['upsell', 'Допродажи', clubId !== 'all' || clubs.length > 0], ['talks', 'Записи разговоров', can(me, 'crm.work')], ['shadow', 'Теневой режим', can(me, 'ai.review')]];
   const [tab, setTab] = useState(() => (tabs.some((t) => t[0] === navParams('hot').tab && t[2]) ? navParams('hot').tab : 'day'));
   const club = clubId !== 'all' ? clubId : clubs[0]?.id ?? '';
   return (
     <>
       <div className="tabs" role="group" aria-label="Дядя Витя">{tabs.filter((t) => t[2]).map(([k, t]) => <button key={k} aria-pressed={tab === k} onClick={() => setTab(k)}>{t}</button>)}</div>
-      <p className="small muted" style={{ margin: 0 }}>Рекомендации ИИ: основание, период и уверенность указаны. Цены — по действующему прейскуранту клуба, ИИ их не меняет.</p>
+      {tab !== 'talks' && <p className="small muted" style={{ margin: 0 }}>Рекомендации ИИ: основание, период и уверенность указаны. Цены — по действующему прейскуранту клуба, ИИ их не меняет.</p>}
       {tab === 'day' && club && <DayPlan me={me} clubId={club} openPerson={openPerson} />}
       {tab === 'list' && <HotList me={me} clubId={clubId} openPerson={openPerson} />}
       {tab === 'shadow' && <Shadow clubId={clubId} />}
+      {tab === 'talks' && <CallsPage me={me} clubs={clubs} clubId={clubId} openPerson={openPerson} />}
       {tab === 'upsell' && club && <UpsellList clubId={club} openPerson={openPerson} />}
     </>
   );

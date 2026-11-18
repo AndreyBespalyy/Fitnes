@@ -17,11 +17,12 @@ export const ROLE_MENU: Record<string, string[]> = {
   gm: ['problems', 'finance', 'pnl', 'load', 'cohorts', 'payouts', 'weekly', 'learn', 'reviews', 'staff', 'activity', 'sales', 'calls', 'tasks', 'processes', 'schedule', 'home',
     'retention', 'fiscal', 'tariffs', 'shop', 'contracts', 'site', 'messaging', 'stafftime', 'config', 'telephony', 'access', 'privacy'],
   // «Настройки клуба» у РОПа — только вкладка «Продажи» и история (повторная проверка CRM 18.11.2026, п. 4)
-  rop: ['tasks', 'processes', 'weekly', 'learn', 'hot', 'calls', 'sales', 'schedule', 'leads', 'board', 'chats', 'home', 'tariffs', 'shop', 'load', 'cohorts',
+  // «Звонки» (записи разговоров) — вкладкой в разделе «Звонки» вместе с «Кому звонить» (замечание №42)
+  rop: ['tasks', 'processes', 'weekly', 'learn', 'hot', 'sales', 'schedule', 'leads', 'board', 'chats', 'home', 'tariffs', 'shop', 'load', 'cohorts',
     'staff', 'retention', 'reviews', 'stafftime', 'config'],
   // «Компании» — вкладка «Корпоративные клиенты» в «Клиентах» (замечание №45, 18.11.2026); «Бизнес-процессы» у менеджера убраны (№35): его шаги — в «Задачах»
   // «Лиды» у менеджера убраны из меню: заявки — в «Мой день» на рабочем столе, новый лид — кнопкой «+ Лид» (повторная проверка CRM 18.11.2026, п. 14)
-  manager: ['tasks', 'hot', 'calls', 'sales', 'schedule', 'board', 'chats', 'home', 'tariffs', 'shop', 'reviews', 'stafftime'],
+  manager: ['tasks', 'hot', 'sales', 'schedule', 'board', 'chats', 'home', 'tariffs', 'shop', 'reviews', 'stafftime'],
   // «Мои задачи» у ресепшна, финансиста и тренера: им приходят шаги процессов и задачи из советов (проверка CRM 17.11.2026)
   desk: ['desk', 'tasks', 'schedule', 'leads', 'chats', 'home', 'access', 'tariffs', 'shop', 'finance', 'fiscal', 'stafftime'],
   fin: ['problems', 'tasks', 'finance', 'pnl', 'cohorts', 'payouts', 'weekly', 'home', 'import', 'staff', 'reviews', 'stafftime'],

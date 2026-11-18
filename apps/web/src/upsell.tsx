@@ -39,7 +39,7 @@ export function UpsellBlock({ personId, clubId }: { personId: string; clubId: st
 }
 
 const KEYS: Record<string, string> = { intro_pt: 'Вводная персональная', pt_renew: 'Новый пакет персональных', visits_to_unlimited: 'Безлимит вместо пакета', visits_renew: 'Новый пакет посещений',
-  guest_to_member: 'Абонемент вместо разовых', daytime: 'Дневной тариф вместо ухода', longer_term: 'Продлить на дольше' };
+  guest_to_member: 'Абонемент вместо разовых', daytime: 'Дневной тариф вместо ухода', longer_term: 'Продлить на дольше', upgrade_pay: 'Доплата по абонементу' };
 
 export function UpsellList({ clubId, openPerson }: { clubId: string; openPerson: (id: string) => void }) {
   const [who, setWho] = useState('');

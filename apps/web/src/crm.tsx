@@ -16,6 +16,7 @@ import { PersonCallFlags, TakeLeadButton } from './salesOps.tsx';
 import { ScriptButton, SituationButton } from './agent.tsx';
 import { PersonPrivacy } from './privacy.tsx';
 import { ownerOnly } from './roleMenu.ts';
+import { TaskCalendar, sameDay } from './taskCalendar.tsx';
 import { OwnerBlock, PersonDocuments, PersonHead, ShowPhone } from './personExtras.tsx';
 
 type Stage = { id: string; name: string; kind: 'open' | 'won' | 'lost'; openCount?: number };
@@ -167,12 +168,15 @@ export function TasksPage({ me, clubId, openPerson }: { me: Me; clubId: string; 
   // Из ИИ-помощника: «Задачи на сегодня: <менеджер>» — задачи одного сотрудника, только просроченные и на сегодня
   const [only, setOnly] = useState<{ user: string; today: boolean } | null>(() => { const q = navParams('tasks'); return q.user && can(me, 'crm.view_all') ? { user: q.user, today: q.day === 'today' } : null; });
   const [all, setAll] = useState<Task[]>([]);
+  // День из календаря задач (замечание №41): YYYY-MM-DD или 'overdue'
+  const [day, setDay] = useState<string | null>(() => { const d = navParams('tasks').day; return d && /^\d{4}-\d{2}-\d{2}$|^overdue$/.test(d) ? d : null; });
   const reload = () => api<Task[]>('GET', `/api/tasks?scope=${only ? 'all' : scope}${clubId !== 'all' ? `&clubId=${clubId}` : ''}`).then(setAll).catch(() => setAll([]));
   useEffect(() => { setTasks(only ? all.filter((t) => t.assigneeId === only.user) : all); }, [all, only]);
   useEffect(() => { reload(); }, [scope, clubId, only]);
   const now = Date.now();
   const endOfDay = new Date(); endOfDay.setHours(23, 59, 59, 999);
-  const groups: [string, Task[]][] = [
+  const groups: [string, Task[]][] = day ? [[day === 'overdue' ? 'Просрочено' : new Date(`${day}T12:00:00`).toLocaleDateString('ru-RU', { weekday: 'long', day: 'numeric', month: 'long' }),
+    tasks.filter((t) => (day === 'overdue' ? t.overdue : !t.overdue && sameDay(t.dueAt, day)))]] : [
     ['Просрочено', tasks.filter((t) => t.overdue)],
     ['Сегодня', tasks.filter((t) => !t.overdue && new Date(t.dueAt).getTime() <= endOfDay.getTime())],
     ['Позже', only?.today ? [] : tasks.filter((t) => new Date(t.dueAt).getTime() > endOfDay.getTime() && new Date(t.dueAt).getTime() > now)],
@@ -192,6 +196,8 @@ export function TasksPage({ me, clubId, openPerson }: { me: Me; clubId: string; 
       {can(me, 'crm.view_all') && !only && (
         <div className="tabs" role="group"><button aria-pressed={scope === 'mine'} onClick={() => setScope('mine')}>Мои</button><button aria-pressed={scope === 'all'} onClick={() => setScope('all')}>Все в клубе</button></div>
       )}
+      {!only && <TaskCalendar tasks={tasks} value={day} onPick={setDay} />}
+      {day && groups[0][1].length === 0 && <div className="card"><p className="muted" style={{ margin: 0 }}>На этот день задач нет.</p></div>}
       {groups.map(([title, list]) => list.length > 0 && (
         <div key={title} className="card" style={{ display: 'grid', gap: 8 }}>
           <h2 style={title === 'Просрочено' ? { color: 'var(--bad)' } : undefined}>{title} · {list.length}</h2>
@@ -225,17 +231,19 @@ export function NewTask({ me, clubId, personId, personName, onDone, onCancel, pr
   /** Кому по умолчанию: первая подходящая роль (например, ['gm', 'rop'] — «Поручить управляющему») */ prefer?: string[]; heading?: string; defaultTitle?: string }) {
   const [clubs, setClubs] = useState<Club[]>([]);
   const [club, setClub] = useState(clubId && clubId !== 'all' ? clubId : '');
-  const [who, setWho] = useState<{ id: string; name: string; role: string; code?: string }[]>([]);
+  const [who, setWho] = useState<{ id: string; name: string; role: string; code?: string; works?: boolean | null; why?: string | null }[]>([]);
   const [to, setTo] = useState(me.id);
   const [title, setTitle] = useState(defaultTitle ?? (personId ? 'Перезвонить' : ''));
   const [due, setDue] = useState(localInput(24 * 60));
   const [err, setErr] = useState('');
   useEffect(() => { if (!club) api<Club[]>('GET', '/api/clubs').then((c) => { setClubs(c); if (c[0]) setClub(c[0].id); }).catch(() => null); }, []);
-  useEffect(() => { if (club) api<{ id: string; name: string; role: string; code?: string }[]>('GET', `/api/tasks/assignees?clubId=${club}`).then((w) => {
+  // Кому можно поставить на этот день: кто не работает по графику — недоступен (замечание №46)
+  const dueDay = due.slice(0, 10);
+  useEffect(() => { if (club) api<{ id: string; name: string; role: string; code?: string; works?: boolean | null; why?: string | null }[]>('GET', `/api/tasks/assignees?clubId=${club}&day=${dueDay}`).then((w) => {
     setWho(w);
     const pick = prefer?.map((r) => w.find((x) => x.code === r && x.id !== me.id)).find(Boolean);
     if (pick) setTo(pick.id);
-  }).catch(() => setWho([])); }, [club]);
+  }).catch(() => setWho([])); }, [club, dueDay]);
   const submit = async (e: FormEvent) => {
     e.preventDefault(); setErr('');
     try {
@@ -252,8 +260,9 @@ export function NewTask({ me, clubId, personId, personName, onDone, onCancel, pr
         {clubs.length > 1 && <label className="f">Клуб<select value={club} onChange={(e) => setClub(e.target.value)}>{clubs.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}</select></label>}
         <label className="f">Кому<select value={to} onChange={(e) => setTo(e.target.value)}>
           {!who.some((w) => w.id === me.id) && <option value={me.id}>Мне</option>}
-          {who.map((w) => <option key={w.id} value={w.id}>{w.id === me.id ? 'Мне' : `${w.name} · ${w.role}`}</option>)}</select></label>
+          {who.map((w) => <option key={w.id} value={w.id} disabled={w.id !== me.id && w.works === false}>{w.id === me.id ? 'Мне' : `${w.name} · ${w.role}${w.works === false ? ` — ${w.why}` : ''}`}</option>)}</select></label>
       </div>
+      {to !== me.id && who.find((w) => w.id === to)?.works === false && <div className="err">{who.find((w) => w.id === to)?.name} {who.find((w) => w.id === to)?.why}. Выберите другой день или другого сотрудника.</div>}
       {err && <div className="err">{err}</div>}
       <div className="row"><button className="btn pri sm" disabled={!title.trim() || !club}>Поставить</button><button type="button" className="btn sm" onClick={onCancel}>Отмена</button></div>
     </form>

@@ -4,14 +4,16 @@ import { api, can, type Club, type Me, navParams } from './api.ts';
 import { errText, toast } from './ui.ts';
 import { trainerOnly } from './roleMenu.ts';
 
-type Session = { id: string; typeName: string; kind: 'group' | 'personal'; roomName: string | null; trainerId: string | null; trainerName: string | null; localStart: string; localEnd: string;
+type Session = { id: string; typeName: string; kind: 'group' | 'personal'; department?: string | null; roomName: string | null; trainerId: string | null; trainerName: string | null; localStart: string; localEnd: string;
   capacity: number; status: 'scheduled' | 'done' | 'cancelled'; booked: number; waitlist: number; note: string | null; cancelReason: string | null };
 type Booking = { id: string; personId: string; name: string; phone: string | null; status: string; trial: boolean; lateCancel: boolean; charged: boolean; membership: string | null; visitsLeft: number | null };
 type Full = Session & { bookings: Booking[]; canMark: boolean; canManage: boolean };
-type Setup = { rooms: { id: string; name: string; capacity: number | null }[]; types: { id: string; name: string; kind: string; durationMin: number; capacity: number }[];
+type Setup = { rooms: { id: string; name: string; capacity: number | null }[]; types: { id: string; name: string; kind: string; department: string | null; durationMin: number; capacity: number }[];
   trainers: { id: string; name: string }[];
   settings: { lateCancelHours: number; chargePersonalLate: boolean; chargeGroupNoShow: boolean; noShowLimit: number | null; noShowBlockDays: number; remind24: boolean; remind2: boolean; bookAheadDays: number } };
 
+// Подразделения клуба (замечание №37): тренажёрный зал, групповые программы, БК — и свои
+const DEPTS = ['ТЗ', 'ГП', 'БК'];
 const DOW = ['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс'];
 const iso = (d: Date) => d.toISOString().slice(0, 10);
 const addDays = (s: string, n: number) => { const d = new Date(`${s}T00:00:00Z`); d.setUTCDate(d.getUTCDate() + n); return iso(d); };
@@ -26,6 +28,7 @@ export function SchedulePage({ me, clubs, clubId, openPerson }: { me: Me; clubs:
   const [list, setList] = useState<Session[]>([]);
   const [setup, setSetup] = useState<Setup | null>(null);
   const [trainer, setTrainer] = useState('');
+  const [dep, setDep] = useState('');
   const [open, setOpen] = useState<string | null>(() => navParams('schedule').session ?? null);
   const [view, setView] = useState<'week' | 'new' | 'setup'>('week');
   const manage = can(me, 'schedule.manage');
@@ -59,17 +62,21 @@ export function SchedulePage({ me, clubs, clubId, openPerson }: { me: Me; clubs:
             {setup?.trainers.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
           </select>}
         </div>
+        {(() => { const deps = [...new Set([...DEPTS.filter((x) => list.some((s) => s.department === x)), ...list.map((s) => s.department).filter((x): x is string => !!x)])];
+          return deps.length > 1 && <div className="tabs" role="group" aria-label="Подразделение">
+            <button aria-pressed={!dep} onClick={() => setDep('')}>Все подразделения</button>
+            {deps.map((x) => <button key={x} aria-pressed={dep === x} onClick={() => setDep(x)}>{x}</button>)}</div>; })()}
         <div className="week7">
           {DOW.map((d, i) => {
             const day = addDays(week, i);
-            const items = list.filter((s) => s.localStart.startsWith(day));
+            const items = list.filter((s) => s.localStart.startsWith(day) && (!dep || s.department === dep));
             return (
               <div key={day} className={`card day ${day === today ? 'today' : ''}`}>
                 <div className="lbl">{d}, {ddmm(day)}</div>
                 {items.map((s) => (
                   <button key={s.id} className={`item cls ${s.status}`} onClick={() => setOpen(s.id)}>
                     <div className="row between"><b>{s.localStart.slice(11)}</b><span className={`chip ${s.status === 'cancelled' ? 'bad' : s.booked >= s.capacity ? 'warn' : 'ok'}`}>{s.status === 'cancelled' ? 'отменено' : `${s.booked}/${s.capacity}`}{s.waitlist ? ` +${s.waitlist}` : ''}</span></div>
-                    <div>{s.typeName}</div>
+                    <div>{s.typeName}{s.department && !dep ? <span className="small muted"> · {s.department}</span> : null}</div>
                     <div className="small muted">{[s.trainerName, s.roomName].filter(Boolean).join(' · ')}</div>
                   </button>
                 ))}
@@ -179,7 +186,7 @@ function NewSession({ club, setup, onDone }: { club: string; setup: Setup; onDon
 }
 
 function SetupView({ club, setup, reload }: { club: string; setup: Setup; reload: () => void }) {
-  const [t, setT] = useState({ name: '', kind: 'group', durationMin: 60, capacity: 15 });
+  const [t, setT] = useState({ name: '', kind: 'group', durationMin: 60, capacity: 15, department: 'ГП' });
   const [room, setRoom] = useState({ name: '', capacity: '' });
   const [st, setSt] = useState(setup.settings);
   const call = async (fn: () => Promise<unknown>, ok: string) => { try { await fn(); toast(ok); reload(); } catch (x) { toast(errText(x)); } };
@@ -187,9 +194,13 @@ function SetupView({ club, setup, reload }: { club: string; setup: Setup; reload
     <div className="grid2">
       <div className="card" style={{ display: 'grid', gap: 6 }}>
         <h2>Виды занятий</h2>
-        {setup.types.map((x) => <div key={x.id} className="item small">{x.name} · {x.kind === 'group' ? 'групповое' : 'персональное'} · {x.durationMin} мин · мест {x.capacity}</div>)}
+        {setup.types.map((x) => <div key={x.id} className="item small row between" style={{ gap: 6 }}><span>{x.name} · {x.kind === 'group' ? 'групповое' : 'персональное'} · {x.durationMin} мин · мест {x.capacity}</span>
+          <select value={x.department ?? ''} aria-label={`Подразделение: ${x.name}`} style={{ width: 'auto' }} onChange={(e) => call(() => api('PATCH', `/api/schedule/types/${x.id}`, { department: e.target.value }), 'Подразделение изменено')}>
+            {[...new Set([...DEPTS, ...(x.department ? [x.department] : [])])].map((d) => <option key={d} value={d}>{d}</option>)}</select></div>)}
         <label className="f">Название<input value={t.name} onChange={(e) => setT({ ...t, name: e.target.value })} /></label>
-        <label className="f">Вид<select className="f" value={t.kind} onChange={(e) => setT({ ...t, kind: e.target.value, capacity: e.target.value === 'personal' ? 1 : 15 })}><option value="group">Групповое</option><option value="personal">Персональное</option></select></label>
+        <label className="f">Подразделение<input list="sched-depts" value={t.department} onChange={(e) => setT({ ...t, department: e.target.value })} placeholder="ТЗ, ГП, БК" /></label>
+        <datalist id="sched-depts">{DEPTS.map((d) => <option key={d} value={d} />)}</datalist>
+        <label className="f">Вид<select className="f" value={t.kind} onChange={(e) => setT({ ...t, kind: e.target.value, capacity: e.target.value === 'personal' ? 1 : 15, department: e.target.value === 'personal' ? 'ТЗ' : t.department })}><option value="group">Групповое</option><option value="personal">Персональное</option></select></label>
         <div className="row" style={{ gap: 6 }}>
           <label className="f">Минут<input type="number" value={t.durationMin} onChange={(e) => setT({ ...t, durationMin: Number(e.target.value) })} /></label>
           <label className="f">Мест<input type="number" value={t.capacity} onChange={(e) => setT({ ...t, capacity: Number(e.target.value) })} /></label>

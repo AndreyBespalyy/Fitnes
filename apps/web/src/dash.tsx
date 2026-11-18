@@ -1,5 +1,6 @@
 // Шаг 13. Рабочий стол из виджетов: дашборды собственника, управляющего, РОПа и менеджера,
 // план продаж по клубу и менеджерам, нормы KPI, отчёт по продажам, словарь метрик, выгрузки.
+import { MyTaskCalendar } from './taskCalendar.tsx';
 import { PlanDrill } from './insights.tsx';
 import { MyDay } from './myDay.tsx';
 import { useClubPick } from './clubPick.tsx';
@@ -70,6 +71,7 @@ export function DashPage({ me, clubs, clubId, openPerson, go: goTo, canGo, pickC
       </div>
       {drill && <PlanDrill clubId={drill.clubId} month={drill.month} category={drill.category} userId={drill.userId} onClose={() => setDrill(null)} openPerson={openPerson} />}
       {view === 'desk' && me.roles.some((r) => r.code === 'manager') && <MyDay me={me} clubs={clubs} clubId={clubId} openPerson={openPerson} />}
+      {view === 'desk' && can(me, 'crm.work') && canGo('tasks') && <MyTaskCalendar clubId={clubId} onPick={(day) => goTo({ tab: 'tasks', p: { day } })} />}
       {view === 'desk' && (layout.widgets.length ? layout.widgets.map((w) => <Widget key={`${w}-${clubId}`} exportable={office} id={w} q={q} tick={tick} metrics={metrics} openPerson={openPerson} nav={nav} pickClub={pickClub}
         onDrill={(x) => { const c = club?.id ?? (clubs.length === 1 ? clubs[0].id : null); if (!c) { toast('Выберите клуб вверху страницы, чтобы раскрыть цифру до клиентов'); return; } setDrill({ ...x, month, clubId: c }); }}
         title={layout.available.find((a) => a.id === w)?.title ?? w} />)
@@ -181,6 +183,19 @@ function WidgetBody({ d, metrics, onDrill, openPerson, nav, pickClub }: { d: Any
         <td className="num">{rub(c.factKop)}<Bar v={c.percent} /></td><td className="num">{c.planKop === null ? 'не задан' : `${rub(c.planKop)} · ${pctText(c.percent)}`}</td>
         <td className={`num ${c.deficitKop ? 'bad' : ''}`}>{rub(c.forecastKop)}</td><td className="num hide-narrow">{pctText(c.conversion)}</td><td className="num hide-narrow">{rub(c.debtsKop)}</td></tr>)}</tbody></table></div>
   );
+  // «Мой месяц» менеджера (замечание №34)
+  if (d.widget === 'my_month') return <>
+    <p className="small muted" style={{ margin: 0 }}>{monthName(d.month)}. Продажи засчитываются по проданным вами абонементам.</p>
+    <div className="kpis">
+      <Kpi label="План месяца" value={d.planKop === null ? 'план не задан' : rub(d.planKop)} metric="plan" metrics={metrics} onClick={() => onDrill({ category: null, userId: null })} />
+      <Kpi label="Факт" value={rub(d.factKop)} sub={pctText(d.percent)} metric="percent" metrics={metrics} tone={d.light === 'red' ? 'bad' : d.light === 'green' ? 'ok' : ''} onClick={() => onDrill({ category: null, userId: null })} />
+      <Kpi metrics={metrics} label="Новые клиенты" value={num(d.newClients)} sub="продаж за месяц" onClick={() => onDrill({ category: 'new', userId: null })} />
+      <Kpi metrics={metrics} label="Рекурренты" value={num(d.recurring)} sub={`подписок с автосписанием${d.subscriptions ? ` · новых ${d.subscriptions}` : ''}`} onClick={nav({ tab: 'home', p: { kind: 'member' } })} />
+      <Kpi metrics={metrics} label="Тренер хаб" value={num(d.trainerHub.won)} sub={`продано · в работе ${d.trainerHub.open}`} onClick={nav({ tab: 'board' })} />
+      <Kpi metrics={metrics} label="Продления" value={num(d.renewals)} sub={d.returns ? `возвращено бывших ${d.returns}` : undefined} onClick={() => onDrill({ category: 'renewal', userId: null })} />
+      <Kpi metrics={metrics} label="Звонки" value={num(d.calls)} sub="за месяц" onClick={nav({ tab: 'hot', p: { tab: 'talks' } })} />
+      <Kpi metrics={metrics} label="Диалоги" value={num(d.dialogs)} sub="переписок с клиентами" onClick={nav({ tab: 'chats' })} />
+    </div></>;
   if (d.widget === 'plan' || d.widget === 'my_plan') {
     const t = d.total;
     return <>

@@ -103,6 +103,18 @@ export async function hintsFor(db: Db, clubId: string, personIds: string[]): Pro
           text: `Ходит регулярно (${v.v30} ${plural(v.v30, 'раз', 'раза', 'раз')} за месяц), абонемент заканчивается ${main.ends_on.split('-').reverse().join('.')}. «${longer.name}» выйдет ${rub(Math.round(perMonth(longer)))} в месяц вместо ${rub(Math.round(perMonth(cur)))}` });
       }
     }
+    // 7. Доплата по абонементу (замечание №43): ходит часто, до конца ещё больше месяца — перейти на длинный с зачётом остатка
+    if (main && main.kind === 'term' && main.ends_on && main.ends_on > addDaysIso(today, 30) && v.v30 >= 4 && main.amount > 0) {
+      const cur = prods.find((x) => x.id === main.product_id);
+      const total = Math.max(1, Math.round((Date.parse(main.ends_on) - Date.parse(main.starts_on)) / 86400_000) + 1);
+      const left = Math.max(0, Math.round((Date.parse(main.ends_on) - Date.parse(today)) / 86400_000));
+      const credit = Math.round(Number(main.amount) * left / total);
+      const curDays = cur?.duration_days ?? total;
+      const up = prods.filter((p) => p.kind === 'term' && !p.access_to && (p.duration_days ?? 0) > curDays && p.id !== main.product_id && p.price > credit)
+        .sort((a, b) => (a.duration_days ?? 0) - (b.duration_days ?? 0))[0];
+      if (up) hints.push({ key: 'upgrade_pay', title: 'Доплата по абонементу', who: 'manager', productId: up.id, priceKop: up.price - credit,
+        text: `Ходит ${v.v30} ${plural(v.v30, 'раз', 'раза', 'раз')} за месяц, по «${main.product_name}» осталось ${left} ${plural(left, 'день', 'дня', 'дней')} (≈ ${rub(credit)}). Предложите перейти на «${up.name}» с доплатой ${rub(up.price - credit)}: остаток засчитывается, срок считается с сегодняшнего дня` });
+    }
     out.set(pid, hints);
   }
   return out;
