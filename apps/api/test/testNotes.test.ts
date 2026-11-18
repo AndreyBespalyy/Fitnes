@@ -79,6 +79,11 @@ test('ежедневный разбор: выгрузка по ключу, св�
   assert.equal(sums[0].bodyMd.includes('Итог смены'), true);
   const idea = ex.notes.find((n: { kind: string }) => n.kind === 'idea');
   assert.equal((await req('PATCH', '/api/test-notes/export/status', null, { ids: [idea.id], status: 'in_work' }, auth)).json().updated, 1);
+  // Удаление записи по ключу
+  assert.equal((await req('DELETE', `/api/test-notes/export/${idea.id}`, null)).statusCode, 401);
+  assert.equal((await req('DELETE', `/api/test-notes/export/${idea.id}`, null, undefined, auth)).json().ok, true);
+  assert.equal((await req('DELETE', `/api/test-notes/export/${idea.id}`, null, undefined, auth)).statusCode, 404);
+  assert.equal((await req('GET', '/api/test-notes/export?all=1', null, undefined, auth)).json().notes.length, 2);
   // После выпуска нового ключа старый не работает
   await req('POST', '/api/test-notes/key', 'a.bespalyy');
   assert.equal((await req('GET', '/api/test-notes/export', null, undefined, auth)).statusCode, 401);
