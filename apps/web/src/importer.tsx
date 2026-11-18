@@ -16,15 +16,17 @@ type IFile = { id: string; fileName: string; reportType: string | null; detected
 type Count = { name: string; files: number; source: number; load: number; warning: number; excluded: number; conflict: number; skipped: number; earlier: number };
 type Month = { month: string; inSourceKop: number; inLoadKop: number; outSourceKop: number; outLoadKop: number };
 type Issue = { type: string; status: string; group: string; count: number; examples: { rowNo: number; file: string; issue: string }[] };
+// money = null и dataHidden — у технического администратора: суммы и данные клиентов скрыты, видны счётчики и ошибки
 type Report = { generatedAt: string; mode: 'check' | 'applied'; canApply: boolean; blockers: string[]; counts: Record<string, Count>;
-  money: { months: Month[]; totals: Omit<Month, 'month'>; paymentsFooterKop: number | null; debts: { sourceKop: number; loadKop: number };
+  dataHidden?: { people: boolean; money: boolean };
+  money: null | { months: Month[]; totals: Omit<Month, 'month'>; paymentsFooterKop: number | null; debts: { sourceKop: number; loadKop: number };
     advances: { sourceKop: number; count: number }; memberships: { loadKop: number; footerKop: number | null } };
   completeness: { clientsWithoutPhone: number; clientsWithoutBirthDate: number; clientsWithoutEmail: number; membershipsWithoutContract: number; membershipsActive: number;
     paymentsWithoutMembership: number; tasksOpen?: number; tasksHistory?: number;
     staffNew?: number; staffRoles?: { position: string; role: string | null; count: number }[]; notTransferred: string[] };
   issues: Issue[]; applied?: Applied };
 type BatchFull = Batch & { report: Report | null; files: IFile[]; statusCounts: Record<string, number> };
-type IRow = { id: string; rowNo: number; cells: string[]; status: string; issue: string | null; conflictWith: string | null; resolution: string | null; fileName: string; headers: string[] };
+type IRow = { id: string; rowNo: number; cells: string[] | null; status: string; issue: string | null; conflictWith: string | null; resolution: string | null; fileName: string; headers: string[] };
 
 const ORDER = ['clients', 'memberships', 'payments', 'visits', 'balances', 'tasks', 'staff'];
 const OPTIONAL = ['tasks', 'staff'];
@@ -256,7 +258,7 @@ function FileCard({ f, types, editable, reload }: { f: IFile; types: TypeDef[]; 
 
 function ReportView({ r }: { r: Report }) {
   const m = r.money;
-  const rowsSum = m.totals.inSourceKop - m.totals.outSourceKop;
+  const rowsSum = m ? m.totals.inSourceKop - m.totals.outSourceKop : 0;
   return (
     <>
       <div className="card" style={{ display: 'grid', gap: 10 }}>
@@ -276,7 +278,10 @@ function ReportView({ r }: { r: Report }) {
         </table></div>
       </div>
 
-      <div className="card" style={{ display: 'grid', gap: 10 }}>
+      {r.dataHidden && (
+        <div className="note">Данные клиентов{r.dataHidden.money ? ' и суммы' : ''} скрыты: у вашей роли нет к ним доступа. Видны счётчики, ошибки и номера строк в файлах 1С.
+          {r.dataHidden.money && ' Сверку денег после переноса проверяет собственник или финансист в этом же разделе.'}</div>)}
+      {m && <div className="card" style={{ display: 'grid', gap: 10 }}>
         <h2>Деньги: сверка с 1С без округлений</h2>
         {m.paymentsFooterKop !== null && (
           <div className={`note ${m.paymentsFooterKop === rowsSum ? 'ok-msg' : ''}`}>
@@ -300,7 +305,7 @@ function ReportView({ r }: { r: Report }) {
           <span>Авансы клиентов в 1С</span><span className="num">{rub(m.advances.sourceKop)} у {m.advances.count} клиентов (показаны здесь, лицевого счёта пока нет)</span>
           <span>Стоимость абонементов</span><span className="num">{rub(m.memberships.loadKop)}</span>
         </div>
-      </div>
+      </div>}
 
       <div className="card" style={{ display: 'grid', gap: 8 }}>
         <h2>Полнота данных</h2>
@@ -343,6 +348,7 @@ function Conflicts({ batchId, reload }: { batchId: string; reload: () => void })
   };
   const LBL: Record<string, string> = { merge: 'объединить', new: 'отдельный клиент', skip: 'не переносить' };
   const open = rows.filter((r) => !r.resolution).length;
+  const hidden = rows.some((r) => r.cells === null);
   const resolveAll = async (resolution: 'new' | 'skip') => {
     const what = resolution === 'new' ? 'создать отдельными клиентами' : 'не переносить';
     if (!window.confirm(`Все нерешённые конфликты (${open}) — ${what}? Решение по отдельной строке потом можно поменять.`)) return;
@@ -359,13 +365,15 @@ function Conflicts({ batchId, reload }: { batchId: string; reload: () => void })
           <button className="btn sm pri" onClick={() => resolveAll('new')}>Всех создать отдельными клиентами</button>
           <button className="btn sm" onClick={() => resolveAll('skip')}>Всех не переносить</button>
         </div>)}
+      {hidden && <p className="small" style={{ margin: 0 }}>Содержимое строк скрыто: у вашей роли нет доступа к данным клиентов. Решите конфликты кнопкой для всех
+        или по номеру строки в файле 1С; объединить с существующим клиентом может собственник или управляющий.</p>}
       {rows.map((r) => (
         <div key={r.id} className="item" style={{ display: 'grid', gap: 6 }}>
           <div className="small">{r.fileName}, строка {r.rowNo}</div>
-          <div>{r.cells.filter(Boolean).slice(0, 5).join(' · ')}</div>
-          <div className="small bad">{r.conflictWith}</div>
+          {r.cells && <div>{r.cells.filter(Boolean).slice(0, 5).join(' · ')}</div>}
+          {r.conflictWith && <div className="small bad">{r.conflictWith}</div>}
           <div className="row">
-            {(['merge', 'new', 'skip'] as const).map((k) => (
+            {(hidden ? ['new', 'skip'] as const : ['merge', 'new', 'skip'] as const).map((k) => (
               <button key={k} className={`btn sm ${r.resolution === k ? 'pri' : ''}`} onClick={() => resolve(r.id, k)}>
                 {k === 'merge' ? 'Это один человек: объединить' : k === 'new' ? 'Разные люди: создать отдельно' : 'Не переносить'}</button>))}
             {r.resolution && <span className="chip ok">решено: {LBL[r.resolution]}</span>}
@@ -390,7 +398,7 @@ function IssueRows({ batchId }: { batchId: string }) {
         <div className="tbl"><table>
           <thead><tr><th>Файл</th><th>Строка</th><th>Данные</th><th>Причина</th></tr></thead>
           <tbody>{rows.map((r) => <tr key={r.id}><td className="small">{r.fileName}</td><td className="num">{r.rowNo}</td>
-            <td className="small">{r.cells.filter(Boolean).slice(0, 6).join(' · ')}</td><td>{r.issue}</td></tr>)}</tbody>
+            <td className="small">{r.cells ? r.cells.filter(Boolean).slice(0, 6).join(' · ') : 'скрыто'}</td><td>{r.issue ?? ISSUE_STATUS[r.status]?.[0] ?? r.status}</td></tr>)}</tbody>
         </table></div>) : <p className="muted">Таких строк нет.</p>)}
     </details>
   );

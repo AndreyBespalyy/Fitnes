@@ -6,6 +6,7 @@ import { badRequest, forbidden, notFound } from '../errors.ts';
 import { hashPassword, tempPassword } from '../passwords.ts';
 import { checkLimit } from './onboarding.ts';
 import { PERMISSIONS as P } from '../roles.ts';
+import { assertCanManageUser, grantableRole, missingToGrant } from './roleAdmin.ts';
 
 const TR: Record<string, string> = { а: 'a', б: 'b', в: 'v', г: 'g', д: 'd', е: 'e', ё: 'e', ж: 'zh', з: 'z', и: 'i', й: 'y', к: 'k', л: 'l', м: 'm',
   н: 'n', о: 'o', п: 'p', р: 'r', с: 's', т: 't', у: 'u', ф: 'f', х: 'kh', ц: 'ts', ч: 'ch', ш: 'sh', щ: 'sch', ъ: '', ы: 'y', ь: '', э: 'e', ю: 'yu', я: 'ya' };
@@ -44,8 +45,10 @@ async function loadUser(db: Db, id: string) {
 export function staffRoutes(app: FastifyInstance, pool: pg.Pool) {
   app.get('/api/roles', async (req) => {
     const ctx = requirePerm(req, P.staffView);
+    // Свои роли сети видны только ей (RLS). canAssign — можно ли выдать роль: нельзя выдать права на клиентов и деньги, которых нет у себя
     return withCtx(pool, ctx, async (db) => (await db.query(
-      'select code, name, network_wide as "networkWide" from roles order by sort')).rows);
+      'select code, name, network_wide as "networkWide", permissions, tenant_id from roles order by tenant_id nulls first, sort, name')).rows
+      .map((r) => ({ code: r.code, name: r.name, networkWide: r.networkWide, custom: !!r.tenant_id, canAssign: missingToGrant(ctx, r).length === 0 })));
   });
 
   app.get('/api/staff', async (req) => {
@@ -62,8 +65,7 @@ export function staffRoutes(app: FastifyInstance, pool: pg.Pool) {
     if (!b.role) throw badRequest('Выберите роль');
     if (b.role === 'owner' && !can(ctx, '*')) throw forbidden('Назначить собственника может только собственник');
     const res = await withCtx(pool, ctx, async (db) => {
-      const role = (await db.query('select code, network_wide from roles where code = $1', [b.role])).rows[0];
-      if (!role) throw badRequest('Неизвестная роль');
+      const role = await grantableRole(db, ctx, b.role!);
       let clubId: string | null = b.clubId || null;
       if (role.network_wide && !ctx.allClubs) throw forbidden('Сетевые роли назначает собственник или администратор системы');
       if (role.network_wide) clubId = null;
@@ -95,6 +97,7 @@ export function staffRoutes(app: FastifyInstance, pool: pg.Pool) {
     if (id === ctx.userId) throw badRequest('Нельзя выполнить это действие со своей учётной записью');
     const isOwner = (await db.query(`select 1 from user_assignments where user_id = $1 and role_code = 'owner'`, [id])).rowCount;
     if (isOwner && !can(ctx, '*')) throw forbidden('Учётной записью собственника управляет только собственник');
+    await assertCanManageUser(db, ctx, id);
     if (!ctx.allClubs) {
       const a = (await db.query('select club_id from user_assignments where user_id = $1', [id])).rows as { club_id: string | null }[];
       if (a.some((x) => x.club_id === null)) throw forbidden('Сотрудниками сети управляет собственник или администратор системы');

@@ -10,6 +10,7 @@ import { badRequest, forbidden, notFound } from '../errors.ts';
 import { hashPassword, tempPassword, verifyPassword } from '../passwords.ts';
 import { checkLimit } from './onboarding.ts';
 import { makeLogin } from './staff.ts';
+import { missingToGrant } from './roleAdmin.ts';
 import { PERMISSIONS as P } from '../roles.ts';
 import { readTable, TableError } from '../lib/tables.ts';
 import { clubToday, daysBetween } from './memberships.ts';
@@ -517,10 +518,16 @@ async function saveMarks(db: Db, marks: Map<string, Mark>) {
 /* ======================= перенос ======================= */
 export type StaffCredential = { fullName: string; login: string; tempPassword: string; role: string; position: string };
 
-async function apply(db: Db, ctx: Actor, batch: { id: string; club_id: string; tenant_id: string }, canStaff: boolean) {
+async function apply(db: Db, ctx: Actor, batch: { id: string; club_id: string; tenant_id: string }, canStaff: boolean, grantable?: Set<string>) {
   const a = await analyze(db, batch);
   if (!a.report.canApply) throw badRequest(`Перенос невозможен: ${a.report.blockers.join('; ')}`);
   if (a.staffNew.length && !canStaff) throw badRequest('Создавать учётные записи сотрудников может собственник или управляющий: попросите их выполнить этот перенос');
+  // Учётные записи с правами на клиентов и деньги создаёт только тот, у кого эти права есть (технический администратор — нет)
+  const denied = grantable ? [...new Set(a.staffNew.map((x) => x.role))].filter((r) => !grantable.has(r)) : [];
+  if (denied.length) {
+    const names = (await db.query('select name from roles where code = any($1) order by sort', [denied])).rows.map((r) => `«${r.name}»`).join(', ');
+    throw forbidden(`В отчёте «Сотрудники» есть роли ${names}: такие учётные записи создаёт собственник или управляющий. Уберите отчёт «Сотрудники» из этого переноса или попросите их выполнить перенос`);
+  }
   const t = batch.tenant_id; const club = batch.club_id;
   const ext: { entity: string; key: string; target: string; row: Row; type: ReportType }[] = [];
   const fileType = new Map(a.files.map((f) => [f.id, f.report_type!]));
@@ -708,6 +715,22 @@ async function bulk<T>(db: Db, sql: string, common: unknown[], items: T[], cols:
   }
 }
 
+
+/* Технический администратор (18.11.2026) запускает перенос, не видя данных: без права на клиентов — без ФИО, телефонов и строк файлов,
+   без права на финансы — без сумм. Остаются счётчики, ошибки по видам и номера строк, чтобы найти их в файле 1С. */
+const hidePeople = (ctx: Ctx) => !can(ctx, P.personsView);
+const hideMoney = (ctx: Ctx) => !can(ctx, P.financeView);
+export const importBlind = (ctx: Ctx) => hidePeople(ctx) || hideMoney(ctx);
+type IssueOut = { group: string; examples: { rowNo: number; file: string; issue: string }[] };
+function maskReport<T extends Record<string, unknown> | null | undefined>(ctx: Ctx, report: T): T {
+  if (!report || !importBlind(ctx)) return report;
+  const r: Record<string, unknown> = { ...report, dataHidden: { people: hidePeople(ctx), money: hideMoney(ctx) } };
+  if (hideMoney(ctx)) r.money = null;
+  // В тексте ошибки бывают ФИО, телефоны и суммы из файла: показываем только вид ошибки и номер строки
+  if (Array.isArray(r.issues)) r.issues = (r.issues as IssueOut[]).map((i) => ({ ...i, examples: i.examples.map((e) => ({ ...e, issue: i.group })) }));
+  return r as T;
+}
+
 /* ======================= маршруты ======================= */
 const BATCH_SELECT = `select b.id, b.club_id as "clubId", c.name as "clubName", b.status, b.report, b.created_at as "createdAt", b.checked_at as "checkedAt",
   b.applied_at as "appliedAt", b.accepted_at as "acceptedAt", b.rolled_back_at as "rolledBackAt", u.full_name as "createdByName"
@@ -766,7 +789,9 @@ export function importRoutes(app: FastifyInstance, pool: pg.Pool) {
           (select coalesce(json_agg(r.cells order by r.row_no), '[]') from (select cells, row_no from import_rows where file_id = f.id order by row_no limit 5) r) as sample
         from import_files f where f.batch_id = $1 order by f.uploaded_at`, [id])).rows;
       const statusCounts = (await db.query(`select status, count(*)::int as n from import_rows where batch_id = $1 group by status`, [id])).rows;
-      return { ...b, files, statusCounts: Object.fromEntries(statusCounts.map((r) => [r.status, r.n])) };
+      const blind = importBlind(ctx);
+      return { ...b, report: maskReport(ctx, b.report), files: blind ? files.map((f) => ({ ...f, sample: [] })) : files, dataHidden: blind,
+        statusCounts: Object.fromEntries(statusCounts.map((r) => [r.status, r.n])) };
     });
   });
 
@@ -868,7 +893,7 @@ export function importRoutes(app: FastifyInstance, pool: pg.Pool) {
       await saveMarks(db, a.marks);
       const report = { ...a.report, mode: 'check' };
       await db.query(`update import_batches set status = 'checked', report = $2, checked_at = now() where id = $1`, [id, JSON.stringify(report)]);
-      return report;
+      return maskReport(ctx, report);
     });
   });
 
@@ -880,7 +905,9 @@ export function importRoutes(app: FastifyInstance, pool: pg.Pool) {
         r.conflict_person_id as "conflictPersonId", r.resolution, f.original_name as "fileName", f.report_type as "reportType", f.headers
       from import_rows r join import_files f on f.id = r.file_id
       where r.batch_id = $1 and ($2::text is null or ($2 = 'conflict' and r.conflict_with is not null) or ($2 <> 'conflict' and r.status = $2)) and ($3::text is null or f.report_type = $3)
-      order by f.uploaded_at, r.row_no limit $4`, [id, status || null, type || null, Math.min(Number(limit) || 200, 1000)])).rows);
+      order by f.uploaded_at, r.row_no limit $4`, [id, status || null, type || null, Math.min(Number(limit) || 200, 1000)])).rows
+      // Без права на клиентов и финансы — только номер строки, файл и состояние, без содержимого строки
+      .map((r) => (importBlind(ctx) ? { ...r, cells: null, issue: null, conflictWith: null, conflictPersonId: null, hidden: true } : r)));
   });
 
   // Одно решение сразу для всех нерешённых конфликтов пакета: например, общий телефон у членов семьи
@@ -911,6 +938,7 @@ export function importRoutes(app: FastifyInstance, pool: pg.Pool) {
       if (!r) throw notFound('Строка не найдена');
       editable(await loadBatch(db, r.batch_id));
       if (!r.conflict_with) throw badRequest('По этой строке нет конфликта');
+      if (resolution === 'merge' && hidePeople(ctx)) throw forbidden('Объединить с клиентом может тот, кто видит клиентов: решите конфликты кнопкой для всех или попросите управляющего');
       await db.query(`update import_rows set resolution = $2, resolved_by = $3, resolved_at = now() where id = $1`, [id, resolution, ctx.userId]);
       await db.query(`update import_batches set status = 'draft' where id = $1`, [r.batch_id]);
       await audit(db, ctx, 'import.conflict_resolved', 'import_row', String(id), { resolution: r.resolution }, { resolution, conflictWith: r.conflict_with });
@@ -928,7 +956,9 @@ export function importRoutes(app: FastifyInstance, pool: pg.Pool) {
       if (!b) throw notFound('Перенос не найден');
       if (b.status === 'applied' || b.status === 'accepted') throw badRequest('Этот перенос уже выполнен');
       if (b.status !== 'checked') throw badRequest('Сначала выполните пробный перенос и проверьте отчёт');
-      return apply(db, ctx, b, can(ctx, P.staffManage));
+      const roles = (await db.query('select code, permissions, tenant_id from roles')).rows;
+      const grantable = new Set(roles.filter((r) => missingToGrant(ctx, r).length === 0).map((r) => r.code as string));
+      return maskReport(ctx, await apply(db, ctx, b, can(ctx, P.staffManage), grantable));
     });
   });
 

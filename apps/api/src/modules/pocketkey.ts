@@ -10,7 +10,7 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import type pg from 'pg';
 import { createHash, randomBytes } from 'node:crypto';
-import { requirePerm } from '../auth.ts';
+import { can, requirePerm } from '../auth.ts';
 import { audit, withCtx, type Db } from '../db.ts';
 import { badRequest, HttpError, notFound } from '../errors.ts';
 import { PERMISSIONS as P } from '../roles.ts';
@@ -304,7 +304,9 @@ export function pocketkeyRoutes(app: FastifyInstance, pool: pg.Pool) {
         const devices = (await db.query(`select id, name, direction, external_id as "externalId", is_active as "isActive", device_ip as ip, device_port as port,
           device_type as type, biometrics from access_points where gateway_id = $1 order by nullif(regexp_replace(external_id, '\\D', '', 'g'), '')::int nulls last, name`, [g.id])).rows;
         const journal = (await db.query(`select at, op, status, correlation_id as "correlationId", device, code_tail as "codeTail", message, ms from acs_integration_log
-          where gateway_id = $1 order by at desc, id desc limit 50`, [g.id])).rows;
+          where gateway_id = $1 order by at desc, id desc limit 50`, [g.id])).rows
+          // На табло бывают имя клиента и остаток абонемента: без права на клиентов показываем только решение и причину
+          .map((j) => (can(ctx, P.personsView) ? j : { ...j, message: j.message?.replace(/\. На табло:[\s\S]*$/, '') ?? null }));
         const stats = (await db.query(`select count(*) filter (where op = 'check')::int as checks, count(*) filter (where op = 'event')::int as events,
             count(*) filter (where status = 'error')::int as errors from acs_integration_log where gateway_id = $1 and at > now() - interval '24 hours'`, [g.id])).rows[0];
         out.push({ ...g, settings: pkSettings(g.settings), devices, journal, stats });

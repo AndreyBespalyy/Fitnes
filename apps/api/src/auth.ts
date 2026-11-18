@@ -70,6 +70,13 @@ export function requireCtx(req: FastifyRequest): Ctx {
   return req.ctx;
 }
 
+/** Хотя бы одно из прав (например, телефонию настраивает управляющий или технический администратор). */
+export function requireAnyPerm(req: FastifyRequest, ...perms: string[]): Ctx {
+  const ctx = requireCtx(req);
+  if (!perms.some((p) => can(ctx, p))) throw forbidden();
+  return ctx;
+}
+
 export function requirePerm(req: FastifyRequest, perm: string): Ctx {
   const ctx = requireCtx(req);
   if (!can(ctx, perm)) throw forbidden();

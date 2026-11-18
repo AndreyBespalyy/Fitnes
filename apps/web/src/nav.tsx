@@ -13,7 +13,7 @@ const GROUP: Record<string, string> = {
   sales: 'sales', leads: 'sales', board: 'sales', home: 'sales', chats: 'sales', retention: 'sales', reviews: 'sales', corp: 'sales',
   schedule: 'club', access: 'club', load: 'club', shop: 'club', tariffs: 'club', contracts: 'club',
   finance: 'money', payouts: 'money', fiscal: 'money', pnl: 'money', cohorts: 'money',
-  team: 'today', staff: 'team', stafftime: 'team', activity: 'team', learn: 'team',
+  team: 'today', staff: 'team', roles: 'team', stafftime: 'team', activity: 'team', learn: 'team',
   clubs: 'setup', config: 'setup', telephony: 'setup', pipelines: 'setup', intake: 'setup', messaging: 'setup', site: 'setup', import: 'setup', onboarding: 'setup', usage: 'setup', notes: 'setup', privacy: 'setup', system: 'setup',
   help: 'foot', profile: 'foot',
 };
@@ -51,6 +51,7 @@ const P: Record<string, string> = {
   pnl: 'M3 17l6-6 4 4 8-8M15 7h6v6',
   cohorts: 'M4 4h4v4H4zM10 4h4v4h-4zM16 4h4v4h-4zM4 10h4v4H4zM10 10h4v4h-4zM4 16h4v4H4z',
   staff: 'M9 4.5a3.5 3.5 0 1 1 0 7 3.5 3.5 0 0 1 0-7M2 20a7 7 0 0 1 14 0M16 4.5a3.5 3.5 0 0 1 0 7M18 14a6 6 0 0 1 4 6',
+  roles: 'M12 3l7 3v5c0 4.5-3 8.5-7 10-4-1.5-7-5.5-7-10V6l7-3M9 12l2 2 4-4',
   stafftime: 'M12 3a9 9 0 1 1 0 18 9 9 0 0 1 0-18M12 7v5l3 3',
   clubs: 'M3 21h18M5 21V8l7-5 7 5v13M9 21v-6h6v6',
   notes: 'M4 20h4L19 9l-4-4L4 16zM13 7l4 4',
