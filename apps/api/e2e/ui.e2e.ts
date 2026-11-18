@@ -201,7 +201,7 @@ test('9. телефон: нижняя панель, «Ещё» и переход
 test('10. собственник: только отчёты — проблемные моменты, прибыль, посещаемость, выплаты; операционки в меню нет', async () => {
   const { ctx, p } = await open('a.bespalyy');
   await p.locator('.main-tabs').waitFor();
-  for (const name of ['Ресепшн', 'Звонки', 'Задачи', 'Лиды', 'Сделки', 'Переписка', 'Мои задачи', 'Кому звонить', 'Проходы и турникеты', 'Касса и чеки', 'Чеки', 'Воронки', 'Приём заявок']) {
+  for (const name of ['Ресепшн', 'Звонки', 'Задачи', 'Лиды', 'Сделки', 'Переписка', 'Мои задачи', 'Кому звонить', 'Касса и чеки', 'Чеки', 'Воронки', 'Приём заявок']) {
     assert.equal(await p.locator('.main-tabs').getByRole('button', { name, exact: true }).count(), 0, `у собственника в меню не должно быть «${name}»`);
   }
   for (const name of ['Проблемные моменты', 'Прибыль', 'Удержание', 'Посещаемость', 'Финансы', 'Выплаты', 'Использование', 'Рабочий стол']) {
@@ -210,5 +210,9 @@ test('10. собственник: только отчёты — проблемн
     assert.equal(await p.locator('.main-tabs').getByRole('button', { name, exact: true }).getAttribute('aria-pressed'), 'true', name);
     assert.equal(await p.getByText('Раздел не загрузился').count(), 0, name);
   }
+  // «Проходы и турникеты» — в блоке «Настройки»: подключение PocketKey, без экрана ресепшн (18.11.2026)
+  await tab(p, 'Проходы и турникеты');
+  await p.waitForLoadState('networkidle');
+  assert.equal(await p.getByRole('button', { name: 'Ресепшн', exact: true }).count(), 0, 'у собственника нет экрана ресепшн в проходах');
   noErrors(p); await ctx.close();
 });
