@@ -6,7 +6,7 @@ import type pg from 'pg';
 import { createHash, randomUUID } from 'node:crypto';
 import { can, requirePerm } from '../auth.ts';
 import { audit, withCtx, type Ctx, type Db } from '../db.ts';
-import { badRequest, notFound } from '../errors.ts';
+import { badRequest, forbidden, notFound } from '../errors.ts';
 import { hashPassword, tempPassword, verifyPassword } from '../passwords.ts';
 import { checkLimit } from './onboarding.ts';
 import { makeLogin } from './staff.ts';
@@ -952,6 +952,44 @@ export function importRoutes(app: FastifyInstance, pool: pg.Pool) {
       }
       await audit(db, ctx, 'import.rolled_back', 'import_batch', id, { status: 'applied' }, { status: 'rolled_back' });
       return { ok: true };
+    });
+  });
+
+  // Демо-данные клуба (решение Андрея 18.11.2026): клиенты клуба, не перенесённые из 1С, и всё, что к ним привязано.
+  // Сначала предпросмотр (удаление в точке сохранения с откатом), затем удаление по паролю. Только собственник.
+  const demoPurge = async (db: Db, clubId: string, dry: boolean) => {
+    await db.query('savepoint demo');
+    try {
+      const counts = (await db.query('select demo_purge($1) as r', [clubId])).rows[0].r as Record<string, number>;
+      await db.query(dry ? 'rollback to savepoint demo' : 'release savepoint demo');
+      return counts;
+    } catch (e) {
+      await db.query('rollback to savepoint demo');
+      const err = e as { code?: string; message?: string };
+      if (err.code === 'P0001' || err.code === 'P0002') throw badRequest(err.message ?? 'Удаление невозможно');
+      if (err.code === '23503') throw badRequest('На демо-клиентов ссылаются данные, которые нельзя удалить автоматически: напишите в поддержку');
+      throw e;
+    }
+  };
+  const ownerOnly = (ctx: Ctx) => { if (!can(ctx, '*')) throw forbidden('Удалять демо-данные может только собственник'); };
+  app.get('/api/import/demo-cleanup', async (req) => {
+    const ctx = requirePerm(req, P.importManage); ownerOnly(ctx);
+    const { clubId } = req.query as { clubId?: string };
+    if (!clubId) throw badRequest('Выберите клуб');
+    return withCtx(pool, ctx, async (db) => {
+      const imported = Number((await db.query('select count(*) from persons where home_club_id = $1 and import_batch_id is not null', [clubId])).rows[0].count);
+      return { counts: await demoPurge(db, clubId, true), imported };
+    });
+  });
+  app.post('/api/import/demo-cleanup', async (req) => {
+    const ctx = requirePerm(req, P.importManage); ownerOnly(ctx);
+    const { clubId, password } = (req.body ?? {}) as { clubId?: string; password?: string };
+    if (!clubId) throw badRequest('Выберите клуб');
+    return withCtx(pool, ctx, async (db) => {
+      await checkPassword(db, ctx, password);
+      const counts = await demoPurge(db, clubId, false);
+      await audit(db, ctx, 'import.demo_purged', 'club', clubId, null, counts);
+      return { counts };
     });
   });
 

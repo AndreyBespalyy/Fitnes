@@ -1,7 +1,7 @@
 // Шаг 9. Раздел «Перенос из 1С»: загрузка пяти отчётов, карта полей, пробный перенос с отчётом сверки,
 // решение конфликтов, перенос с паролем, принятие или отмена.
 import { useEffect, useState, type FormEvent } from 'react';
-import { api, type Club } from './api.ts';
+import { api, can, type Club, type Me } from './api.ts';
 import { dt, errText, toast } from './ui.ts';
 import { rub } from './memberships.tsx';
 import { readFile } from './contracts.tsx';
@@ -37,7 +37,7 @@ const ISSUE_STATUS: Record<string, [string, string]> = { conflict: ['Конфл�
 const monthName = (m: string) => new Date(`${m}-01T00:00:00`).toLocaleDateString('ru-RU', { month: 'long', year: 'numeric' });
 const pct = (x: number) => `${Math.round(x * 100)} %`;
 
-export function ImportPage({ clubs, clubId }: { clubs: Club[]; clubId: string }) {
+export function ImportPage({ me, clubs, clubId }: { me: Me; clubs: Club[]; clubId: string }) {
   const [club, setClub] = useState(clubId !== 'all' ? clubId : clubs[0]?.id ?? '');
   useEffect(() => { if (clubId !== 'all') setClub(clubId); }, [clubId]);
   const [list, setList] = useState<Batch[]>([]);
@@ -81,8 +81,55 @@ export function ImportPage({ clubs, clubId }: { clubs: Club[]; clubId: string })
             </tbody>
           </table>)}
       </div>
+      {can(me, '*') && club && <DemoCleanup clubId={club} clubName={clubs.find((x) => x.id === club)?.name ?? ''} />}
     </>
   );
+}
+
+// Названия таблиц для предпросмотра удаления демо-данных; остальные показываются как есть
+const TABLE_NAMES: Record<string, string> = {
+  persons: 'Клиенты', person_contacts: 'Телефоны и почта', memberships: 'Абонементы', membership_operations: 'Операции по абонементам', payments: 'Оплаты',
+  visits: 'Посещения', charges: 'Начисления и долги', contracts: 'Договоры', tasks: 'Задачи', calls: 'Звонки', leads: 'Заявки', opportunities: 'Сделки',
+  opportunity_stage_history: 'История сделок', class_bookings: 'Записи на занятия', messages: 'Сообщения', conversations: 'Переписки', access_credentials: 'Карты доступа',
+  person_payment_methods: 'Привязанные карты', consents: 'Согласия', surveys: 'Опросы', survey_responses: 'Ответы на опросы', receipts: 'Чеки',
+};
+
+/** Удаление выдуманных клиентов клуба после переноса настоящей базы (решение Андрея 18.11.2026) */
+function DemoCleanup({ clubId, clubName }: { clubId: string; clubName: string }) {
+  const [pre, setPre] = useState<{ counts: Record<string, number>; imported: number } | null>(null);
+  const [password, setPassword] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState('');
+  useEffect(() => { setPre(null); setErr(''); setPassword(''); }, [clubId]);
+  const preview = async () => {
+    setBusy(true); setErr('');
+    try { setPre(await api('GET', `/api/import/demo-cleanup?clubId=${clubId}`)); } catch (e) { setErr(errText(e)); } finally { setBusy(false); }
+  };
+  const run = async (e: FormEvent) => {
+    e.preventDefault(); setBusy(true); setErr('');
+    try {
+      const r = await api<{ counts: Record<string, number> }>('POST', '/api/import/demo-cleanup', { clubId, password });
+      toast(`Удалено демо-клиентов: ${r.counts.persons ?? 0}`); setPre(null); setPassword('');
+    } catch (x) { setErr(errText(x)); } finally { setBusy(false); }
+  };
+  const rows = pre ? Object.entries(pre.counts).sort((a, b) => (a[0] === 'persons' ? -1 : b[0] === 'persons' ? 1 : b[1] - a[1])) : [];
+  return (
+    <div className="card" style={{ display: 'grid', gap: 8 }}>
+      <h2>Демо-данные клуба</h2>
+      <p className="small" style={{ margin: 0 }}>Удаляет из клуба «{clubName}» всех клиентов, которые не перенесены из 1С (тестовое наполнение и заведённые вручную), вместе с их абонементами, оплатами, посещениями, задачами, звонками и перепиской. Данные из 1С не затрагиваются: если удаление их заденет, оно не выполнится. Отменить удаление нельзя.</p>
+      {err && <div className="err">{err}</div>}
+      {!pre && <div className="row"><button className="btn" disabled={busy} onClick={preview}>{busy ? 'Считаю…' : 'Показать, что удалится'}</button></div>}
+      {pre && (rows.length === 0 ? <p className="muted">Демо-клиентов в этом клубе нет.</p> : (
+        <>
+          <p style={{ margin: 0 }}>Клиентов из 1С останется: <b>{pre.imported}</b>. Будет удалено:</p>
+          <div className="tbl"><table><tbody>{rows.map(([k, n]) => <tr key={k}><td>{TABLE_NAMES[k] ?? k}</td><td className="num">{n}</td></tr>)}</tbody></table></div>
+          <form onSubmit={run} className="row">
+            <label className="f">Ваш пароль для подтверждения<input type="password" autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} /></label>
+            <button className="btn pri" disabled={!password || busy}>{busy ? 'Удаляю…' : 'Удалить демо-данные'}</button>
+            <button type="button" className="btn" onClick={() => setPre(null)}>Отмена</button>
+          </form>
+        </>))}
+    </div>);
 }
 
 function BatchView({ id, types, back }: { id: string; types: TypeDef[]; back: () => void }) {

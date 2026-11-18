@@ -394,3 +394,33 @@ test('седьмой отчёт «Сотрудники»: вход с ролью
   for (const id of [b2.id, b.id]) assert.equal((await api('POST', `/api/import/batches/${id}/rollback`, owner, { password: PASSWORD })).statusCode, 200);
   assert.equal(await owner$(async (c) => Number((await c.query('select count(*) from users where import_batch_id = any($1::uuid[])', [[b.id, b2.id]])).rows[0].count)), 0);
 });
+
+test('демо-данные клуба: предпросмотр и удаление, данные из 1С не трогаются, только собственник', async () => {
+  const b = (await api('POST', '/api/import/batches', owner, { clubId: c2 })).json();
+  await uploadAll(b.id, owner);
+  await confirmAll(b.id, owner);
+  await api('POST', `/api/import/batches/${b.id}/check`, owner);
+  await api('POST', `/api/import/batches/${b.id}/resolve-conflicts`, owner, { resolution: 'new' });
+  await api('POST', `/api/import/batches/${b.id}/check`, owner);
+  assert.equal((await api('POST', `/api/import/batches/${b.id}/apply`, owner, { password: PASSWORD })).statusCode, 200);
+  const q = (sql: string) => owner$(async (c) => Number((await c.query(sql, [c2])).rows[0].count));
+  const importedBefore = await q('select count(*) from persons where home_club_id = $1 and import_batch_id is not null');
+  const membershipsBefore = await q('select count(*) from memberships where club_id = $1 and import_batch_id is not null');
+  const demoBefore = await q('select count(*) from persons where home_club_id = $1 and import_batch_id is null');
+  assert.ok(demoBefore > 0 && importedBefore > 0);
+
+  assert.equal((await api('GET', `/api/import/demo-cleanup?clubId=${c2}`, gm)).statusCode, 403, 'управляющему нельзя');
+  const pre = await api('GET', `/api/import/demo-cleanup?clubId=${c2}`, owner);
+  assert.equal(pre.statusCode, 200, pre.body);
+  assert.equal(pre.json().counts.persons, demoBefore);
+  assert.equal(pre.json().imported, importedBefore);
+  assert.equal(await q('select count(*) from persons where home_club_id = $1 and import_batch_id is null'), demoBefore, 'предпросмотр ничего не удаляет');
+
+  assert.equal((await api('POST', '/api/import/demo-cleanup', owner, { clubId: c2, password: 'неверный' })).statusCode, 400);
+  const del = await api('POST', '/api/import/demo-cleanup', owner, { clubId: c2, password: PASSWORD });
+  assert.equal(del.statusCode, 200, del.body);
+  assert.equal(await q('select count(*) from persons where home_club_id = $1 and import_batch_id is null'), 0);
+  assert.equal(await q('select count(*) from persons where home_club_id = $1 and import_batch_id is not null'), importedBefore);
+  assert.equal(await q('select count(*) from memberships where club_id = $1 and import_batch_id is not null'), membershipsBefore);
+  assert.equal(await q('select count(*) from memberships where club_id = $1 and import_batch_id is null'), 0, 'демо-абонементы ушли вместе с клиентами');
+});

@@ -349,7 +349,7 @@ function Shell({ me, onLogout }: { me: Me; onLogout: () => void }) {
         {tab === 'chats' && <ChatsPage me={me} clubs={clubs} clubId={clubId} openPerson={openPerson} />}
         {tab === 'access' && <AccessPage me={me} clubs={clubs} clubId={clubId} openPerson={openPerson} />}
         {tab === 'messaging' && <MessagingAdmin me={me} clubs={clubs} clubId={clubId} />}
-        {tab === 'import' && <ImportPage clubs={clubs} clubId={clubId} />}
+        {tab === 'import' && <ImportPage me={me} clubs={clubs} clubId={clubId} />}
         {tab === 'pnl' && <PnlPage me={me} clubs={clubs} clubId={clubId} />}
         {tab === 'intake' && <IntakePage me={me} clubs={clubs} clubId={clubId} openPerson={openPerson} />}
         {tab === 'activity' && <ActivityPage />}
