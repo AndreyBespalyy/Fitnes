@@ -16,6 +16,7 @@ import { PersonCallFlags, TakeLeadButton } from './salesOps.tsx';
 import { ScriptButton, SituationButton } from './agent.tsx';
 import { PersonPrivacy } from './privacy.tsx';
 import { ownerOnly } from './roleMenu.ts';
+import { OwnerBlock, PersonDocuments, PersonHead, ShowPhone } from './personExtras.tsx';
 
 type Stage = { id: string; name: string; kind: 'open' | 'won' | 'lost'; openCount?: number };
 type Pipeline = { id: string; clubId: string; name: string; purpose: string; isDefaultForLeads: boolean; isActive: boolean; stages: Stage[] };
@@ -26,7 +27,7 @@ type Opp = { id: string; stageId: string; personId: string; personName: string; 
 type Task = { id: string; kind: string; title: string; dueAt: string; doneAt: string | null; result: string | null; personId: string | null; personName: string | null;
   opportunityId: string | null; assigneeId?: string | null; assigneeName: string | null; overdue: boolean; callId: string | null };
 type Card = {
-  person: { id: string; fullName: string; segment: string; homeClubId: string | null; homeClubName: string | null; createdAt: string; autopayEnabled: boolean; autopayChangedAt: string | null; marketingConsent: boolean; messagingOptOut: boolean };
+  person: { id: string; fullName: string; birthDate: string | null; segment: string; homeClubId: string | null; homeClubName: string | null; createdAt: string; autopayEnabled: boolean; autopayChangedAt: string | null; marketingConsent: boolean; messagingOptOut: boolean };
   contacts: { type: string; value: string; isPrimary: boolean }[];
   leads: { id: string; createdAt: string; sourceName: string | null; comment: string | null; isRepeat: boolean; clubName: string; dueAt: string; respondedAt: string | null }[];
   opportunities: { id: string; status: string; clubName: string; pipelineName: string; stageId: string; stageName: string; ownerName: string | null; lostReason: string | null; stages: Stage[] }[];
@@ -309,6 +310,8 @@ export function PersonCard({ me: meIn, id, onClose }: { me: Me; id: string; onCl
   const [doingTask, setDoingTask] = useState<string | null>(null);
   const [addTask, setAddTask] = useState(false);
   // «Купил» в сделке — сначала продажа абонемента, сделка закроется сама после «Оформить» (замечание №33)
+  const [phones, setPhones] = useState<string[] | null>(null);
+  useEffect(() => setPhones(null), [id]);
   const [sellFor, setSellFor] = useState<{ oppId: string; stage: Stage; n: number } | null>(null);
   const reload = () => api<Card>('GET', `/api/persons/${id}`).then(setCard).catch((x) => setErr(errText(x)));
   useEffect(() => { reload(); }, [id]);
@@ -340,11 +343,14 @@ export function PersonCard({ me: meIn, id, onClose }: { me: Me; id: string; onCl
                 defaultTitle="Разобраться с клиентом: " onDone={() => { setDelegate(false); reload(); }} onCancel={() => setDelegate(false)} />
             : <div className="item row between" style={{ gap: 8 }}><span className="small">Карточка открыта для просмотра. Работу с клиентом ведёт клуб.</span>
                 <button className="btn pri sm" onClick={() => setDelegate(true)}>Поручить управляющему</button></div>)}
-          <div><h1>{card.person.fullName}</h1>
+          <div><PersonHead me={viewOnly ? { ...me, permissions: [] } : me} person={card.person} reload={reload}>
             <div className="row" style={{ marginTop: 4 }}><span className="chip acc">{card.person.segment}</span>
               <span className="small">{card.person.homeClubName ?? 'клиент другого клуба сети'} · в базе с {dt(card.person.createdAt)}</span></div>
-            {can(me, 'crm.work') && <div style={{ marginTop: 10 }}><div className="row" style={{ gap: 8, flexWrap: 'wrap' }}><SituationButton type="person" id={card.person.id} small={false} /><ScriptButton type="person" id={card.person.id} small={false} /></div></div>}</div>
-          <div className="card kv">{card.contacts.map((c, i) => <span key={i} style={{ display: 'contents' }}><span>{c.type === 'phone' ? 'Телефон' : c.type === 'email' ? 'E-mail' : c.type === 'telegram' ? 'Telegram' : c.type === 'whatsapp' ? 'WhatsApp' : c.type}</span><span className="num">{c.value}{c.type === 'phone' && c.isPrimary && <> <DialButton personId={id} label="" /> {!viewOnly && <MessengerButtons me={me} personId={id} short />}</>}</span></span>)}</div>
+            {can(me, 'crm.work') && <div style={{ marginTop: 10 }}><div className="row" style={{ gap: 8, flexWrap: 'wrap' }}><SituationButton type="person" id={card.person.id} small={false} /><ScriptButton type="person" id={card.person.id} small={false} /></div></div>}
+          </PersonHead></div>
+          {sales && !viewOnly && <OwnerBlock me={me} personId={card.person.id} clubId={card.person.homeClubId} />}
+          <div className="card kv">{card.contacts.map((c, i) => <span key={i} style={{ display: 'contents' }}><span>{c.type === 'phone' ? 'Телефон' : c.type === 'email' ? 'E-mail' : c.type === 'telegram' ? 'Telegram' : c.type === 'whatsapp' ? 'WhatsApp' : c.type}</span><span className="num">{c.type === 'phone' && phones ? (phones[card.contacts.filter((x) => x.type === 'phone').indexOf(c)] ?? c.value) : c.value}
+            {c.type === 'phone' && c.isPrimary && !phones && !viewOnly && <> <ShowPhone me={me} personId={id} onShow={setPhones} /></>}{c.type === 'phone' && c.isPrimary && <> <DialButton personId={id} label="" /> {!viewOnly && <MessengerButtons me={me} personId={id} short />}</>}</span></span>)}</div>
           {!can(me, 'memberships.manage') && money && card.person.autopayEnabled && <div className="item small">Подписка списывается автоматически с привязанной карты{card.person.autopayChangedAt ? ` (включено ${dt(card.person.autopayChangedAt)})` : ''}</div>}
           {can(me, 'memberships.manage') && (
             <label className="item row" style={{ gap: 10 }}>
@@ -364,6 +370,7 @@ export function PersonCard({ me: meIn, id, onClose }: { me: Me; id: string; onCl
           {money && <DepositBlock personId={card.person.id} clubId={card.person.homeClubId} readOnly={viewOnly} />}
           {money && <LoyaltyBlock personId={card.person.id} clubId={card.person.homeClubId} readOnly={viewOnly} />}
           {sales && <ReferralBlock me={me} personId={card.person.id} clubId={card.person.homeClubId} />}
+          {!viewOnly && <PersonDocuments me={me} personId={card.person.id} />}
           <PersonPrivacy me={me} personId={card.person.id} reload={reload} />
           {(can(me, 'acs.work') || can(me, 'acs.manage')) && <PersonPasses me={me} personId={card.person.id} clubId={card.person.homeClubId ?? ''} />}
 

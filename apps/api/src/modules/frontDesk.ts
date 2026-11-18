@@ -4,7 +4,7 @@
 // Каждая операция пишет замер (время и число нажатий), чтобы на пилоте видеть, где ресепшн теряет время.
 import type { FastifyInstance } from 'fastify';
 import type pg from 'pg';
-import { can, requirePerm } from '../auth.ts';
+import { can, requireAnyPerm, requirePerm } from '../auth.ts';
 import { audit, withCtx, type Ctx, type Db } from '../db.ts';
 import { badRequest, notFound } from '../errors.ts';
 import { PERMISSIONS as P } from '../roles.ts';
@@ -190,7 +190,8 @@ export function frontDeskRoutes(app: FastifyInstance, pool: pg.Pool) {
 
   // Фото с камеры планшета: приходит как data URL, храним у себя
   app.put('/api/persons/:id/photo', { bodyLimit: 700 * 1024 }, async (req) => {
-    const ctx = requirePerm(req, P.acsWork);
+    // Фото ставят ресепшн и все, кто работает с клиентом в карточке (замечание №32)
+    const ctx = requireAnyPerm(req, P.acsWork, P.crmWork, P.membershipsSell, P.membershipsManage);
     const { id } = req.params as { id: string };
     const { image } = (req.body ?? {}) as { image?: string };
     const m = /^data:(image\/(?:jpeg|png|webp));base64,([A-Za-z0-9+/=]+)$/.exec(image ?? '');

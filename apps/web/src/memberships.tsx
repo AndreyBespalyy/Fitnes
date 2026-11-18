@@ -216,6 +216,8 @@ export function MembershipsBlock({ me, personId, homeClubId, sellNow = 0, onSold
   const [payer, setPayer] = useState<PayerValue>({});
   const [seatIds, setSeatIds] = useState<string[]>([]);
   const [freeze, setFreeze] = useState<{ id: string; days: number; startsOn: string } | null>(null);
+  const [frRules, setFrRules] = useState<Settings | null>(null);
+  const [startsOn, setStartsOn] = useState('');
   const [cancel, setCancel] = useState<{ id: string; reason: string } | null>(null);
   const [refund, setRefund] = useState<string | null>(null);
   // Деньги — только после подтверждения (повторная проверка CRM 18.11.2026, п. 1): продление и отметка оплаты одним нажатием
@@ -241,7 +243,12 @@ export function MembershipsBlock({ me, personId, homeClubId, sellNow = 0, onSold
     setSell(true);
     const all = await api<Product[]>('GET', `/api/products?active=1${homeClubId ? `&clubId=${homeClubId}` : ''}`).catch(() => []);
     setProducts(all.length ? all : await api<Product[]>('GET', '/api/products?active=1').catch(() => []));
-    setProductId(''); setInst(1);
+    setProductId(''); setInst(1); setStartsOn(new Date().toISOString().slice(0, 10));
+  };
+  // Заморозка из карточки по правилам клуба (замечание №50): правила показываем прямо в форме
+  const openFreeze = (m: Membership) => {
+    setFreeze({ id: m.id, days: 14, startsOn: today }); setFrRules(null);
+    api<Settings>('GET', `/api/clubs/${m.clubId}/membership-settings`).then((st) => { setFrRules(st); setFreeze((f) => (f ? { ...f, days: Math.max(f.days, st.freezeMinDays) } : f)); }).catch(() => null);
   };
   const box = useRef<HTMLDivElement>(null);
   useEffect(() => { if (sellNow && canSell) { openSell(); setTimeout(() => box.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 50); } }, [sellNow]);
@@ -263,11 +270,13 @@ export function MembershipsBlock({ me, personId, homeClubId, sellNow = 0, onSold
           {prod?.installmentsAllowed && maxInst > 1 && (
             <label className="f">Оплата<select value={inst} onChange={(e) => setInst(Number(e.target.value))}>
               {Array.from({ length: maxInst }, (_, i) => i + 1).map((n) => <option key={n} value={n}>{n === 1 ? 'Сразу полностью' : `Рассрочка: ${n} ${n < 5 ? 'платежа' : 'платежей'} по ${rub(Math.floor((prod.priceKop ?? 0) / n))}`}</option>)}</select></label>)}
+          {/* Дата активации: с какого дня абонемент начинает действовать (замечание №30) */}
+          {prod && prod.kind !== 'subscription' && <label className="f">Дата активации<input type="date" value={startsOn} min={today} onChange={(e) => setStartsOn(e.target.value)} /></label>}
           {prod?.familySeats ? <SeatPick key={productId} personId={personId} clubId={prod.clubId} seats={prod.familySeats} onChange={setSeatIds} />
             : <PayerPick personId={personId} clubId={prod?.clubId} kind={prod?.kind} onChange={setPayer} />}
           <SaleDiscount key={productId} personId={personId} product={prod} clubId={prod?.clubId} onChange={setDiscount} />
           <div className="row">
-            <button className="btn pri sm" disabled={!productId} onClick={() => act(async () => { await api('POST', '/api/memberships', { personId, productId, installments: inst, ...discount, ...(prod?.familySeats ? { familyPersonIds: seatIds } : payer) }); onSold?.(); }, `Продано: ${prod?.name}. Платёж ждёт оплаты`)}>Оформить</button>
+            <button className="btn pri sm" disabled={!productId} onClick={() => act(async () => { await api('POST', '/api/memberships', { personId, productId, installments: inst, ...(startsOn && prod?.kind !== 'subscription' ? { startsOn } : {}), ...discount, ...(prod?.familySeats ? { familyPersonIds: seatIds } : payer) }); onSold?.(); }, `Продано: ${prod?.name}. Платёж ждёт оплаты`)}>Оформить</button>
             <button className="btn sm" onClick={() => { setSell(false); onSellCancel?.(); }}>Отмена</button>
           </div>
         </div>)}
@@ -277,7 +286,7 @@ export function MembershipsBlock({ me, personId, homeClubId, sellNow = 0, onSold
         return (
           <div key={m.id} className={`item ${m.state === 'debt_blocked' ? 'over' : ''}`} style={{ display: 'grid', gap: 6 }}>
             <div className="row between"><b>{m.productName}</b><span className={`chip ${cls}`}>{label}</span></div>
-            <div className="small">{m.clubName} · {m.seatOf ? 'место в семейном' : rub(m.amountKop)}{m.kind === 'subscription' ? ' в месяц' : ''} · {d(m.startsOn)} — {d(m.endsOn)}
+            <div className="small">{m.clubName} · {m.seatOf ? 'место в семейном' : rub(m.amountKop)}{m.kind === 'subscription' ? ' в месяц' : ''} · активация {d(m.startsOn)} · до {d(m.endsOn)}
               {m.visitsLeft !== null ? ` · осталось занятий: ${m.visitsLeft}` : ''}{m.nextChargeOn ? ` · следующее списание ${d(m.nextChargeOn)}` : ''}</div>
             <div className={`small ${m.access ? '' : 'bad'}`}>{m.access ? 'Проход открыт' : 'Проход закрыт'}: {m.reason}</div>
             {m.freezes.length > 0 && <div className="small">Заморозки: {m.freezes.map((f) => `${d(f.startsOn)} — ${d(f.endedEarlyOn ?? f.endsOn)}${f.endedEarlyOn ? ' (досрочно)' : ''}`).join(', ')}</div>}
@@ -302,7 +311,7 @@ export function MembershipsBlock({ me, personId, homeClubId, sellNow = 0, onSold
               <div className="row">
                 {canSell && ['active', 'expired', 'used_up', 'debt_grace'].includes(m.state) && m.kind !== 'subscription' &&
                   <button className="btn sm" onClick={() => void askRenew(m)}>Продлить</button>}
-                {canManage && m.freezeAllowed && !activeFreeze && m.state !== 'expired' && <button className="btn sm" onClick={() => setFreeze({ id: m.id, days: 14, startsOn: today })}>Заморозить</button>}
+                {(canManage || canSell) && m.freezeAllowed && !activeFreeze && m.state !== 'expired' && <button className="btn sm" onClick={() => openFreeze(m)}>Заморозить</button>}
                 {canManage && activeFreeze && <button className="btn sm" onClick={() => setAsk({ key: m.id, text: 'Снять заморозку сегодня? Неиспользованные дни вернутся, окончание абонемента сдвинется назад.', run: () => api('POST', `/api/memberships/${m.id}/unfreeze`), ok: 'Заморозка снята, неиспользованные дни возвращены' })}>Разморозить</button>}
                 {canManage && <button className="btn sm" onClick={() => setCancel({ id: m.id, reason: '' })}>Расторгнуть</button>}
                 {canManage && m.charges.some((c) => c.status === 'paid') && <button className="btn sm" onClick={() => setRefund(m.id)}>Возврат денег</button>}
@@ -313,6 +322,10 @@ export function MembershipsBlock({ me, personId, homeClubId, sellNow = 0, onSold
                 <div className="row"><button className="btn pri sm" onClick={() => act(ask.run, ask.ok)}>Подтвердить</button>
                   <button className="btn sm" onClick={() => setAsk(null)}>Отмена</button></div>
               </div>)}
+            {freeze?.id === m.id && frRules && (
+              <div className="small">{frRules.freezeEnabled
+                ? `Правила клуба: от ${frRules.freezeMinDays} дн., не больше ${frRules.freezeMaxDaysPerYear} дн. и ${frRules.freezeMaxTimesPerYear} раз за год абонемента${frRules.freezePaid ? `, платно — ${rub(frRules.freezePriceKop)}` : ', бесплатно'}. Окончание абонемента сдвинется на эти дни.`
+                : 'В клубе заморозка отключена.'}</div>)}
             {freeze?.id === m.id && (
               <div className="row">
                 <label className="f">С<input type="date" value={freeze.startsOn} onChange={(e) => setFreeze({ ...freeze, startsOn: e.target.value })} /></label>
