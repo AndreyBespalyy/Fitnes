@@ -11,6 +11,7 @@ import { personRoutes } from './modules/persons.ts';
 import { crmRoutes } from './modules/crm.ts';
 import { pipelineRoutes } from './modules/pipelines.ts';
 import { staffRoutes } from './modules/staff.ts';
+import { roleAdminRoutes } from './modules/roleAdmin.ts';
 import { membershipRoutes } from './modules/memberships.ts';
 import { contractRoutes } from './modules/contracts.ts';
 import { siteRoutes } from './modules/site.ts';
@@ -134,6 +135,7 @@ export async function buildApp(pool: pg.Pool, opts: { webDist?: string; secureCo
   authRoutes(app, pool, { secureCookie: !!opts.secureCookie });
   clubRoutes(app, pool);
   staffRoutes(app, pool);
+  roleAdminRoutes(app, pool);
   personRoutes(app, pool);
   crmRoutes(app, pool);
   pipelineRoutes(app, pool);

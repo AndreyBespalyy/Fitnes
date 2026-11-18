@@ -26,6 +26,8 @@ export const ROLE_MENU: Record<string, string[]> = {
   fin: ['problems', 'tasks', 'finance', 'pnl', 'cohorts', 'payouts', 'weekly', 'home', 'corp', 'import', 'staff', 'reviews', 'stafftime'],
   trainer: ['trainer', 'tasks', 'schedule', 'home', 'stafftime'],
   admin: ['clubs', 'onboarding', 'staff', 'stafftime', 'pipelines', 'intake', 'import', 'access', 'usage', 'system'],
+  // Технический администратор (18.11.2026): только техническая часть — СКУД, перенос из 1С, сотрудники и роли, подключения, состояние системы
+  techadmin: ['access', 'import', 'staff', 'roles', 'telephony', 'messaging', 'intake', 'system', 'stafftime'],
 };
 
 /** Показывать ли раздел в меню этой роли (право на раздел проверяется отдельно). */

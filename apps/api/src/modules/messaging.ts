@@ -4,7 +4,7 @@
 import type { FastifyInstance } from 'fastify';
 import type pg from 'pg';
 import { randomBytes } from 'node:crypto';
-import { can, requireCtx, requirePerm } from '../auth.ts';
+import { can, requireCtx, requireAnyPerm, requirePerm } from '../auth.ts';
 import { audit, withCtx, type Ctx, type Db } from '../db.ts';
 import { badRequest, forbidden, HttpError, notFound } from '../errors.ts';
 import { PERMISSIONS as P } from '../roles.ts';
@@ -389,10 +389,10 @@ export function messagingRoutes(app: FastifyInstance, pool: pg.Pool, opts: { fet
   /* каналы */
   app.get('/api/msg/channels', async (req) => {
     const ctx = requireCtx(req);
-    if (!can(ctx, P.messagesManage) && !can(ctx, P.messagesWork)) throw forbidden();
+    if (!can(ctx, P.messagesManage) && !can(ctx, P.messagesWork) && !can(ctx, P.integrationsManage)) throw forbidden();
     const { clubId } = req.query as { clubId?: string };
     const rows = await withCtx(pool, ctx, async (db) => (await db.query(`${CHANNEL_SELECT} where ($1::uuid is null or club_id = $1) order by created_at`, [clubId || null])).rows);
-    const manage = can(ctx, P.messagesManage);
+    const manage = can(ctx, P.messagesManage) || can(ctx, P.integrationsManage);
     return rows.map((c) => ({ ...c, kindName: KINDS[c.kind]?.name, webhookToken: undefined, webhookUrl: manage ? `${base(req)}/api/hooks/msg/${c.id}/${c.webhookToken}` : undefined,
       polling: KINDS[c.kind]?.polling ?? false }));
   });
@@ -409,7 +409,7 @@ export function messagingRoutes(app: FastifyInstance, pool: pg.Pool, opts: { fet
   };
 
   app.post('/api/msg/channels', async (req, reply) => {
-    const ctx = requirePerm(req, P.messagesManage);
+    const ctx = requireAnyPerm(req, P.messagesManage, P.integrationsManage);
     const b = (req.body ?? {}) as { clubId?: string; kind?: string; messenger?: string; name?: string; settings?: Record<string, string>; secret?: string };
     if (!b.clubId) throw badRequest('Выберите клуб');
     const settings = checkChannel(b);
@@ -429,7 +429,7 @@ export function messagingRoutes(app: FastifyInstance, pool: pg.Pool, opts: { fet
   });
 
   app.patch('/api/msg/channels/:id', async (req) => {
-    const ctx = requirePerm(req, P.messagesManage);
+    const ctx = requireAnyPerm(req, P.messagesManage, P.integrationsManage);
     const { id } = req.params as { id: string };
     const b = (req.body ?? {}) as { name?: string; settings?: Record<string, string>; secret?: string; status?: string; clientBot?: boolean };
     return withCtx(pool, ctx, async (db) => {
@@ -450,7 +450,7 @@ export function messagingRoutes(app: FastifyInstance, pool: pg.Pool, opts: { fet
   });
 
   app.post('/api/msg/channels/:id/test', async (req) => {
-    const ctx = requirePerm(req, P.messagesManage);
+    const ctx = requireAnyPerm(req, P.messagesManage, P.integrationsManage);
     const { id } = req.params as { id: string };
     return withCtx(pool, ctx, async (db) => {
       const ch = await loadChannel(db, id);
@@ -536,7 +536,7 @@ export function messagingRoutes(app: FastifyInstance, pool: pg.Pool, opts: { fet
   /* шаблоны */
   app.get('/api/msg/templates', async (req) => {
     const ctx = requireCtx(req);
-    if (!can(ctx, P.messagesManage) && !can(ctx, P.messagesWork)) throw forbidden();
+    if (!can(ctx, P.messagesManage) && !can(ctx, P.messagesWork) && !can(ctx, P.integrationsManage)) throw forbidden();
     const { clubId } = req.query as { clubId?: string };
     return withCtx(pool, ctx, async (db) => (await db.query(`select t.id, t.club_id as "clubId", t.name, t.body, t.is_active as "isActive",
         (select event from msg_triggers r where r.template_id = t.id limit 1) as "event"

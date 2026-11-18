@@ -50,8 +50,8 @@ export function ContractsAdminPage({ me, clubs, clubId }: { me: Me; clubs: Club[
   );
 }
 
-function SmsSettings() {
-  type S = { provider: 'test' | 'smsru' | 'smsc'; sender: string | null; login: string | null; hasSecret: boolean; updatedAt: string | null; outbox: { phone: string; text: string; provider: string; status: string; error: string | null; at: string }[] };
+export function SmsSettings() {
+  type S = { provider: 'test' | 'smsru' | 'smsc'; sender: string | null; login: string | null; hasSecret: boolean; updatedAt: string | null; outbox: { phone: string; text: string | null; provider: string; status: string; error: string | null; at: string }[] };
   const [s, setS] = useState<S | null>(null);
   const [f, setF] = useState({ provider: 'test', sender: '', login: '', secret: '' });
   const [phone, setPhone] = useState('');
@@ -79,7 +79,7 @@ function SmsSettings() {
       {s.provider !== 'test' && <div className="row" style={{ gap: 6 }}><input value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="+7 900 000-00-00" aria-label="Телефон для проверки" style={{ maxWidth: 200 }} /><button className="btn sm" disabled={!phone} onClick={test}>Отправить проверочное СМС</button></div>}
       {err && <div className="err">{err}</div>}
       {s.outbox.length > 0 && <details><summary className="small">Последние СМС ({s.outbox.length})</summary>
-        {s.outbox.map((o, i) => <div key={i} className="small">{new Date(o.at).toLocaleString('ru-RU', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })} · {o.phone} · {ST[o.status] ?? o.status}{o.error ? ` (${o.error})` : ''} · <span className="muted">{o.text}</span></div>)}
+        {s.outbox.map((o, i) => <div key={i} className="small">{new Date(o.at).toLocaleString('ru-RU', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })} · {o.phone} · {ST[o.status] ?? o.status}{o.error ? ` (${o.error})` : ''} {o.text && <>· <span className="muted">{o.text}</span></>}</div>)}
       </details>}
     </div>
   );

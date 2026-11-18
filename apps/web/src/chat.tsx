@@ -5,6 +5,7 @@ import { ToConfig } from './toConfig.tsx';
 import { api, can, type Club, type Me, navParams } from './api.ts';
 import { dt, errText, toast } from './ui.ts';
 import { Md } from './fiscal.tsx';
+import { SmsSettings } from './contracts.tsx';
 import guide from '../../../docs/03_Инструкции/Мессенджеры_Telegram_WhatsApp.md?raw';
 
 type Conv = { id: string; clubId: string; channelId: string; channelName: string; channelKind: string; messenger: 'telegram' | 'whatsapp'; personId: string | null;
@@ -163,16 +164,19 @@ export function MessagingAdmin({ me, clubs, clubId }: { me: Me; clubs: Club[]; c
   const [club, setClub] = useState(clubId !== 'all' ? clubId : clubs[0]?.id ?? '');
   useEffect(() => { if (clubId !== 'all') setClub(clubId); }, [clubId]);
   const [view, setView] = useState('channels');
-  void me;
+  // Технический администратор: только подключение каналов и СМС — шаблоны и автосообщения клиентам ему не нужны
+  const full = can(me, 'messages.manage');
+  const views = ([['channels', 'Каналы', true], ['triggers', 'Автосообщения', full], ['templates', 'Шаблоны', full], ['settings', 'Рабочее время и автоответ', full],
+    ['sms', 'СМС', me.allClubs && (can(me, '*') || can(me, 'integrations.manage'))], ['guide', 'Инструкция', true]] as [string, string, boolean][]).filter((v) => v[2]);
   if (!club) return <p className="muted">Клубов нет.</p>;
   return (
     <>
       <div className="row between">
-        <div className="tabs">{[['channels', 'Каналы'], ['triggers', 'Автосообщения'], ['templates', 'Шаблоны'], ['settings', 'Рабочее время и автоответ'], ['guide', 'Инструкция']]
-          .map(([k, t]) => <button key={k} aria-pressed={view === k} onClick={() => setView(k)}>{t}</button>)}</div>
+        <div className="tabs">{views.map(([k, t]) => <button key={k} aria-pressed={view === k} onClick={() => setView(k)}>{t}</button>)}</div>
         {clubId === 'all' && <select aria-label="Клуб" value={club} onChange={(e) => setClub(e.target.value)} style={{ width: 'auto' }}>{clubs.map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}</select>}
       </div>
-      {view === 'channels' && <Channels key={club} clubId={club} />}
+      {view === 'channels' && <Channels key={club} clubId={club} canSimulate={full || can(me, 'messages.work')} />}
+      {view === 'sms' && <SmsSettings />}
       {view === 'triggers' && <Triggers key={club} clubId={club} />}
       {view === 'templates' && <Templates key={club} clubId={club} />}
       {view === 'settings' && <Settings key={club} clubId={club} />}
@@ -191,7 +195,7 @@ const KIND_INFO: Record<string, { title: string; messengers: string[]; text: str
   test: { title: 'Тестовый канал', messengers: ['whatsapp', 'telegram'], fields: [], text: 'Для проверки: отправка всегда успешна, сообщение клиента можно сымитировать.' },
 };
 
-function Channels({ clubId }: { clubId: string }) {
+function Channels({ clubId, canSimulate }: { clubId: string; canSimulate: boolean }) {
   const [list, setList] = useState<Channel[]>([]);
   const [form, setForm] = useState<{ kind: string; messenger: string; name: string; secret: string; settings: Record<string, string> } | null>(null);
   const [sim, setSim] = useState<{ id: string; messenger: string; name: string; phone: string; text: string } | null>(null);
@@ -233,7 +237,7 @@ function Channels({ clubId }: { clubId: string }) {
                 <td>{c.status !== 'active' ? <span className="chip">отключён</span> : c.lastError ? <span className="chip bad" title={c.lastError}>ошибка: {c.lastError}</span>
                   : <span className="chip ok">работает{c.lastOkAt ? `, ${dt(c.lastOkAt)}` : ''}</span>}</td>
                 <td className="r"><div className="row" style={{ justifyContent: 'flex-end' }}>
-                  {c.kind === 'test' && c.status === 'active' && <button className="btn sm" onClick={() => setSim({ id: c.id, messenger: c.messenger, name: 'Анна Тестова', phone: c.messenger === 'whatsapp' ? '+7 916 000-00-01' : '', text: 'Здравствуйте! Сколько стоит абонемент?' })}>Написать от клиента</button>}
+                  {canSimulate && c.kind === 'test' && c.status === 'active' && <button className="btn sm" onClick={() => setSim({ id: c.id, messenger: c.messenger, name: 'Анна Тестова', phone: c.messenger === 'whatsapp' ? '+7 916 000-00-01' : '', text: 'Здравствуйте! Сколько стоит абонемент?' })}>Написать от клиента</button>}
                   <button className="btn sm" onClick={() => test(c.id)}>Проверить</button>
                   <button className="btn sm" onClick={() => toggle(c)}>{c.status === 'active' ? 'Отключить' : 'Включить'}</button></div></td>
               </tr>))}</tbody></table>)}
