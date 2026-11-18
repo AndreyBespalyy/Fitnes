@@ -1,5 +1,6 @@
 // Рабочее место тренера: «Мой день» в приложении. Свои занятия и окна, отметка проведённого, клиенты и остатки пакетов,
 // «предложить продление» и предварительный заработок за месяц. Экран рассчитан на телефон.
+import { MessengerButtons } from './mobile.tsx';
 import { useEffect, useState } from 'react';
 import { api, can, type Club, type Me } from './api.ts';
 import { dt, errText, toast } from './ui.ts';
@@ -87,6 +88,7 @@ export function TrainerPage({ me, clubs, clubId, openPerson }: { me: Me; clubs: 
           {d.renew.map((c) => (
             <div key={c.personId} className="item" style={{ display: 'grid', gap: 6 }}>
               <div className="row between" style={{ flexWrap: 'wrap', gap: 6 }}><button className="link" onClick={() => openPerson(c.personId)}><b>{c.name}</b></button><span className="chip warn">{c.reason}</span></div>
+              <div className="row" style={{ gap: 6, flexWrap: 'wrap' }}><MessengerButtons me={me} personId={c.personId} /></div>
               {c.package && <span className="small muted">{c.package}{c.nextAt ? ` · следующее занятие ${dt(c.nextAt)}` : ''}</span>}
               <div className="row" style={{ gap: 6, flexWrap: 'wrap' }}>
                 <button className="btn sm pri" onClick={() => offer(c, 'agreed')}>Согласен продлить</button>
@@ -126,7 +128,8 @@ export function TrainerPage({ me, clubs, clubId, openPerson }: { me: Me; clubs: 
         <h2>Мои клиенты</h2>
         {d.clients.length === 0 ? <p className="muted" style={{ margin: 0 }}>Здесь появятся клиенты, которые занимаются у вас персонально.</p> : (
           <div className="tbl"><table><thead><tr><th>Клиент</th><th>Пакет</th><th>Свободно занятий</th><th>Следующее</th></tr></thead>
-            <tbody>{d.clients.map((c) => { const l = left(c); return <tr key={c.personId}><td><button className="link" onClick={() => openPerson(c.personId)}>{c.name}</button><div className="small muted">за 30 дней: {c.sessions30}</div></td>
+            <tbody>{d.clients.map((c) => { const l = left(c); return <tr key={c.personId}><td><button className="link" onClick={() => openPerson(c.personId)}>{c.name}</button><div className="small muted">за 30 дней: {c.sessions30}</div>
+              <div className="row" style={{ gap: 4, marginTop: 4 }}><MessengerButtons me={me} personId={c.personId} short /></div></td>
               <td className="small">{c.package ?? <span className="bad">нет пакета</span>}{c.endsOn && <div className="muted">до {c.endsOn.split('-').reverse().join('.')}</div>}</td>
               <td className={l != null && l <= 2 ? 'bad' : ''}>{l ?? '—'}{c.reserved ? <span className="small muted"> (+{c.reserved} записано)</span> : null}</td>
               <td className="small">{c.nextAt ? dt(c.nextAt) : '—'}</td></tr>; })}</tbody></table></div>)}
@@ -144,7 +147,7 @@ export function TrainerPage({ me, clubs, clubId, openPerson }: { me: Me; clubs: 
 }
 
 function People({ p, openPerson }: { p: Person; openPerson: (id: string) => void }) {
-  return <div className="row between small"><button className="link" onClick={() => openPerson(p.personId)}>{p.name}</button>
+  return <div className="row between small"><span className="row" style={{ gap: 4 }}><button className="link" onClick={() => openPerson(p.personId)}>{p.name}</button><MessengerButtons personId={p.personId} short /></span>
     <span className="muted">{p.trial ? 'пробное' : p.package ? `${p.package}${p.visitsLeft != null ? `, осталось ${p.visitsLeft}` : ''}` : ''}{p.status !== 'booked' ? ` · ${ST[p.status]}` : ''}</span></div>;
 }
 

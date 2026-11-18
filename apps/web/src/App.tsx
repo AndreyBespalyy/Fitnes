@@ -4,7 +4,7 @@ import { errText, toast as alertOk } from './ui.ts';
 import { ReportProblem } from './report.tsx';
 import { CommandPalette, SideNav } from './nav.tsx';
 import { UpdateBanner } from './version.tsx';
-import { OfflineBar, ProfilePage, registerServiceWorker, StaffSessions } from './mobile.tsx';
+import { OfflineBar, ProfilePage, registerServiceWorker, setCurrentMe, StaffSessions } from './mobile.tsx';
 import { NotificationsBell } from './notifications.tsx';
 import { IncomingCall, PbxSettings } from './telephony.tsx';
 import { AiButton, TeamButton } from './team/button.tsx';
@@ -160,6 +160,7 @@ function ChangePassword({ me, forced, onDone, onLogout }: { me: Me; forced?: boo
 type Tab = 'dash' | 'hot' | 'calls' | 'leads' | 'board' | 'tasks' | 'home' | 'clubs' | 'tariffs' | 'contracts' | 'site' | 'fiscal' | 'finance' | 'import' | 'chats' | 'access' | 'messaging' | 'pipelines' | 'staff' | 'stafftime' | 'config' | 'reviews' | 'onboarding' | 'privacy' | 'system' | 'help' | 'schedule' | 'retention' | 'shop' | 'corp' | 'trainer' | 'desk' | 'load' | 'cohorts' | 'pnl' | 'usage' | 'intake' | 'sales' | 'processes' | 'weekly' | 'learn' | 'team' | 'notes' | 'profile' | 'problems' | 'payouts' | 'activity' | 'telephony' | 'roles';
 
 function Shell({ me, onLogout }: { me: Me; onLogout: () => void }) {
+  setCurrentMe(me);
   // Главный экран роли (проверка CRM, п. 11): ресепшн начинает с «Ресепшна», тренер — с «Моего дня», остальные — с рабочего стола
   const only = (code: string) => me.roles.length > 0 && me.roles.every((r) => r.code === code);
   const firstTab: Tab = only('desk') ? 'desk' : only('trainer') ? 'trainer' : 'dash';

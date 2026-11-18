@@ -47,10 +47,16 @@ export function DialButton({ personId, label = 'Позвонить', className =
 // Номер телефона клиента по умолчанию считается его номером в WhatsApp и Telegram. Если в клубе подключён канал —
 // переписка открывается прямо в CRM (окно поверх страницы), иначе — чат с клиентом в приложении на устройстве сотрудника.
 const ChatPopup = lazy(() => import('./chat.tsx').then((m) => ({ default: m.ChatPopup })));
-export function MessengerButtons({ me, personId, clubId, className = 'btn sm', short }: { me: Me; personId: string; clubId?: string; className?: string; short?: boolean }) {
+// Текущий сотрудник: кнопки ставятся и там, куда не передаётся me (таблицы РОПа, ресепшн)
+let currentMe: Me | null = null;
+export const setCurrentMe = (m: Me) => { currentMe = m; };
+/** Кому показывать кнопки: всем, у кого есть переписка с клиентами, и тренеру (он пишет только своим клиентам — проверяет сервер) */
+export const canWriteClients = (me: Me | null) => !!me && (can(me, 'messages.work') || me.roles.some((r) => r.code === 'trainer'));
+export function MessengerButtons({ me: meIn, personId, clubId, className = 'btn sm', short }: { me?: Me; personId: string; clubId?: string; className?: string; short?: boolean }) {
+  const me = meIn ?? currentMe;
   const [busy, setBusy] = useState<string | null>(null);
   const [conv, setConv] = useState<string | null>(null);
-  if (!can(me, 'messages.work')) return null;
+  if (!me || !canWriteClients(me)) return null;
   const write = async (messenger: 'whatsapp' | 'telegram') => {
     setBusy(messenger);
     try {
@@ -72,7 +78,7 @@ export function MessengerButtons({ me, personId, clubId, className = 'btn sm', s
 }
 
 /** «Позвонить» + «WhatsApp» + «Telegram» — одним блоком везде, где можно связаться с клиентом. */
-export function ContactButtons({ me, personId, clubId, label, className }: { me: Me; personId: string; clubId?: string; label?: string; className?: string }) {
+export function ContactButtons({ me, personId, clubId, label, className }: { me?: Me; personId: string; clubId?: string; label?: string; className?: string }) {
   return <><DialButton personId={personId} label={label} className={className} /><MessengerButtons me={me} personId={personId} clubId={clubId} className={className} /></>;
 }
 
