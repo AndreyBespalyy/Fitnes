@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import pg from 'pg';
 import { setupTestApp, login } from './helpers.ts';
 import { withCtx } from '../src/db.ts';
-import { advanceProcesses, parseProcessText } from '../src/modules/agentProcesses.ts';
+import { advanceProcesses, parseProcessText, stepHints } from '../src/modules/agentProcesses.ts';
 
 let t: Awaited<ReturnType<typeof setupTestApp>>;
 const ck: Record<string, Record<string, string>> = {};
@@ -43,6 +43,14 @@ test('процесс словами: шаги, роли и сроки', () => {
   assert.deepEqual(q.steps.map((s) => [s.role, s.hours]), [['owner', 1], ['trainer', 24], ['owner', 24]]);
 });
 
+test('подсказки-действия у шага: по смыслу, из шаблона, без клиента — без звонка', () => {
+  assert.deepEqual(stepHints('Разобраться в причине, решить, что исправить', true), ['card', 'team', 'task', 'result']);
+  assert.deepEqual(stepHints('Позвонить по заявке, узнать цель, пригласить на экскурсию', true), ['call', 'write', 'schedule', 'result']);
+  assert.ok(!stepHints('Позвонить клиенту', false).some((h) => ['call', 'write', 'card'].includes(h)));
+  assert.deepEqual(stepHints('Что-то непонятное', false), ['task', 'team', 'result']);
+  assert.deepEqual(stepHints('Любой шаг', true, ['team', 'bogus', 'call']), ['team', 'call']);
+});
+
 test('готовые шаблоны, конструктор и права', async () => {
   const g = (await req('GET', '/api/processes/templates', 'm.volkova')).json();
   assert.ok(g.items.length >= 5);
@@ -52,6 +60,9 @@ test('готовые шаблоны, конструктор и права', asyn
   assert.equal((await req('POST', '/api/processes/templates', 'o.smirnov', { name: 'X', steps: [{ title: 'a', role: 'boss', hours: 1 }] })).statusCode, 400);
   const c = await req('POST', '/api/processes/templates', 'o.smirnov', { name: 'Проверка зала', description: 'тест', steps: [{ title: 'Осмотреть тренажёры', role: 'trainer', hours: 4 }, { title: 'Заказать ремонт', role: 'gm', hours: 24 }] });
   assert.equal(c.statusCode, 200, c.body);
+  const h = await req('POST', '/api/processes/templates', 'o.smirnov', { id: c.json().id, name: 'Проверка зала', steps: [{ title: 'Осмотреть тренажёры', role: 'trainer', hours: 4, hints: ['task', 'x', 'task'] }] });
+  assert.equal(h.statusCode, 200, h.body);
+  assert.deepEqual((await sql(`select steps from process_templates where id = $1`, [c.json().id]))[0].steps[0].hints, ['task']);
   const ft = await req('POST', '/api/processes/from-text', 'o.smirnov', { text: 'Открытие смены: администратор включает свет и музыку сразу; тренер проверяет зал за 1 час' });
   assert.equal(ft.json().steps.length, 2);
   assert.equal(ft.json().engine, 'rules');
@@ -74,6 +85,10 @@ test('запуск по шаблону: шаг — задача исполнит
   // Менеджер видит процесс, где у него шаг; отмечает шаг — агент запускает следующий
   const mine = (await req('GET', `/api/processes?clubId=${centr}`, 'm.volkova')).json().items;
   assert.ok(mine.some((x: { id: string }) => x.id === id));
+  // У текущего шага — кнопки-подсказки; у остальных шагов их нет
+  const cur = mine.find((x: { id: string }) => x.id === id).steps;
+  assert.deepEqual(cur[0].hints, ['call', 'write', 'schedule', 'result']);
+  assert.equal(cur[1].hints, undefined);
   assert.equal((await req('POST', `/api/processes/${id}/step-done`, 'm.volkova', { result: 'Записан на экскурсию' })).statusCode, 200);
   // Выполнение задачи в обычном разделе «Задачи» тоже двигает процесс (через проход агента)
   await sql(`update tasks set done_at = now(), result = 'Подтвердил' where id = (select task_id from process_steps where process_id = $1 and ord = 2)`, [id]);

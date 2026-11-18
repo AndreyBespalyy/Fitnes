@@ -14,7 +14,31 @@ import { collectFacts, fitBrief, fmtDate, noContacts, rulesBrief, type Facts } f
 import { processFlow } from './agentFlow.ts';
 import { card, leastLoaded } from './agentReminders.ts';
 
-export type Step = { title: string; role: string; hours: number };
+export type Step = { title: string; role: string; hours: number; hints?: Hint[] };
+
+/* ---------- подсказки-действия у шага (замечание тестировщика №26, 18.11.2026) ---------- */
+// Кнопки под текущим шагом: что сделать прямо сейчас. Берутся из шаблона, а если в шаблоне не заданы — помощник подбирает по смыслу шага.
+export const HINTS = ['call', 'write', 'card', 'task', 'team', 'schedule', 'staff', 'result'] as const;
+export type Hint = typeof HINTS[number];
+const NEEDS_PERSON: Hint[] = ['call', 'write', 'card'];
+const HINT_RULES: [RegExp, Hint[]][] = [
+  [/(позвон|созвон|перезвон|звонок|звонк|связат|уточн|подтверд|узна|извин)/, ['call', 'write']],
+  [/(жалоб|причин|разобрат|исправ|проблем)/, ['card', 'team', 'task']],
+  [/(предлож|оформ|оплат|продлен|абонемент|договор)/, ['card', 'call']],
+  [/(тренировк|визит|экскурс|программ|заняти)/, ['schedule', 'card']],
+  [/(документ|график|доступ|наставник|обуч|аттестац|сотрудник)/, ['staff', 'team', 'task']],
+  [/(поблагодар|напис|сообщ|рассказа|напомн)/, ['write', 'call']],
+];
+export function stepHints(title: string, hasPerson: boolean, fromTemplate?: unknown): Hint[] {
+  const ok = (h: Hint) => hasPerson || !NEEDS_PERSON.includes(h);
+  const tpl = Array.isArray(fromTemplate) ? fromTemplate.filter((h): h is Hint => HINTS.includes(h as Hint)) : [];
+  if (tpl.length) return [...new Set(tpl)].filter(ok).slice(0, 4);
+  const t = title.toLowerCase().replace(/ё/g, 'е');
+  const out: Hint[] = [];
+  for (const [re, hs] of HINT_RULES) if (re.test(t)) for (const h of hs) if (ok(h) && !out.includes(h)) out.push(h);
+  if (!out.length) out.push(...(hasPerson ? ['card', 'task'] as Hint[] : ['task', 'team'] as Hint[]));
+  return [...out.slice(0, 3), 'result'];
+}
 export const ROLE_NAME: Record<string, string> = { owner: 'ответственный за процесс', manager: 'менеджер', rop: 'РОП', trainer: 'тренер', desk: 'администратор', gm: 'управляющий', fin: 'финансист' };
 
 export const BUILTIN: { code: string; name: string; description: string; steps: Step[] }[] = [
@@ -96,7 +120,8 @@ function cleanSteps(raw: unknown): Step[] {
     if (!(String(x.role) in ROLE_NAME)) throw badRequest(`Шаг ${i + 1}: неизвестная роль`);
     const hours = Number(x.hours);
     if (!(hours > 0 && hours <= 2000)) throw badRequest(`Шаг ${i + 1}: срок — от 15 минут до 83 дней`);
-    return { title: title.slice(0, 200), role: String(x.role), hours };
+    const hints = Array.isArray(x.hints) ? [...new Set(x.hints.filter((h) => HINTS.includes(h)))].slice(0, 4) : [];
+    return { title: title.slice(0, 200), role: String(x.role), hours, ...(hints.length ? { hints } : {}) };
   });
 }
 
@@ -306,14 +331,20 @@ export function processRoutes(app: FastifyInstance, pool: pg.Pool, yandex: Yande
       if (clubId) await advanceProcesses(db, ctx, clubId);
       const mineOnly = !can(ctx, P.crmViewAll);
       const rows = (await db.query(`select p.id, p.title, p.status, p.started_at as "startedAt", p.due_at as "dueAt", p.finished_at as "finishedAt", p.person_id as "personId", pe.full_name as person,
-          u.full_name as owner, p.owner_id = $3 as "isOwner",
+          u.full_name as owner, p.owner_id = $3 as "isOwner", pt.steps as "tplSteps",
           coalesce((select json_agg(json_build_object('ord', s.ord, 'title', s.title, 'role', s.role, 'status', s.status, 'assignee', su.full_name, 'assigneeId', s.assignee_id, 'dueAt', s.due_at, 'doneAt', s.done_at, 'taskId', s.task_id) order by s.ord)
             from process_steps s left join users su on su.id = s.assignee_id where s.process_id = p.id), '[]') as steps
-        from processes p left join persons pe on pe.id = p.person_id left join users u on u.id = p.owner_id
+        from processes p left join persons pe on pe.id = p.person_id left join users u on u.id = p.owner_id left join process_templates pt on pt.id = p.template_id
         where ($1::uuid is null or p.club_id = $1) and p.status = coalesce($2, 'active')
           and (not $4 or p.owner_id = $3 or exists (select 1 from process_steps s where s.process_id = p.id and s.assignee_id = $3))
         order by p.due_at limit 200`, [clubId ?? null, ['active', 'done', 'cancelled'].includes(status ?? '') ? status : null, ctx.userId, mineOnly])).rows;
-      return { items: rows, canEdit: canEdit(ctx) };
+      // Подсказки-действия к текущему шагу: из шаблона (если шаг тот же) или по смыслу шага
+      const items = rows.map(({ tplSteps, ...p }) => ({ ...p, steps: (p.steps as { ord: number; title: string; status: string }[]).map((st) => {
+        if (st.status !== 'active') return st;
+        const t = Array.isArray(tplSteps) ? (tplSteps as Step[])[st.ord - 1] : undefined;
+        return { ...st, hints: stepHints(st.title, !!p.personId, t && t.title === st.title ? t.hints : undefined) };
+      }) }));
+      return { items, canEdit: canEdit(ctx) };
     });
   });
   app.post('/api/processes', async (req) => {
