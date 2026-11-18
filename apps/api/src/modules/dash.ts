@@ -250,7 +250,10 @@ export async function kpi(db: Db, clubIds: string[], from: string, to: string, u
 export async function norms(db: Db, clubIds: string[]) {
   const rows = (await db.query('select club_id as "clubId", metric, per_day::float as v from kpi_norms where club_id = any($1)', [clubIds])).rows as { clubId: string; metric: string; v: number }[];
   const out: Record<string, Record<string, number | null>> = {};
-  for (const c of clubIds) out[c] = Object.fromEntries(KPI.map((k) => [k.id, rows.find((r) => r.clubId === c && r.metric === k.id)?.v ?? DEFAULT_NORMS[k.id] ?? null]));
+  // Норма первого ответа — одна на клуб: срок ответа на заявку из «Отдел продаж → Настройки» (повторная проверка CRM 18.11.2026, п. 3)
+  const fr = new Map((await db.query('select id, first_response_minutes as m from clubs where id = any($1)', [clubIds])).rows.map((r) => [r.id as string, Number(r.m)]));
+  for (const c of clubIds) out[c] = Object.fromEntries(KPI.map((k) => [k.id, k.id === 'first_response' ? (fr.get(c) ?? DEFAULT_NORMS[k.id])
+    : rows.find((r) => r.clubId === c && r.metric === k.id)?.v ?? DEFAULT_NORMS[k.id] ?? null]));
   return out;
 }
 /** Пороги светофора клуба (FR-AI-11): доля от плана на сегодня, выше которой «зелёный» и «жёлтый». Задаются в «Нормы KPI» */
@@ -554,7 +557,8 @@ export function dashRoutes(app: FastifyInstance, pool: pg.Pool) {
     return withCtx(pool, ctx, async (db) => {
       await scope(db, clubId);
       const l = await lightOf(db, [clubId]);
-      return { metrics: KPI, norms: (await norms(db, [clubId]))[clubId], light: { green: Math.round(l.green * 100), yellow: Math.round(l.yellow * 100) }, canEdit: can(ctx, P.planManage) || can(ctx, P.salesManage) };
+      // «Первый ответ» здесь не правится: это норма ответа на заявку клуба из «Отдел продаж → Настройки» (повторная проверка CRM 18.11.2026, п. 3)
+      return { metrics: KPI.filter((k) => k.id !== 'first_response'), firstResponseMinutes: (await norms(db, [clubId]))[clubId].first_response, norms: (await norms(db, [clubId]))[clubId], light: { green: Math.round(l.green * 100), yellow: Math.round(l.yellow * 100) }, canEdit: can(ctx, P.planManage) || can(ctx, P.salesManage) };
     });
   });
   app.put('/api/kpi-norms', async (req) => {
@@ -569,6 +573,7 @@ export function dashRoutes(app: FastifyInstance, pool: pg.Pool) {
     return withCtx(pool, ctx, async (db) => {
       await scope(db, b.clubId);
       for (const [k, v] of Object.entries(b.norms ?? {})) {
+        if (k === 'first_response') continue; // норма ответа на заявку — в «Отдел продаж → Настройки»
         if (!KPI.some((x) => x.id === k) || typeof v !== 'number' || !(v >= 0) || v > 10000) throw badRequest('Норма указана неверно');
         await db.query(`insert into kpi_norms(tenant_id, club_id, metric, per_day, updated_by) values ($1,$2,$3,$4,$5)
           on conflict (club_id, metric) do update set per_day = excluded.per_day, updated_by = excluded.updated_by, updated_at = now()`, [ctx.tenantId, b.clubId, k, v, ctx.userId]);

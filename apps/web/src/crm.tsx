@@ -15,6 +15,7 @@ import { CallDialog, PersonCalls } from './calls.tsx';
 import { PersonCallFlags, TakeLeadButton } from './salesOps.tsx';
 import { ScriptButton, SituationButton } from './agent.tsx';
 import { PersonPrivacy } from './privacy.tsx';
+import { ownerOnly } from './roleMenu.ts';
 
 type Stage = { id: string; name: string; kind: 'open' | 'won' | 'lost'; openCount?: number };
 type Pipeline = { id: string; clubId: string; name: string; purpose: string; isDefaultForLeads: boolean; isActive: boolean; stages: Stage[] };
@@ -54,7 +55,7 @@ export function LeadsPage({ me, clubs, clubId, openPerson }: { me: Me; clubs: Cl
   // С рабочего стола: «лиды ждут первого ответа»
   const [noResp, setNoResp] = useState(() => navParams('leads').filter === 'noresponse');
   // Форма нового лида — по кнопке «+ Лид», сначала список (проверка CRM 17.11.2026, п. 11)
-  const [adding, setAdding] = useState(false);
+  const [adding, setAdding] = useState(() => navParams('leads').add === '1'); // «+ Лид» из «Мой день»
   const shownLeads = noResp ? leads.filter((l) => !l.respondedAt) : leads;
   const reload = () => api<Lead[]>('GET', `/api/leads${clubId !== 'all' ? `?clubId=${clubId}` : ''}`).then(setLeads).catch((x) => setErr(errText(x)));
   useEffect(() => { reload(); }, [clubId]);
@@ -218,16 +219,21 @@ export function TasksPage({ me, clubId, openPerson }: { me: Me; clubId: string; 
 }
 
 /** «+ Задача» (проверка CRM 17.11.2026, п. 3): себе или коллеге, по клиенту или без */
-export function NewTask({ me, clubId, personId, personName, onDone, onCancel }: { me: Me; clubId: string | null; personId?: string; personName?: string; onDone: () => void; onCancel: () => void }) {
+export function NewTask({ me, clubId, personId, personName, onDone, onCancel, prefer, heading, defaultTitle }: { me: Me; clubId: string | null; personId?: string; personName?: string; onDone: () => void; onCancel: () => void;
+  /** Кому по умолчанию: первая подходящая роль (например, ['gm', 'rop'] — «Поручить управляющему») */ prefer?: string[]; heading?: string; defaultTitle?: string }) {
   const [clubs, setClubs] = useState<Club[]>([]);
   const [club, setClub] = useState(clubId && clubId !== 'all' ? clubId : '');
-  const [who, setWho] = useState<{ id: string; name: string; role: string }[]>([]);
+  const [who, setWho] = useState<{ id: string; name: string; role: string; code?: string }[]>([]);
   const [to, setTo] = useState(me.id);
-  const [title, setTitle] = useState(personId ? 'Перезвонить' : '');
+  const [title, setTitle] = useState(defaultTitle ?? (personId ? 'Перезвонить' : ''));
   const [due, setDue] = useState(localInput(24 * 60));
   const [err, setErr] = useState('');
   useEffect(() => { if (!club) api<Club[]>('GET', '/api/clubs').then((c) => { setClubs(c); if (c[0]) setClub(c[0].id); }).catch(() => null); }, []);
-  useEffect(() => { if (club) api<{ id: string; name: string; role: string }[]>('GET', `/api/tasks/assignees?clubId=${club}`).then(setWho).catch(() => setWho([])); }, [club]);
+  useEffect(() => { if (club) api<{ id: string; name: string; role: string; code?: string }[]>('GET', `/api/tasks/assignees?clubId=${club}`).then((w) => {
+    setWho(w);
+    const pick = prefer?.map((r) => w.find((x) => x.code === r && x.id !== me.id)).find(Boolean);
+    if (pick) setTo(pick.id);
+  }).catch(() => setWho([])); }, [club]);
   const submit = async (e: FormEvent) => {
     e.preventDefault(); setErr('');
     try {
@@ -237,7 +243,7 @@ export function NewTask({ me, clubId, personId, personName, onDone, onCancel }: 
   };
   return (
     <form className="card" onSubmit={submit} style={{ display: 'grid', gap: 8 }}>
-      <b>Новая задача{personName ? ` · ${personName}` : ''}</b>
+      <b>{heading ?? 'Новая задача'}{personName ? ` · ${personName}` : ''}</b>
       <div className="grid2" style={{ gridTemplateColumns: 'repeat(auto-fit,minmax(180px,1fr))' }}>
         <label className="f">Что сделать<input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="перезвонить, подготовить договор…" autoFocus /></label>
         <label className="f">Когда<input type="datetime-local" value={due} onChange={(e) => setDue(e.target.value)} /></label>
@@ -284,7 +290,14 @@ function CompleteTask({ task, onDone, onCancel }: { task: Task; onDone: () => vo
 }
 
 /* ---------- Карточка клиента ---------- */
-export function PersonCard({ me, id, onClose }: { me: Me; id: string; onClose: () => void }) {
+// Карточка у собственника — только просмотр (повторная проверка CRM 18.11.2026, п. 13): собственник не работает с клиентом
+// сам (не продаёт, не пишет, не двигает этапы), а поручает это управляющему клуба кнопкой «Поручить управляющему».
+const OWNER_VIEW = new Set(['persons.view', 'memberships.view', 'finance.view', 'crm.view_all', 'dash.view', 'data.protect', 'clubs.view']);
+
+export function PersonCard({ me: meIn, id, onClose }: { me: Me; id: string; onClose: () => void }) {
+  const viewOnly = ownerOnly(meIn);
+  const me: Me = viewOnly ? { ...meIn, permissions: meIn.permissions.filter((p) => OWNER_VIEW.has(p)) } : meIn;
+  const [delegate, setDelegate] = useState(false);
   const [card, setCard] = useState<Card | null>(null);
   const [err, setErr] = useState('');
   const [move, setMove] = useState<{ oppId: string; stage: Stage } | null>(null);
@@ -319,6 +332,11 @@ export function PersonCard({ me, id, onClose }: { me: Me; id: string; onClose: (
             <button className="btn sm" onClick={onClose}>Закрыть</button></span></div>
         {err && <div className="err">{err}</div>}
         {!card ? <p className="muted">Загрузка…</p> : (<>
+          {viewOnly && (delegate
+            ? <NewTask me={meIn} clubId={card.person.homeClubId} personId={card.person.id} personName={card.person.fullName} prefer={['gm', 'rop']} heading="Поручить управляющему"
+                defaultTitle="Разобраться с клиентом: " onDone={() => { setDelegate(false); reload(); }} onCancel={() => setDelegate(false)} />
+            : <div className="item row between" style={{ gap: 8 }}><span className="small">Карточка открыта для просмотра. Работу с клиентом ведёт клуб.</span>
+                <button className="btn pri sm" onClick={() => setDelegate(true)}>Поручить управляющему</button></div>)}
           <div><h1>{card.person.fullName}</h1>
             <div className="row" style={{ marginTop: 4 }}><span className="chip acc">{card.person.segment}</span>
               <span className="small">{card.person.homeClubName ?? 'клиент другого клуба сети'} · в базе с {dt(card.person.createdAt)}</span></div>
@@ -336,11 +354,11 @@ export function PersonCard({ me, id, onClose }: { me: Me; id: string; onClose: (
           {can(me, 'messages.work') && <PersonChats me={me} personId={card.person.id} homeClubId={card.person.homeClubId}
             marketingConsent={card.person.marketingConsent} optOut={card.person.messagingOptOut} reload={reload} />}
           {work && <PersonCallFlags personId={card.person.id} />}
-          {sales && <UpsellBlock personId={card.person.id} clubId={card.person.homeClubId} />}
+          {sales && !viewOnly && <UpsellBlock personId={card.person.id} clubId={card.person.homeClubId} />}
           <MembershipsBlock me={me} personId={card.person.id} homeClubId={card.person.homeClubId} />
-          {money && <FamilyBlock me={me} personId={card.person.id} clubId={card.person.homeClubId} />}
-          {money && <DepositBlock personId={card.person.id} clubId={card.person.homeClubId} />}
-          {money && <LoyaltyBlock personId={card.person.id} clubId={card.person.homeClubId} />}
+          {money && <FamilyBlock me={me} personId={card.person.id} clubId={card.person.homeClubId} readOnly={viewOnly} />}
+          {money && <DepositBlock personId={card.person.id} clubId={card.person.homeClubId} readOnly={viewOnly} />}
+          {money && <LoyaltyBlock personId={card.person.id} clubId={card.person.homeClubId} readOnly={viewOnly} />}
           {sales && <ReferralBlock me={me} personId={card.person.id} clubId={card.person.homeClubId} />}
           <PersonPrivacy me={me} personId={card.person.id} reload={reload} />
           {(can(me, 'acs.work') || can(me, 'acs.manage')) && <PersonPasses me={me} personId={card.person.id} clubId={card.person.homeClubId ?? ''} />}
@@ -348,7 +366,7 @@ export function PersonCard({ me, id, onClose }: { me: Me; id: string; onClose: (
           {sales && card.opportunities.map((o) => (
             <div key={o.id} className="card" style={{ display: 'grid', gap: 8 }}>
               <div className="row between"><h2>{o.pipelineName}</h2>
-                <span className="row" style={{ gap: 6 }}><SituationButton type="opportunity" id={o.id} />{o.status === 'open' && <ScriptButton type="opportunity" id={o.id} label="Скрипт" />}<span className={`chip ${o.status === 'won' ? 'ok' : o.status === 'lost' ? 'bad' : 'acc'}`}>{o.status === 'open' ? 'в работе' : o.status === 'won' ? 'успешно' : 'отказ'}</span></span></div>
+                <span className="row" style={{ gap: 6 }}>{work && <SituationButton type="opportunity" id={o.id} />}{work && o.status === 'open' && <ScriptButton type="opportunity" id={o.id} label="Скрипт" />}<span className={`chip ${o.status === 'won' ? 'ok' : o.status === 'lost' ? 'bad' : 'acc'}`}>{o.status === 'open' ? 'в работе' : o.status === 'won' ? 'успешно' : 'отказ'}</span></span></div>
               <div className="small">{o.clubName} · ответственный: {o.ownerName ?? 'не назначен'}{o.lostReason ? ` · причина отказа: ${o.lostReason}` : ''}</div>
               <div className="stagebar">{o.stages.map((s) => (
                 <button key={s.id} className={s.kind} aria-current={s.id === o.stageId} disabled={!work || o.status !== 'open' || s.id === o.stageId}
@@ -387,7 +405,7 @@ export function PersonCard({ me, id, onClose }: { me: Me; id: string; onClose: (
             </div>)}
 
           {work && <PersonCalls personId={card.person.id} />}
-          {sales && <><div className="card" style={{ display: 'grid', gap: 6 }}><div className="row between"><h2>Задачи</h2>{!addTask && <button className="btn sm" onClick={() => setAddTask(true)}>+ Задача</button>}</div>
+          {sales && <><div className="card" style={{ display: 'grid', gap: 6 }}><div className="row between"><h2>Задачи</h2>{!addTask && !viewOnly && <button className="btn sm" onClick={() => setAddTask(true)}>+ Задача</button>}</div>
             {addTask && <NewTask me={me} clubId={card.person.homeClubId} personId={card.person.id} personName={card.person.fullName} onDone={() => { setAddTask(false); reload(); }} onCancel={() => setAddTask(false)} />}
             {card.tasks.length === 0 && <p className="muted" style={{ margin: 0 }}>Задач нет.</p>}
             {card.tasks.map((t) => (

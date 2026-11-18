@@ -9,7 +9,7 @@ import { PERMISSIONS as P } from '../roles.ts';
 import { withCtx, type Ctx, type Db } from '../db.ts';
 import { badRequest } from '../errors.ts';
 import { addDays } from './memberships.ts';
-import { conversationFor, deliver, firstName, queueMessage } from './messaging.ts';
+import { autoSentWeek, conversationFor, deliver, firstName, queueMessage } from './messaging.ts';
 
 type Fetch = typeof fetch;
 type Actor = { tenantId: string; userId: string | null };
@@ -191,8 +191,7 @@ export async function processRules(db: Db, f: Fetch | null, actor: Actor, clubId
     const log = (result: 'done' | 'skipped', details: string | null, refId: string | null = null) => db.query(`insert into rule_actions(tenant_id, club_id, run_id, person_id, step, action, result, details, ref_id)
       values ($1,$2,$3,$4,$5,$6,$7,$8,$9)`, [actor.tenantId, clubId, run.id, run.person_id, run.next_step, s.action, result, details, refId]);
     if (s.action === 'message') {
-      const week = Number((await db.query(`select (select count(*) from msg_trigger_sends where person_id = $1 and club_id = $2 and created_at > now() - interval '7 days')
-        + (select count(*) from rule_actions where person_id = $1 and club_id = $2 and action = 'message' and result = 'done' and created_at > now() - interval '7 days') as n`, [run.person_id, clubId])).rows[0].n);
+      const week = await autoSentWeek(db, run.person_id, clubId);
       const reason = p.messaging_opt_out ? 'клиент отписался от сообщений' : r.marketing && !p.marketing_consent ? 'нет согласия на рекламные сообщения'
         : week >= limit ? `лимит: уже ${week} автосообщ. за неделю` : null;
       const conv = reason ? null : await conversationFor(db, actor, run.person_id, clubId, true);

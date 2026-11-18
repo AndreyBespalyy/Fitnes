@@ -1,5 +1,6 @@
 // Шаг 6. Раздел «Тарифы» (настройки клуба, тарифы и цены) и абонементы в карточке клиента.
 import { LoyaltySettings } from './loyalty.tsx';
+import { ToConfig } from './toConfig.tsx';
 import { Fragment, useEffect, useState, type FormEvent } from 'react';
 import { PayLinkButton } from './payments.tsx';
 import { PayerPick, SeatPick, SeatsLine, type PayerValue } from './familyCorp.tsx';
@@ -75,12 +76,14 @@ function SettingsForm({ club, manage }: { club: Club; manage: boolean }) {
     e.preventDefault(); setErr('');
     try { setS(await api<Settings>('PUT', `/api/clubs/${club.id}/membership-settings`, s)); toast(`Правила клуба «${club.name}» сохранены`); } catch (x) { setErr(errText(x)); }
   };
-  const ro = !manage;
+  // Правила абонементов меняются только в «Настройки клуба» — с черновиком, утверждением и историей (повторная проверка CRM 18.11.2026, п. 4).
+  // Здесь все видят их коротким текстом; у кого есть право — ссылка в настройки.
+  const ro = true;
   const sub = club.salesModel === 'subscription';
-  // Кто не может менять правила (менеджер, ресепшн), видит их коротким текстом, без полей ввода
   if (ro) return (
     <div className="card" style={{ display: 'grid', gap: 6 }}>
       <h2>Правила клуба</h2>
+      {manage && <ToConfig view="rules" text="Заморозка, рассрочка, просрочка и подписка меняются в «Настройки клуба → Абонементы», с утверждением." />}
       <div className="small"><b>Заморозка:</b> {s.freezeEnabled ? `до ${s.freezeMaxDaysPerYear} дн. в год, не больше ${s.freezeMaxTimesPerYear} раз, от ${s.freezeMinDays} дн.${s.freezePaid ? `, платная — ${rub(s.freezePriceKop)}` : ', бесплатно'}` : 'нет'}</div>
       <div className="small"><b>Рассрочка:</b> {s.installmentsEnabled ? `до ${s.installmentsMaxPayments} платежей, раз в месяц` : 'нет'}. Проход закрывается при просрочке больше {s.overdueBlockAfterDays} дн.; напоминание о продлении за {s.renewalReminderDays} дн.</div>
       <div className="small"><b>Семья:</b> скидка второму и следующим {s.familyDiscountPercent} %, до {s.familyMaxMembers} человек.{s.contractRequiredForAccess ? ' Без подписанного договора в клуб не пускаем.' : ''}</div>
@@ -212,13 +215,24 @@ export function MembershipsBlock({ me, personId, homeClubId }: { me: Me; personI
   const [freeze, setFreeze] = useState<{ id: string; days: number; startsOn: string } | null>(null);
   const [cancel, setCancel] = useState<{ id: string; reason: string } | null>(null);
   const [refund, setRefund] = useState<string | null>(null);
+  // Деньги — только после подтверждения (повторная проверка CRM 18.11.2026, п. 1): продление и отметка оплаты одним нажатием
+  // приводили к случайным продажам. Под абонементом появляется строка «что произойдёт» с кнопками «Подтвердить» и «Отмена».
+  const [ask, setAsk] = useState<{ key: string; text: string; run: () => Promise<unknown>; ok: string } | null>(null);
+  const askRenew = async (m: Membership) => {
+    const list = await api<Product[]>('GET', `/api/products?active=1&clubId=${m.clubId}`).catch(() => [] as Product[]);
+    const p = list.find((x) => x.name === m.productName);
+    const from = m.endsOn && m.endsOn >= today ? d(new Date(new Date(m.endsOn).getTime() + 86400000).toISOString().slice(0, 10)) : 'сегодня';
+    setAsk({ key: m.id, text: `Продлить «${m.productName}» с ${from}${p?.priceKop ? ` за ${rub(p.priceKop)}` : ' по текущей цене тарифа'}? Клиенту будет выставлен счёт.`,
+      run: () => api('POST', `/api/memberships/${m.id}/renew`, {}), ok: 'Продление оформлено с даты окончания текущего' });
+  };
+  const today = new Date().toISOString().slice(0, 10);
   const reload = () => api<Membership[]>('GET', `/api/persons/${personId}/memberships`).then(setMs).catch((x) => setErr(errText(x)));
   useEffect(() => { reload(); }, [personId]);
   const canSell = can(me, 'memberships.sell');
   const canManage = can(me, 'memberships.manage');
   const act = async (fn: () => Promise<unknown>, ok: string) => {
     setErr('');
-    try { await fn(); toast(ok); setFreeze(null); setCancel(null); setSell(false); reload(); } catch (x) { setErr(errText(x)); }
+    try { await fn(); toast(ok); setFreeze(null); setCancel(null); setSell(false); setAsk(null); reload(); } catch (x) { setErr(errText(x)); setAsk(null); }
   };
   const openSell = async () => {
     setSell(true);
@@ -228,7 +242,6 @@ export function MembershipsBlock({ me, personId, homeClubId }: { me: Me; personI
   };
   const prod = products.find((p) => p.id === productId);
   if (!can(me, 'memberships.view')) return null;
-  const today = new Date().toISOString().slice(0, 10);
   return (
     <div className="card" style={{ display: 'grid', gap: 8 }}>
       <div className="row between"><h2>Абонементы и подписки</h2>{canSell && !sell && <button className="btn sm pri" onClick={openSell}>+ Продать</button>}</div>
@@ -271,23 +284,29 @@ export function MembershipsBlock({ me, personId, homeClubId }: { me: Me; personI
                     : c.status === 'cancelled' ? <span className="chip">отменён</span>
                     : c.company ? <span className="chip acc">платит «{c.company}» по счёту{c.invoice ? ` ${c.invoice}` : ''}</span>
                     : <span className="row"><span className={`chip ${c.overdue ? 'bad' : 'warn'}`}>{c.overdue ? 'просрочен' : 'к оплате'}</span>
-                      {canManage && <><button className="btn sm" onClick={() => act(() => api('POST', `/api/charges/${c.id}/mark-paid`, { method: 'card_terminal' }), 'Оплата картой отмечена')}>Картой</button>
-                        <button className="btn sm" onClick={() => act(() => api('POST', `/api/charges/${c.id}/mark-paid`, { method: 'cash' }), 'Оплата наличными отмечена')}>Наличными</button></>}
-                      {(can(me, 'memberships.sell') || can(me, 'shifts.work')) && <button className="btn sm" title="Списать с депозита клиента" onClick={() => act(() => api('POST', `/api/charges/${c.id}/pay-deposit`), 'Оплачено с депозита')}>С депозита</button>}
+                      {canManage && <><button className="btn sm" onClick={() => setAsk({ key: m.id, text: `Отметить «${c.title}» на ${rub(c.amountKop)} оплаченным картой через терминал? Платёж попадёт в кассу смены.`, run: () => api('POST', `/api/charges/${c.id}/mark-paid`, { method: 'card_terminal' }), ok: 'Оплата картой отмечена' })}>Картой</button>
+                        <button className="btn sm" onClick={() => setAsk({ key: m.id, text: `Отметить «${c.title}» на ${rub(c.amountKop)} оплаченным наличными? Сумма попадёт в кассу смены.`, run: () => api('POST', `/api/charges/${c.id}/mark-paid`, { method: 'cash' }), ok: 'Оплата наличными отмечена' })}>Наличными</button></>}
+                      {(can(me, 'memberships.sell') || can(me, 'shifts.work')) && <button className="btn sm" title="Списать с депозита клиента" onClick={() => setAsk({ key: m.id, text: `Списать ${rub(c.amountKop)} с депозита клиента в оплату «${c.title}»?`, run: () => api('POST', `/api/charges/${c.id}/pay-deposit`), ok: 'Оплачено с депозита' })}>С депозита</button>}
                       {can(me, 'memberships.sell') && <PayLinkButton chargeId={c.id} />}</span>}
                 </div>))}</div>)}
             {m.contract && (canSell || canManage || can(me, 'contracts.sign') || can(me, 'finance.view')) && <ContractLine me={me} c={m.contract} reload={reload} />}
             {m.seatOf && <div className="small">Место в общем семейном абонементе. Купил и платит: <b>{m.seatOf.holderName}</b>. Срок, заморозка и продление — по основному абонементу.</div>}
             {m.familySeats && m.status === 'active' && <SeatsLine membershipId={m.id} clubId={m.clubId} buyerId={personId} seats={m.familySeats} taken={m.seats ?? []} canEdit={canSell} reload={reload} />}
-            {m.seatOf && m.status === 'active' && canSell && <div className="row"><button className="btn sm" onClick={() => act(() => api('POST', `/api/memberships/${m.seatOf!.membershipId}/seats/${m.id}/remove`), 'Место освобождено')}>Освободить место</button></div>}
+            {m.seatOf && m.status === 'active' && canSell && <div className="row"><button className="btn sm" onClick={() => setAsk({ key: m.id, text: `Освободить место в семейном абонементе ${m.seatOf!.holderName}? Клиент потеряет проход по нему.`, run: () => api('POST', `/api/memberships/${m.seatOf!.membershipId}/seats/${m.id}/remove`), ok: 'Место освобождено' })}>Освободить место</button></div>}
             {m.status === 'active' && !m.seatOf && (
               <div className="row">
                 {canSell && ['active', 'expired', 'used_up', 'debt_grace'].includes(m.state) && m.kind !== 'subscription' &&
-                  <button className="btn sm" onClick={() => act(() => api('POST', `/api/memberships/${m.id}/renew`, {}), 'Продление оформлено с даты окончания текущего')}>Продлить</button>}
+                  <button className="btn sm" onClick={() => void askRenew(m)}>Продлить</button>}
                 {canManage && m.freezeAllowed && !activeFreeze && m.state !== 'expired' && <button className="btn sm" onClick={() => setFreeze({ id: m.id, days: 14, startsOn: today })}>Заморозить</button>}
-                {canManage && activeFreeze && <button className="btn sm" onClick={() => act(() => api('POST', `/api/memberships/${m.id}/unfreeze`), 'Заморозка снята, неиспользованные дни возвращены')}>Разморозить</button>}
+                {canManage && activeFreeze && <button className="btn sm" onClick={() => setAsk({ key: m.id, text: 'Снять заморозку сегодня? Неиспользованные дни вернутся, окончание абонемента сдвинется назад.', run: () => api('POST', `/api/memberships/${m.id}/unfreeze`), ok: 'Заморозка снята, неиспользованные дни возвращены' })}>Разморозить</button>}
                 {canManage && <button className="btn sm" onClick={() => setCancel({ id: m.id, reason: '' })}>Расторгнуть</button>}
                 {canManage && m.charges.some((c) => c.status === 'paid') && <button className="btn sm" onClick={() => setRefund(m.id)}>Возврат денег</button>}
+              </div>)}
+            {ask?.key === m.id && (
+              <div className="item confirm-row" role="alertdialog" aria-label="Подтверждение" style={{ display: 'grid', gap: 6 }}>
+                <span>{ask.text}</span>
+                <div className="row"><button className="btn pri sm" onClick={() => act(ask.run, ask.ok)}>Подтвердить</button>
+                  <button className="btn sm" onClick={() => setAsk(null)}>Отмена</button></div>
               </div>)}
             {freeze?.id === m.id && (
               <div className="row">

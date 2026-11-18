@@ -35,7 +35,7 @@ const ACTION: Record<string, string> = {
   'referral.link_sent': 'Отправил ссылку «Приведи друга»', 'retention.launched': 'Запустил кампанию возврата клиентов', 'push.subscribed': 'Включил уведомления на телефоне',
 };
 const AREA: Record<string, string> = {
-  access: 'Проходы', agent: 'ИИ-помощник', ai: 'ИИ', bank: 'Сверка с банком', call: 'Звонки', charge: 'Оплаты', churn: 'Риск ухода', class: 'Расписание',
+  access: 'Проходы', agent: 'Дядя Витя', ai: 'ИИ', bank: 'Сверка с банком', call: 'Звонки', charge: 'Оплаты', churn: 'Риск ухода', class: 'Расписание',
   club: 'Клуб', company: 'Компании', config: 'Настройки клуба', contract: 'Договоры', dash: 'Рабочий стол', deposit: 'Депозит', desk: 'Ресепшн',
   expense: 'Расходы', family: 'Семейный абонемент', finance: 'Финансы', gift: 'Сертификаты', goods: 'Товары', import: 'Перенос из 1С', intake: 'Приём заявок',
   kpi: 'Нормы KPI', lead: 'Лиды', lead_source: 'Источники заявок', loyalty: 'Бонусы', meeting: 'Встречи', membership: 'Абонементы', msg_channel: 'Каналы переписки',

@@ -174,7 +174,7 @@ function Shell({ me, onLogout }: { me: Me; onLogout: () => void }) {
   const [more, setMore] = useState(false);
   const [cmdk, setCmdk] = useState(false);
   const [personId, setPersonId] = useState<string | null>(init.person);
-  const [teamKey, setTeamKey] = useState(0); // «ИИ-помощник» в шапке: заново открыть мессенджер на чате помощника
+  const [teamKey, setTeamKey] = useState(0); // «Дядя Витя» в шапке: заново открыть мессенджер на чате Дяди Вити
   const href = (t: string, p: Record<string, string> = {}, person?: string | null) => {
     const q = new URLSearchParams({ tab: t, ...p }); if (person) q.set('person', person); return `/?${q}`;
   };
@@ -271,7 +271,7 @@ function Shell({ me, onLogout }: { me: Me; onLogout: () => void }) {
     ['retention', 'Возврат клиентов', can(me, 'retention.manage')],
     ['reviews', 'Обзоры', can(me, 'crm.work') || can(me, 'dash.view') || can(me, 'ai.review')],
     ['stafftime', 'График и зарплата', true],
-    ['config', 'Настройки клуба', can(me, 'config.manage')],
+    ['config', 'Настройки клуба', can(me, 'config.manage') || can(me, 'sales.manage')],
     ['telephony', 'Телефония', can(me, 'plan.manage')],
     ['onboarding', 'Подключение клубов', can(me, 'clubs.manage')],
     ['notes', 'Журнал замечаний', can(me, '*')],
@@ -285,6 +285,8 @@ function Shell({ me, onLogout }: { me: Me; onLogout: () => void }) {
   // Право на раздел (t[2]) — можно открыть по ссылке и из отчёта; в меню — только разделы своей роли (roleMenu.ts)
   const allowed = tabs.filter((t) => t[2]);
   const visible = allowed.filter((t) => inRoleMenu(me, t[0]));
+  // Открыт ли раздел этой роли: кнопки «Открыть …» на чужой раздел не показываем (повторная проверка CRM 18.11.2026, п. 11)
+  const canTab = (t: string) => allowed.some((x) => x[0] === t);
   const tabLabel = tabs.find((t) => t[0] === tab)?.[1] ?? tab;
   // Статистика использования: какой раздел открыли (без содержимого экрана)
   useEffect(() => { api('POST', '/api/usage/view', { tab, label: tabLabel }).catch(() => null); }, [tab]);
@@ -334,7 +336,7 @@ function Shell({ me, onLogout }: { me: Me; onLogout: () => void }) {
         {tab === 'sales' && <SalesOpsPage me={me} clubs={clubs} clubId={clubId} openPerson={openPerson} />}
         {tab === 'weekly' && <WeeklyPage clubs={clubs} clubId={clubId} />}
         {tab === 'learn' && <LearnPage clubs={clubs} clubId={clubId} />}
-        {tab === 'processes' && <ProcessesPage me={me} clubs={clubs} clubId={clubId} openPerson={openPerson} go={go} />}
+        {tab === 'processes' && <ProcessesPage me={me} clubs={clubs} clubId={clubId} openPerson={openPerson} go={go} canTab={canTab} />}
         {tab === 'calls' && <CallsPage me={me} clubs={clubs} clubId={clubId} openPerson={openPerson} />}
         {tab === 'tasks' && <TasksPage key={ver} me={me} clubId={clubId} openPerson={openPerson} />}
         {tab === 'leads' && <LeadsPage key={ver} me={me} clubs={clubs} clubId={clubId} openPerson={openPerson} />}
@@ -369,7 +371,7 @@ function Shell({ me, onLogout }: { me: Me; onLogout: () => void }) {
         {tab === 'telephony' && <PbxSettings clubs={clubs} clubId={clubId} />}
         {tab === 'schedule' && <SchedulePage me={me} clubs={clubs} clubId={clubId} openPerson={openPerson} />}
         {tab === 'retention' && <RetentionPage me={me} clubs={clubs} clubId={clubId} openPerson={openPerson} />}
-        {tab === 'onboarding' && <OnboardingPage me={me} clubId={clubId} go={(t) => setTab(t as Tab)} reloadClubs={reloadClubs} />}
+        {tab === 'onboarding' && <OnboardingPage me={me} clubId={clubId} go={(t) => setTab(t as Tab)} canTab={canTab} reloadClubs={reloadClubs} />}
         {tab === 'privacy' && <PrivacyPage me={me} clubs={clubs} clubId={clubId} openPerson={openPerson} />}
         {tab === 'system' && <SystemPage />}
         {tab === 'help' && <HelpPage me={me} clubs={clubs} clubId={clubId} page={tab} tabs={visible.map((v) => v[0])} />}
@@ -442,10 +444,6 @@ function Clubs({ me, clubs, reload }: { me: Me; clubs: Club[]; reload: () => voi
     setErr('');
     try { await api('PATCH', `/api/clubs/${c.id}`, { salesModel: model }); alertOk(`Модель продаж «${c.name}»: ${MODEL[model]}`); reload(); } catch (x) { setErr(errText(x)); }
   };
-  const saveNorm = async (c: Club, v: number) => {
-    setErr('');
-    try { await api('PATCH', `/api/clubs/${c.id}`, { firstResponseMinutes: v }); alertOk(`Норма первого ответа: ${v} мин`); reload(); } catch (x) { setErr(errText(x)); }
-  };
   if (wiz) return <Wizard onClose={(created) => { setWiz(false); if (created) reload(); }} />;
   return (
     <>
@@ -465,9 +463,7 @@ function Clubs({ me, clubs, reload }: { me: Me; clubs: Club[]; reload: () => voi
               </select>
             </label>
             <p className="small">При смене модели действующие договоры сохраняют условия, новый набор плана применяется со следующего периода.</p>
-            <label className="f" style={{ marginTop: 8 }}>Норма первого ответа новому лиду, минут
-              <input type="number" min={1} max={1440} defaultValue={c.firstResponseMinutes} style={{ maxWidth: 140 }}
-                onBlur={(e) => { const v = Number(e.target.value); if (v !== c.firstResponseMinutes) saveNorm(c, v); }} /></label>
+            <p className="small muted" style={{ marginTop: 8 }}>Норма ответа на заявку: {c.firstResponseMinutes} мин. Её задают РОП и управляющий в «Отдел продаж → Настройки».</p>
           </div>
         ))}
       </div>

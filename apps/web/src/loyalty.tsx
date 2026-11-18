@@ -76,13 +76,13 @@ type PersonL = { enabled: false } | {
   memberships: { id: string; name: string; kind: string; endsOn: string | null; visitsLeft: number | null }[];
 };
 
-export function LoyaltyBlock({ personId, clubId }: { personId: string; clubId: string | null }) {
+export function LoyaltyBlock({ personId, clubId, readOnly }: { personId: string; clubId: string | null; readOnly?: boolean }) {
   const [d, setD] = useState<PersonL | null>(null);
   const [err, setErr] = useState('');
   const [spend, setSpend] = useState<{ kind: 'days' | 'personal'; membershipId: string; qty: number } | null>(null);
   const [adj, setAdj] = useState<{ points: number; comment: string } | null>(null);
   const [all, setAll] = useState(false);
-  const load = () => clubId && api<PersonL>('GET', `/api/persons/${personId}/loyalty?clubId=${clubId}`).then(setD).catch((x) => setErr(errText(x)));
+  const load = () => clubId && api<PersonL>('GET', `/api/persons/${personId}/loyalty?clubId=${clubId}`).then((x) => setD(readOnly && x.enabled ? { ...x, canSpend: false, canAdjust: false } : x)).catch((x) => setErr(errText(x)));
   useEffect(() => { load(); }, [personId, clubId]);
   if (!d || !d.enabled) return err ? <div className="err">{err}</div> : null;
   const cost = spend ? spend.qty * (spend.kind === 'days' ? d.dayPricePoints : d.personalPricePoints) : 0;

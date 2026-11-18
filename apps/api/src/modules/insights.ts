@@ -9,10 +9,10 @@ import { can, requireCtx } from '../auth.ts';
 import { audit, withCtx, type Ctx, type Db } from '../db.ts';
 import { badRequest, forbidden, notFound } from '../errors.ts';
 import { PERMISSIONS as P } from '../roles.ts';
-import { aiEvaluateCall, type AiConfig } from '../lib/aiClient.ts';
-import { scriptCheckCalls } from './agentScripts.ts';
+import type { AiConfig } from '../lib/aiClient.ts';
+import { checkList, pickScript, scriptCheckCalls } from './agentScripts.ts';
 import { CAT_NAME, CATS, KPI, clientsFact, funnel, kpi, lightOf, monthInfo, normFor, norms, planFact, salesFact, targets } from './dash.ts';
-import { standardAt, type ChecklistItem } from './config.ts';
+import type { ChecklistItem } from './config.ts';
 import { timesheet } from './staffTime.ts';
 
 const isDate = (s?: string) => /^\d{4}-\d{2}-\d{2}$/.test(s ?? '');
@@ -233,30 +233,19 @@ const fmtNum = (v: number) => (Number.isInteger(v) ? String(v) : v.toFixed(1));
 async function nameOf(db: Db, id: string) { return (await db.query('select full_name from users where id = $1', [id])).rows[0]?.full_name ?? '—'; }
 
 /* ---------- оценка звонков по стандарту ---------- */
+/** Один стандарт звонка (повторная проверка CRM 18.11.2026, п. 6): РОП оценивает по тому же списку, что и Дядя Витя —
+ *  этапы скрипта звонка + пункты для всех звонков + чего нельзя говорить; версия — версия скрипта на момент звонка. */
+async function callStandard(db: Db, c: { id: string; club_id: string; started_at: string; direction: string; transcript: { text?: string } | null }) {
+  const done = (await db.query('select script_code from call_script_checks where call_id = $1', [c.id])).rows[0]?.script_code as string | undefined;
+  const cl = await checkList(db, c.club_id, done ?? pickScript(c.direction, c.transcript?.text ?? '').code, c.started_at);
+  return { id: cl.standard.id, versionNo: cl.version, title: cl.script.title,
+    items: cl.items.map((i) => ({ id: i.id, text: i.kind === 'never' ? `Не прозвучало: ${i.text}` : i.text, weight: 1 })) as ChecklistItem[] };
+}
 type EvalItem = ChecklistItem & { ok: boolean | null; comment?: string };
 export function scoreOf(items: EvalItem[]) {
   const rated = items.filter((i) => i.ok !== null);
   const w = rated.reduce((a, i) => a + i.weight, 0);
   return w ? Math.round((rated.filter((i) => i.ok).reduce((a, i) => a + i.weight, 0) / w) * 1000) / 10 : 0;
-}
-
-export async function aiEvaluateCalls(db: Db, tenantId: string, ai: AiConfig, limit = 5) {
-  const calls = (await db.query(`select c.id, c.club_id, c.user_id, c.started_at, c.transcript from calls c
-    where c.transcript is not null and c.asr_status = 'done' and c.started_at > now() - interval '30 days'
-      and not exists (select 1 from call_evaluations e where e.call_id = c.id and e.source = 'ai') order by c.started_at desc limit $1`, [limit])).rows;
-  let n = 0;
-  for (const c of calls) {
-    const std = await standardAt(db, c.club_id, c.started_at);
-    try {
-      const r = await aiEvaluateCall(ai, c.transcript, std.items.map((i) => ({ id: i.id, text: i.text })));
-      const items: EvalItem[] = std.items.map((i) => { const x = r.items?.find((y) => y.id === i.id); return { ...i, ok: typeof x?.ok === 'boolean' ? x.ok : null, comment: typeof x?.quote === 'string' ? x.quote.slice(0, 300) : undefined }; });
-      if (!items.some((i) => i.ok !== null)) continue;
-      await db.query(`insert into call_evaluations(tenant_id, club_id, call_id, user_id, standard_id, standard_version, items, score, source, engine) values ($1,$2,$3,$4,$5,$6,$7,$8,'ai',$9)
-        on conflict (call_id, source) do nothing`, [tenantId, c.club_id, c.id, c.user_id, std.id, std.versionNo, JSON.stringify(items), scoreOf(items), r.engine ?? 'ИИ-сервер']);
-      n++;
-    } catch { /* ИИ-сервер недоступен — попробуем в следующий раз */ }
-  }
-  return n;
 }
 
 /* ---------- фоновая работа ---------- */
@@ -270,7 +259,7 @@ export async function processInsights(pool: pg.Pool, ai: AiConfig | null) {
         await checkPlanAlert(db, tenantId, c.id, c.today);
         await evaluateDueRecommendations(db, c.id, c.today);
       }
-      if (ai) { await aiEvaluateCalls(db, tenantId, ai); await scriptCheckCalls(db, tenantId, ai); }
+      if (ai) await scriptCheckCalls(db, tenantId, ai); // одна оценка звонка: разбор по скрипту пишет и в «Качество звонков»
     });
   }
 }
@@ -446,13 +435,13 @@ export function insightsRoutes(app: FastifyInstance, pool: pg.Pool) {
   app.get('/api/calls/:id/evaluation', async (req) => {
     const ctx = requireCtx(req);
     return withCtx(pool, ctx, async (db) => {
-      const c = (await db.query('select id, club_id, user_id, started_at from calls where id = $1', [(req.params as { id: string }).id])).rows[0];
+      const c = (await db.query('select id, club_id, user_id, started_at, direction, transcript from calls where id = $1', [(req.params as { id: string }).id])).rows[0];
       if (!c) throw notFound('Звонок не найден');
       if (c.user_id !== ctx.userId && !can(ctx, P.aiReview)) throw forbidden();
-      const std = await standardAt(db, c.club_id, c.started_at);
+      const std = await callStandard(db, c);
       const ev = (await db.query(`select e.source, e.items, e.score::float, e.standard_version as "standardVersion", e.engine, e.comment, u.full_name as "by", e.updated_at as "at"
         from call_evaluations e left join users u on u.id = e.evaluated_by where e.call_id = $1 order by e.source`, [c.id])).rows;
-      return { standard: { versionNo: std.versionNo, items: std.items }, evaluations: ev, canEvaluate: can(ctx, P.aiReview) };
+      return { standard: { versionNo: std.versionNo, items: std.items, title: std.title }, evaluations: ev, canEvaluate: can(ctx, P.aiReview) };
     });
   });
 
@@ -462,11 +451,11 @@ export function insightsRoutes(app: FastifyInstance, pool: pg.Pool) {
     const b = (req.body ?? {}) as { items?: { id: string; ok: boolean | null; comment?: string }[]; comment?: string };
     if (!Array.isArray(b.items)) throw badRequest('Отметьте пункты чек-листа');
     return withCtx(pool, ctx, async (db) => {
-      const c = (await db.query('select id, club_id, user_id, started_at from calls where id = $1', [(req.params as { id: string }).id])).rows[0];
+      const c = (await db.query('select id, club_id, user_id, started_at, direction, transcript from calls where id = $1', [(req.params as { id: string }).id])).rows[0];
       if (!c) throw notFound('Звонок не найден');
       // Существующая оценка остаётся по своей версии стандарта, даже если стандарт уже поменяли
       const prev = (await db.query(`select standard_id, standard_version, items from call_evaluations where call_id = $1 and source = 'rop'`, [c.id])).rows[0];
-      const std = prev ? { id: prev.standard_id, versionNo: prev.standard_version, items: (prev.items as EvalItem[]).map(({ id, text, weight }) => ({ id, text, weight })) } : await standardAt(db, c.club_id, c.started_at);
+      const std = prev ? { id: prev.standard_id, versionNo: prev.standard_version, items: (prev.items as EvalItem[]).map(({ id, text, weight }) => ({ id, text, weight })) } : await callStandard(db, c);
       const items: EvalItem[] = std.items.map((i) => { const x = b.items!.find((y) => y.id === i.id); return { ...i, ok: typeof x?.ok === 'boolean' ? x.ok : null, comment: x?.comment?.trim().slice(0, 300) || undefined }; });
       if (!items.some((i) => i.ok !== null)) throw badRequest('Отметьте хотя бы один пункт');
       const score = scoreOf(items);

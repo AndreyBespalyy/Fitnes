@@ -44,6 +44,12 @@ export async function opsSettings(db: Db, clubId: string): Promise<OpsSettings> 
     excludeLowVisits: r.exclude_low_visits };
 }
 
+/** Ответ на заявку: норма клуба (срок первого ответа) и через сколько Дядя Витя передаёт заявку другому */
+export async function responseRules(db: Db, clubId: string) {
+  const r = (await db.query(`select c.first_response_minutes as f, coalesce(a.lead_reassign_minutes, 10) as l from clubs c left join agent_settings a on a.club_id = c.id where c.id = $1`, [clubId])).rows[0];
+  return { firstResponseMinutes: Number(r?.f ?? 5), leadReassignMinutes: Number(r?.l ?? 10) };
+}
+
 /** Сотрудники клуба в ролях (действующие назначения) */
 export async function staffOf(db: Db, clubId: string, roles: string[]) {
   return (await db.query(`select distinct u.id, u.full_name as name, a.role_code as role from users u join user_assignments a on a.user_id = u.id
@@ -474,12 +480,12 @@ export function salesOpsRoutes(app: FastifyInstance, pool: pg.Pool) {
   app.get('/api/sales-ops/settings', async (req) => {
     const ctx = requirePerm(req, P.crmWork);
     const { clubId } = req.query as { clubId?: string };
-    return withCtx(pool, ctx, async (db) => ({ settings: await opsSettings(db, await club(db, clubId)), canManage: can(ctx, P.planManage) || can(ctx, P.salesManage) }));
+    return withCtx(pool, ctx, async (db) => { const id = await club(db, clubId); return { settings: await opsSettings(db, id), response: await responseRules(db, id), canManage: can(ctx, P.planManage) || can(ctx, P.salesManage) }; });
   });
   app.put('/api/sales-ops/settings', async (req) => {
     const ctx = requireCtx(req);
     if (!can(ctx, P.planManage) && !can(ctx, P.salesManage)) throw forbidden('Правила отдела продаж меняют управляющий и РОП');
-    const b = (req.body ?? {}) as Partial<OpsSettings> & { clubId?: string };
+    const b = (req.body ?? {}) as Partial<OpsSettings> & { clubId?: string; firstResponseMinutes?: number; leadReassignMinutes?: number };
     const n = (v: unknown, lo: number, hi: number, msg: string) => { const x = Number(v); if (!Number.isInteger(x) || x < lo || x > hi) throw badRequest(msg); return x; };
     return withCtx(pool, ctx, async (db) => {
       const id = await club(db, b.clubId);
@@ -492,12 +498,21 @@ export function salesOpsRoutes(app: FastifyInstance, pool: pg.Pool) {
         excludeLowVisits: b.excludeLowVisits === undefined ? cur.excludeLowVisits : !!b.excludeLowVisits,
       };
       if (s.escalateMinutes <= s.remindMinutes) throw badRequest('Сигнал РОПу должен быть позже напоминания менеджеру');
+      // Ответ на заявку — одно место (повторная проверка CRM 18.11.2026, п. 3): норма клуба и «передать другому» тоже здесь
+      const rr0 = await responseRules(db, id);
+      const rr = {
+        firstResponseMinutes: b.firstResponseMinutes === undefined ? rr0.firstResponseMinutes : n(b.firstResponseMinutes, 1, 1440, 'Норма ответа на заявку: от 1 до 1440 минут'),
+        leadReassignMinutes: b.leadReassignMinutes === undefined ? rr0.leadReassignMinutes : n(b.leadReassignMinutes, 0, 240, 'Передать другому: от 0 (не передавать) до 240 минут'),
+      };
+      if (rr.firstResponseMinutes !== rr0.firstResponseMinutes) await db.query('update clubs set first_response_minutes = $2, updated_at = now() where id = $1', [id, rr.firstResponseMinutes]);
+      if (rr.leadReassignMinutes !== rr0.leadReassignMinutes) await db.query(`insert into agent_settings(club_id, tenant_id, lead_reassign_minutes, updated_by) values ($1, app_tenant(), $2, $3)
+        on conflict (club_id) do update set lead_reassign_minutes = $2, updated_by = $3, updated_at = now()`, [id, rr.leadReassignMinutes, ctx.userId]);
       await db.query(`insert into sales_ops_settings(club_id, tenant_id, remind_minutes, escalate_minutes, newbie_days, newbie_min_visits, exclude_low_visits, updated_by)
         values ($1, app_tenant(), $2,$3,$4,$5,$6,$7) on conflict (club_id) do update set remind_minutes = $2, escalate_minutes = $3, newbie_days = $4, newbie_min_visits = $5,
         exclude_low_visits = $6, updated_by = $7, updated_at = now()`,
       [id, s.remindMinutes, s.escalateMinutes, s.newbieDays, s.newbieMinVisits, s.excludeLowVisits, ctx.userId]);
-      await audit(db, ctx, 'sales_ops.settings', 'club', id, cur, s);
-      return { settings: s };
+      await audit(db, ctx, 'sales_ops.settings', 'club', id, { ...cur, ...rr0 }, { ...s, ...rr });
+      return { settings: s, response: rr };
     });
   });
 

@@ -20,7 +20,7 @@ export type Rating = {
   userId: string; name: string; score: number;
   parts: { plan: number; over: number; speed: number; discipline: number; script: number };
   facts: { planKop: number | null; factKop: number; percent: number | null; pace: number | null; expectedKop: number | null; forecastPct: number | null;
-    leadMin: number | null; msgMin: number | null; overdue: number; escalations: number; waiting: number; notDone: number; moved: number;
+    leadMin: number | null; leadNorm?: number; msgMin: number | null; overdue: number; escalations: number; waiting: number; notDone: number; moved: number;
     scriptChecks: number; scriptMisses: number; scriptAvg: number | null };
   note: string;
 };
@@ -42,6 +42,8 @@ export async function rateManagers(db: Db, clubId: string, day: string): Promise
   const tg = await targets(db, [clubId], month); const sf = await salesFact(db, [clubId], mi.from, day); const cf = await clientsFact(db, [clubId], mi.from, day);
   const weekFrom = (await db.query(`select to_char($1::date - 6, 'YYYY-MM-DD') as d`, [day])).rows[0].d as string;
   const k = await kpi(db, [clubId], weekFrom, day, ms.map((m) => m.id));
+  // Норма ответа на заявку — одна на клуб (повторная проверка CRM 18.11.2026, п. 3)
+  const leadNorm = Number((await db.query('select first_response_minutes as m from clubs where id = $1', [clubId])).rows[0]?.m ?? 5);
   const out: Rating[] = [];
   for (const m of ms) {
     const t = planFact(mi, tg, sf, cf, { userId: m.id }).total;
@@ -79,7 +81,7 @@ export async function rateManagers(db: Db, clubId: string, day: string): Promise
     const script = (ss.avg === null ? 0.5 : clamp(ss.avg / 100)) * W.script;
     // Без личного плана часть «план» считается по остальным частям, чтобы балл был сравним
     const score = Math.round(plan === null ? ((speed + discipline + script) / (W.speed + W.discipline + W.script)) * 100 : plan + over + speed + discipline + script);
-    const facts = { planKop: t.planKop, factKop: t.factKop, percent: t.percent, pace: pace === null ? null : Math.round(pace * 100), expectedKop: expected, forecastPct, leadMin, msgMin, overdue, escalations, waiting, notDone, moved,
+    const facts = { planKop: t.planKop, factKop: t.factKop, percent: t.percent, pace: pace === null ? null : Math.round(pace * 100), expectedKop: expected, forecastPct, leadMin, leadNorm, msgMin, overdue, escalations, waiting, notDone, moved,
       scriptChecks: ss.checks, scriptMisses: ss.misses, scriptAvg: ss.avg };
     out.push({ userId: m.id, name: m.name, score, parts: { plan: Math.round(plan ?? 0), over: Math.round(over), speed: Math.round(speed), discipline: Math.round(discipline), script: Math.round(script) }, facts, note: agentNote(facts) });
   }
@@ -93,7 +95,8 @@ function agentNote(f: Rating['facts']) {
   else if (f.pace < 85) bad.push(`отстаёт от графика плана на ${100 - f.pace} %${f.forecastPct !== null ? `, прогноз на месяц — ${f.forecastPct} % плана` : ''}`);
   else if (f.pace > 110) good.push(`опережает график на ${f.pace - 100} %`);
   else good.push('идёт по графику плана');
-  if (f.leadMin !== null && f.leadMin > 15) bad.push(`отвечает на заявки за ${f.leadMin} мин (норма 5)`);
+  const norm = f.leadNorm ?? 5;
+  if (f.leadMin !== null && f.leadMin > norm) bad.push(`отвечает на заявки за ${f.leadMin} мин (норма ${norm})`);
   else if (f.leadMin !== null) good.push(`быстро отвечает на заявки (${f.leadMin} мин)`);
   if (f.msgMin !== null && f.msgMin > 30) bad.push(`отвечает клиентам в переписке за ${f.msgMin} мин`);
   if (f.overdue) bad.push(`просрочено задач: ${f.overdue}`);
@@ -103,7 +106,7 @@ function agentNote(f: Rating['facts']) {
   else if (f.scriptChecks) good.push(`разговоры по скрипту (${f.scriptChecks} разобрано)`);
   const todo = f.pace !== null && f.pace < 85 ? 'Что сделать: звонки по горячему списку и продлениям каждый день, пока не догонит график.'
     : f.overdue || f.escalations ? 'Что сделать: разобрать просроченные задачи — закрыть или честно перенести.'
-      : f.leadMin !== null && f.leadMin > 15 ? 'Что сделать: брать заявки сразу, в течение 5 минут.'
+      : f.leadMin !== null && f.leadMin > norm ? `Что сделать: брать заявки сразу, в течение ${norm} мин.`
         : f.scriptMisses ? 'Что сделать: перечитать разборы звонков от Дяди Вити и пройти пропущенные этапы скрипта в следующих разговорах.' : '';
   return [good.length ? `Плюсы: ${good.join(', ')}.` : '', bad.length ? `Снижает балл: ${bad.join('; ')}.` : 'Замечаний нет.', todo].filter(Boolean).join(' ');
 }

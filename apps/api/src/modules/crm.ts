@@ -358,7 +358,7 @@ export function crmRoutes(app: FastifyInstance, pool: pg.Pool) {
     const { clubId } = req.query as { clubId?: string };
     if (!clubId) throw badRequest('Выберите клуб');
     return withCtx(pool, ctx, async (db) => (await db.query(
-      `select distinct on (u.id) u.id, u.full_name as name, r.name as role from users u
+      `select distinct on (u.id) u.id, u.full_name as name, r.name as role, a.role_code as code from users u
          join user_assignments a on a.user_id = u.id join roles r on r.code = a.role_code
         where u.status = 'active' and not u.is_bot and (a.club_id = $1 or a.club_id is null) and a.role_code <> 'admin'
           and a.active_from <= current_date and (a.active_to is null or a.active_to >= current_date)

@@ -188,7 +188,9 @@ export async function candidates(db: Db, t: { event: string; days: number; club_
   if (t.event === 'membership_ending') {
     rows = await q(`select m.person_id, p.full_name, m.id::text as k from memberships m join persons p on p.id = m.person_id
       where m.club_id = $1 and m.status = 'active' and m.ends_on > $2 and m.ends_on <= $3 and m.kind <> 'subscription'
-        and not exists (select 1 from memberships n where n.person_id = m.person_id and n.club_id = m.club_id and n.status = 'active' and n.id <> m.id and n.starts_on >= m.ends_on)`,
+        and not exists (select 1 from memberships n where n.person_id = m.person_id and n.club_id = m.club_id and n.status = 'active' and n.id <> m.id and n.starts_on >= m.ends_on)
+        -- одно правило продления (повторная проверка CRM 18.11.2026, п. 5): клиенту уже ушло предложение досрочного продления — второе напоминание не шлём
+        and not exists (select 1 from renewal_offers o where o.membership_id = m.id and o.status in ('sent', 'call'))`,
     [t.club_id, today, addDays(today, t.days)]);
   } else if (t.event === 'debt_overdue') {
     rows = await q(`select ch.person_id, p.full_name, ch.id::text as k from charges ch join persons p on p.id = ch.person_id
@@ -256,7 +258,7 @@ export async function runTriggers(db: Db, f: Fetch, actor: Actor, clubId: string
       const skip = (reason: string) => r.skipped.push({ personId: c.personId, name: c.name, reason });
       if (p.messaging_opt_out) { skip('клиент отписался от сообщений'); continue; }
       if (t.marketing && !p.marketing_consent) { skip('нет согласия на рекламные сообщения'); continue; }
-      const week = Number((await db.query(`select count(*) from msg_trigger_sends where person_id = $1 and club_id = $2 and created_at > now() - interval '7 days'`, [c.personId, clubId])).rows[0].count);
+      const week = await autoSentWeek(db, c.personId, clubId);
       if (week >= s.max_auto_per_week) { skip(`лимит: уже ${week} автосообщ. за неделю`); continue; }
       const conv = await conversationFor(db, actor, c.personId, clubId, !o.dryRun);
       if (!conv) { skip('нет мессенджера: клиент не писал в Telegram и в клубе не подключён WhatsApp'); continue; }
@@ -272,6 +274,24 @@ export async function runTriggers(db: Db, f: Fetch, actor: Actor, clubId: string
     }
   }
   return out;
+}
+
+/** Общий недельный лимит автосообщений клиенту (повторная проверка CRM 18.11.2026, п. 8).
+ *  Раньше лимит «не больше N в неделю» считали только автосообщения и правила, а возврат клиентов, досрочное продление
+ *  и опросы писали мимо него. Теперь считаются все рассылки по инициативе клуба; ответы бота и напоминания о записи — нет. */
+export async function autoSentWeek(db: Db, personId: string, clubId: string) {
+  return Number((await db.query(`select
+      (select count(*) from msg_trigger_sends where person_id = $1 and club_id = $2 and created_at > now() - interval '7 days')
+    + (select count(*) from rule_actions where person_id = $1 and club_id = $2 and action = 'message' and result = 'done' and created_at > now() - interval '7 days')
+    + (select count(*) from campaign_members where person_id = $1 and club_id = $2 and message_id is not null and created_at > now() - interval '7 days')
+    + (select count(*) from renewal_offers where person_id = $1 and club_id = $2 and message_id is not null and created_at > now() - interval '7 days')
+    + (select count(*) from surveys where person_id = $1 and club_id = $2 and message_id is not null and created_at > now() - interval '7 days') as n`, [personId, clubId])).rows[0].n);
+}
+/** Причина не писать: лимит исчерпан (текст для журнала) или null */
+export async function autoLimitReason(db: Db, personId: string, clubId: string) {
+  const limit = Number((await db.query('select max_auto_per_week from club_msg_settings where club_id = $1', [clubId])).rows[0]?.max_auto_per_week ?? 2);
+  const week = await autoSentWeek(db, personId, clubId);
+  return week >= limit ? `лимит: уже ${week} автосообщ. за неделю` : null;
 }
 
 /* ---------- фоновая работа ---------- */

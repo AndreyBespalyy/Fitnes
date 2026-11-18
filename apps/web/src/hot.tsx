@@ -21,7 +21,7 @@ export function HotPage({ me, clubs, clubId, openPerson }: { me: Me; clubs: Club
   const club = clubId !== 'all' ? clubId : clubs[0]?.id ?? '';
   return (
     <>
-      <div className="tabs" role="group" aria-label="ИИ-помощник">{tabs.filter((t) => t[2]).map(([k, t]) => <button key={k} aria-pressed={tab === k} onClick={() => setTab(k)}>{t}</button>)}</div>
+      <div className="tabs" role="group" aria-label="Дядя Витя">{tabs.filter((t) => t[2]).map(([k, t]) => <button key={k} aria-pressed={tab === k} onClick={() => setTab(k)}>{t}</button>)}</div>
       <p className="small muted" style={{ margin: 0 }}>Рекомендации ИИ: основание, период и уверенность указаны. Цены — по действующему прейскуранту клуба, ИИ их не меняет.</p>
       {tab === 'day' && club && <DayPlan clubId={club} openPerson={openPerson} />}
       {tab === 'list' && <HotList me={me} clubId={clubId} openPerson={openPerson} />}
@@ -66,7 +66,7 @@ type Day = {
   targets: { calls: number | null; meetings: number | null }; tasks: { overdue: number; today: number; reviews: number }; meetings: { at: string; name: string }[];
   callFirst: HotRow[]; byKind: Record<string, number>; blocks: { from: string; to: string; title: string; detail: string }[]; basis: string[]; confidence: string; own: boolean;
 };
-function DayPlan({ clubId, openPerson }: { clubId: string; openPerson: (id: string) => void }) {
+export function DayPlan({ clubId, openPerson }: { clubId: string; openPerson: (id: string) => void }) {
   const [d, setD] = useState<Day | null>(null);
   const [err, setErr] = useState('');
   const hintsOf = useUpsell(d?.callFirst);
@@ -107,8 +107,10 @@ function HotList({ me, clubId, openPerson }: { me: Me; clubId: string; openPerso
   };
   useEffect(() => { load(); }, [clubId, kind, seg, mine]);
   const recompute = async () => {
-    if (clubId === 'all') { toast('Выберите клуб'); return; }
-    try { await api('POST', '/api/ai/scores/recompute', { clubId }); toast('Оценки пересчитаны'); load(); } catch (x) { toast(errText(x)); }
+    // «Все клубы»: пересчитываем каждый клуб, а не просим выбрать вверху (повторная проверка CRM 18.11.2026, п. 15)
+    try {
+      const ids = clubId === 'all' ? (await api<{ id: string }[]>('GET', '/api/clubs')).map((c) => c.id) : [clubId];
+      for (const id of ids) await api('POST', '/api/ai/scores/recompute', { clubId: id }); toast('Оценки пересчитаны'); load(); } catch (x) { toast(errText(x)); }
   };
   const model = d?.models.find((m) => m.clubId === clubId) ?? d?.models[0];
   const hintsOf = useUpsell(d?.rows);
