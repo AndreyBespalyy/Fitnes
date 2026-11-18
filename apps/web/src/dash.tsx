@@ -1,5 +1,6 @@
 // Шаг 13. Рабочий стол из виджетов: дашборды собственника, управляющего, РОПа и менеджера,
 // план продаж по клубу и менеджерам, нормы KPI, отчёт по продажам, словарь метрик, выгрузки.
+import { MyTaskCalendar } from './taskCalendar.tsx';
 import { PlanDrill } from './insights.tsx';
 import { MyDay } from './myDay.tsx';
 import { useClubPick } from './clubPick.tsx';
@@ -70,6 +71,7 @@ export function DashPage({ me, clubs, clubId, openPerson, go: goTo, canGo, pickC
       </div>
       {drill && <PlanDrill clubId={drill.clubId} month={drill.month} category={drill.category} userId={drill.userId} onClose={() => setDrill(null)} openPerson={openPerson} />}
       {view === 'desk' && me.roles.some((r) => r.code === 'manager') && <MyDay me={me} clubs={clubs} clubId={clubId} openPerson={openPerson} />}
+      {view === 'desk' && can(me, 'crm.work') && canGo('tasks') && <MyTaskCalendar clubId={clubId} onPick={(day) => goTo({ tab: 'tasks', p: { day } })} />}
       {view === 'desk' && (layout.widgets.length ? layout.widgets.map((w) => <Widget key={`${w}-${clubId}`} exportable={office} id={w} q={q} tick={tick} metrics={metrics} openPerson={openPerson} nav={nav} pickClub={pickClub}
         onDrill={(x) => { const c = club?.id ?? (clubs.length === 1 ? clubs[0].id : null); if (!c) { toast('Выберите клуб вверху страницы, чтобы раскрыть цифру до клиентов'); return; } setDrill({ ...x, month, clubId: c }); }}
         title={layout.available.find((a) => a.id === w)?.title ?? w} />)

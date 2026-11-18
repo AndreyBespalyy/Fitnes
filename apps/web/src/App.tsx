@@ -242,7 +242,8 @@ function Shell({ me, onLogout }: { me: Me; onLogout: () => void }) {
     ['processes', 'Бизнес-процессы', true],
     ['weekly', 'Разбор недели', can(me, 'dash.view') || can(me, 'crm.view_all')],
     ['learn', 'Чему научился Дядя Витя', can(me, 'dash.view') || can(me, 'crm.view_all')],
-    ['hot', 'Кому звонить', can(me, 'crm.work')],
+    // «Кому звонить» и «Звонки» — один раздел «Звонки» (замечание №42): списки, кому звонить, и записи разговоров вкладками
+    ['hot', 'Звонки', can(me, 'crm.work')],
     ['calls', 'Звонки', can(me, 'crm.work')],
     ['sales', 'Отдел продаж', can(me, 'crm.work')],
     ['schedule', 'Расписание', can(me, 'schedule.book')],

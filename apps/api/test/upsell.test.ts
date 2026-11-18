@@ -73,6 +73,13 @@ test('частый гость — абонемент; ходит днём — д
   const lt = (await hints('c', r)).find((x) => x.key === 'longer_term')!;
   assert.match(lt.text, /Годовой безлимит/);
 
+  // Доплата по абонементу (замечание №43): полгода куплены месяц назад, ходит часто — перейти на год с зачётом остатка
+  const u = await client('c');
+  await sell('c', u, 'Полгода безлимит', 30);
+  await visits('c', u, [[1, 18], [4, 18], [8, 18], [12, 18]]);
+  const up = (await hints('c', u)).find((x) => x.key === 'upgrade_pay')!;
+  assert.match(up.text, /осталось \d+ (день|дня|дней).*«Годовой безлимит» с доплатой \d/);
+
   const b = await req('POST', '/api/upsell/batch', 'm.volkova', { clubId: clubs.c, personIds: [g, r] });
   assert.equal(b.statusCode, 200);
   assert.ok(b.json()[g].length && b.json()[r].length);
