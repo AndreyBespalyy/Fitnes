@@ -308,6 +308,8 @@ export function PersonCard({ me: meIn, id, onClose }: { me: Me; id: string; onCl
   const [meetAt, setMeetAt] = useState(localInput(24 * 60));
   const [doingTask, setDoingTask] = useState<string | null>(null);
   const [addTask, setAddTask] = useState(false);
+  // «Купил» в сделке — сначала продажа абонемента, сделка закроется сама после «Оформить» (замечание №33)
+  const [sellFor, setSellFor] = useState<{ oppId: string; stage: Stage; n: number } | null>(null);
   const reload = () => api<Card>('GET', `/api/persons/${id}`).then(setCard).catch((x) => setErr(errText(x)));
   useEffect(() => { reload(); }, [id]);
   useEffect(() => { const k = (e: KeyboardEvent) => e.key === 'Escape' && onClose(); window.addEventListener('keydown', k); return () => window.removeEventListener('keydown', k); }, []);
@@ -356,7 +358,8 @@ export function PersonCard({ me: meIn, id, onClose }: { me: Me; id: string; onCl
             marketingConsent={card.person.marketingConsent} optOut={card.person.messagingOptOut} reload={reload} />}
           {work && <PersonCallFlags personId={card.person.id} />}
           {sales && !viewOnly && <UpsellBlock personId={card.person.id} clubId={card.person.homeClubId} />}
-          <MembershipsBlock me={me} personId={card.person.id} homeClubId={card.person.homeClubId} />
+          <MembershipsBlock me={me} personId={card.person.id} homeClubId={card.person.homeClubId} sellNow={sellFor?.n ?? 0}
+            onSold={() => { if (sellFor) { const f = sellFor; setSellFor(null); doMove(f.oppId, f.stage, false); } }} onSellCancel={() => setSellFor(null)} />
           {money && <FamilyBlock me={me} personId={card.person.id} clubId={card.person.homeClubId} readOnly={viewOnly} />}
           {money && <DepositBlock personId={card.person.id} clubId={card.person.homeClubId} readOnly={viewOnly} />}
           {money && <LoyaltyBlock personId={card.person.id} clubId={card.person.homeClubId} readOnly={viewOnly} />}
@@ -375,6 +378,7 @@ export function PersonCard({ me: meIn, id, onClose }: { me: Me; id: string; onCl
               {move?.oppId === o.id && (
                 <div className="item" style={{ display: 'grid', gap: 8 }}>
                   <b>Перевести на этап «{move.stage.name}»</b>
+                  {move.stage.kind === 'won' && can(me, 'memberships.sell') && <span className="small">Клиент купил — оформите абонемент: после продажи сделка сама перейдёт на «{move.stage.name}».</span>}
                   {move.stage.kind === 'lost' && <label className="f">Причина отказа (обязательно)<input value={reason} onChange={(e) => setReason(e.target.value)} placeholder="дорого, переехал, выбрал другой клуб" /></label>}
                   {move.stage.kind === 'open' && (
                     <div className="grid2" style={{ gridTemplateColumns: 'repeat(auto-fit,minmax(170px,1fr))' }}>
@@ -382,7 +386,10 @@ export function PersonCard({ me: meIn, id, onClose }: { me: Me; id: string; onCl
                       <label className="f">Когда<input type="datetime-local" value={taskDue} onChange={(e) => setTaskDue(e.target.value)} /></label>
                     </div>)}
                   <div className="row">
-                    <button className="btn pri sm" onClick={() => doMove(o.id, move.stage, move.stage.kind === 'open')}>Перевести</button>
+                    {move.stage.kind === 'won' && can(me, 'memberships.sell')
+                      ? <><button className="btn pri sm" onClick={() => { setSellFor({ oppId: o.id, stage: move.stage, n: Date.now() }); setMove(null); }}>Оформить абонемент</button>
+                          <button className="btn sm" onClick={() => doMove(o.id, move.stage, false)}>Уже оформлен, перевести</button></>
+                      : <button className="btn pri sm" onClick={() => doMove(o.id, move.stage, move.stage.kind === 'open')}>Перевести</button>}
                     {move.stage.kind === 'open' && <button className="btn sm" onClick={() => doMove(o.id, move.stage, false)}>Без новой задачи</button>}
                     <button className="btn sm" onClick={() => setMove(null)}>Отмена</button>
                   </div>

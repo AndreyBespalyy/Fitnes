@@ -1,7 +1,7 @@
 // Шаг 6. Раздел «Тарифы» (настройки клуба, тарифы и цены) и абонементы в карточке клиента.
 import { LoyaltySettings } from './loyalty.tsx';
 import { ToConfig } from './toConfig.tsx';
-import { Fragment, useEffect, useState, type FormEvent } from 'react';
+import { Fragment, useEffect, useRef, useState, type FormEvent } from 'react';
 import { PayLinkButton } from './payments.tsx';
 import { PayerPick, SeatPick, SeatsLine, type PayerValue } from './familyCorp.tsx';
 import { api, can, type Club, type Me } from './api.ts';
@@ -132,7 +132,8 @@ function Products({ club, manage }: { club: Club; manage: boolean }) {
   const [hist, setHist] = useState<string | null>(null);
   const kinds = club.salesModel === 'term' ? ['term', 'visits', 'personal', 'guest'] : ['subscription', 'visits', 'personal', 'guest'];
   const [f, setF] = useState({ kind: kinds[0], name: '', price: '', durationDays: 30, visitsCount: 10, validityDays: 60, installmentsAllowed: false, freezeAllowed: true, networkAccess: false, accessFrom: '', accessTo: '', familySeats: 0 });
-  const reload = () => api<Product[]>('GET', `/api/products?clubId=${club.id}`).then(setList).catch((x) => setErr(errText(x)));
+  // Кто не меняет тарифы (менеджер, ресепшн), видит только то, что сейчас в продаже (замечание №36)
+  const reload = () => api<Product[]>('GET', `/api/products?clubId=${club.id}${manage ? '' : '&active=1'}`).then(setList).catch((x) => setErr(errText(x)));
   useEffect(() => { reload(); }, [club.id]);
   const act = async (fn: () => Promise<unknown>, ok: string) => { setErr(''); try { await fn(); toast(ok); reload(); return true; } catch (x) { setErr(errText(x)); return false; } };
   const add = async (e: FormEvent) => {
@@ -201,7 +202,9 @@ function Products({ club, manage }: { club: Club; manage: boolean }) {
 }
 
 /* ---------------- Абонементы в карточке клиента ---------------- */
-export function MembershipsBlock({ me, personId, homeClubId }: { me: Me; personId: string; homeClubId: string | null }) {
+// sellNow — снаружи просят открыть продажу (сделку перевели на «Купил», замечание №33); onSold — продажа оформлена.
+export function MembershipsBlock({ me, personId, homeClubId, sellNow = 0, onSold, onSellCancel }: { me: Me; personId: string; homeClubId: string | null;
+  sellNow?: number; onSold?: () => void; onSellCancel?: () => void }) {
   const [ms, setMs] = useState<Membership[] | null>(null);
   const [err, setErr] = useState('');
   const [sell, setSell] = useState(false);
@@ -240,10 +243,12 @@ export function MembershipsBlock({ me, personId, homeClubId }: { me: Me; personI
     setProducts(all.length ? all : await api<Product[]>('GET', '/api/products?active=1').catch(() => []));
     setProductId(''); setInst(1);
   };
+  const box = useRef<HTMLDivElement>(null);
+  useEffect(() => { if (sellNow && canSell) { openSell(); setTimeout(() => box.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 50); } }, [sellNow]);
   const prod = products.find((p) => p.id === productId);
   if (!can(me, 'memberships.view')) return null;
   return (
-    <div className="card" style={{ display: 'grid', gap: 8 }}>
+    <div className="card" ref={box} style={{ display: 'grid', gap: 8 }}>
       <div className="row between"><h2>Абонементы и подписки</h2>{canSell && !sell && <button className="btn sm pri" onClick={openSell}>+ Продать</button>}</div>
       {err && <div className="err">{err}</div>}
       {sell && (
@@ -262,8 +267,8 @@ export function MembershipsBlock({ me, personId, homeClubId }: { me: Me; personI
             : <PayerPick personId={personId} clubId={prod?.clubId} kind={prod?.kind} onChange={setPayer} />}
           <SaleDiscount key={productId} personId={personId} product={prod} clubId={prod?.clubId} onChange={setDiscount} />
           <div className="row">
-            <button className="btn pri sm" disabled={!productId} onClick={() => act(() => api('POST', '/api/memberships', { personId, productId, installments: inst, ...discount, ...(prod?.familySeats ? { familyPersonIds: seatIds } : payer) }), `Продано: ${prod?.name}. Платёж ждёт оплаты`)}>Оформить</button>
-            <button className="btn sm" onClick={() => setSell(false)}>Отмена</button>
+            <button className="btn pri sm" disabled={!productId} onClick={() => act(async () => { await api('POST', '/api/memberships', { personId, productId, installments: inst, ...discount, ...(prod?.familySeats ? { familyPersonIds: seatIds } : payer) }); onSold?.(); }, `Продано: ${prod?.name}. Платёж ждёт оплаты`)}>Оформить</button>
+            <button className="btn sm" onClick={() => { setSell(false); onSellCancel?.(); }}>Отмена</button>
           </div>
         </div>)}
       {ms === null ? <p className="muted" style={{ margin: 0 }}>Загрузка…</p> : ms.length === 0 ? <p className="muted" style={{ margin: 0 }}>Абонементов нет.</p> : ms.map((m) => {

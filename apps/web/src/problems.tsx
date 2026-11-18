@@ -15,6 +15,9 @@ const rub = (kop: number | null) => (kop ? `${Math.round(kop / 100).toLocaleStri
 export function ProblemsPage({ clubs, clubId, go, canGo, openPerson }: { me: Me; clubs: Club[]; clubId: string; go: (g: Go) => void; canGo: (t: string) => boolean; openPerson: (id: string) => void }) {
   const [d, setD] = useState<Data | null>(null);
   const [err, setErr] = useState('');
+  // Плитка «Требуют внимания» нажимается: оставляет в списке только пункты, где что-то есть, и ведёт к ним (замечание №27)
+  const [onlyOn, setOnlyOn] = useState(false);
+  const showOn = () => { setOnlyOn((v) => !v); setTimeout(() => document.getElementById('prob-groups')?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 50); };
   useEffect(() => {
     setD(null); setErr('');
     api<Data>('GET', `/api/problems?clubId=${encodeURIComponent(clubId)}`).then(setD).catch((e) => setErr(errText(e)));
@@ -32,15 +35,20 @@ export function ProblemsPage({ clubs, clubId, go, canGo, openPerson }: { me: Me;
       {!d && !err && <p className="muted">Загрузка…</p>}
       {d && (
         <div className="kpis">
-          <div className="card kpi-c"><span className="lbl">Требуют внимания</span><b className={`num ${d.total ? 'bad' : ''}`}>{d.total}</b><span className="small muted">из {d.items.length} проверок</span></div>
+          <div className={`card kpi-c click ${onlyOn ? 'on' : ''}`} onClick={showOn} role="button" tabIndex={0} onKeyDown={(e) => { if (e.key === 'Enter') showOn(); }}
+            title={onlyOn ? 'Показать все проверки' : 'Показать только то, что требует внимания'}>
+            <span className="lbl">Требуют внимания</span><b className={`num ${d.total ? 'bad' : ''}`}>{d.total}</b>
+            <span className="small muted">{onlyOn ? 'показаны только они · нажмите, чтобы вернуть все' : `из ${d.items.length} проверок · нажмите, чтобы показать`}</span></div>
           {d.items.filter((i) => i.moneyKop).slice(0, 3).map((i) => (
             <div key={i.id} className={`card kpi-c ${canGo(i.go.tab) ? 'click' : ''}`} onClick={() => open(i)} role={canGo(i.go.tab) ? 'button' : undefined} tabIndex={canGo(i.go.tab) ? 0 : undefined}>
               <span className="lbl">{i.title}</span><b className="num bad">{rub(i.moneyKop)}</b><span className="small muted">{i.value} шт.</span>
             </div>))}
         </div>
       )}
+      <div id="prob-groups" />
+      {d && onlyOn && d.total === 0 && <p className="muted">Сейчас ничего не требует внимания.</p>}
       {d && GROUPS.map(([g, title]) => {
-        const list = d.items.filter((i) => i.group === g);
+        const list = d.items.filter((i) => i.group === g && (!onlyOn || (i.value ?? 0) > 0));
         if (!list.length) return null;
         return (
           <div key={g} className="card">

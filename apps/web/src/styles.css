@@ -65,7 +65,7 @@ input,select.f{width:100%;border:1px solid var(--line);background:var(--surface)
 .opt[aria-pressed="true"]{border-color:var(--accent);background:var(--accent-soft)}
 .secret{font-family:var(--f-num);font-size:18px;font-weight:600;background:var(--surface-2);padding:8px 12px;border-radius:8px;user-select:all}
 .toast{position:fixed;left:50%;bottom:24px;transform:translateX(-50%);background:var(--ink);color:var(--bg);padding:10px 16px;border-radius:10px;font-weight:600;z-index:30;max-width:calc(100% - 32px)}
-.board{display:grid;grid-auto-flow:column;grid-auto-columns:minmax(230px,1fr);gap:10px;overflow-x:auto;padding-bottom:6px}
+.board{display:grid;grid-auto-flow:column;grid-auto-columns:minmax(165px,1fr);gap:10px;overflow-x:auto;padding-bottom:6px}
 .col{background:var(--surface-2);border-radius:var(--r);padding:8px;display:grid;gap:8px;align-content:start;min-height:120px}
 .col h3{font-size:12px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);display:flex;justify-content:space-between;padding:2px 4px}
 .col.won h3{color:var(--ok)} .col.lost h3{color:var(--bad)}
@@ -669,3 +669,6 @@ input[type="checkbox"],input[type="radio"]{accent-color:var(--accent)}
 .msgr.wa{border-color:color-mix(in srgb,#25d366 55%,transparent)}
 .msgr.tg{border-color:color-mix(in srgb,#2aabee 55%,transparent)}
 .msgr span[aria-hidden]{font-size:.9em}
+
+/* Счётчики в меню (замечание №44) */
+.nv-n{color:var(--accent);font-weight:800;font-family:var(--f-num)}
