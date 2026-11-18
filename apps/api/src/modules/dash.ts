@@ -82,13 +82,15 @@ export const WIDGETS: W[] = [
   { id: 'system', title: 'Система', description: 'Клубы, подключение, сотрудники без роли и с временным паролем, обращения в поддержку, перенос из 1С, состояние системы', perm: P.clubsManage, network: true },
   { id: 'protection', title: 'Защита данных', description: 'Неразобранные сигналы о всплесках просмотров, запросы на большие выгрузки, обращения клиентов по персональным данным', perm: P.dataProtect },
   { id: 'my_plan', title: 'Мой план', description: 'Личный план на месяц и на сегодня, факт, процент, дефицит по категориям', perm: P.crmWork },
+  { id: 'my_month', title: 'Мой месяц', description: 'План и факт месяца, новые клиенты, рекурренты, тренер хаб, продления, звонки и диалоги — одним взглядом', perm: P.crmWork },
   { id: 'my_kpi', title: 'Мои показатели', description: 'Мои звонки, встречи, продажи и задачи за сегодня в сравнении с нормой', perm: P.crmWork },
 ];
 const ROLE_DEFAULTS: Record<string, string[]> = {
   owner: ['clubs', 'day', 'plan', 'risks', 'nps', 'retention', 'protection'],
   gm: ['club_today', 'day', 'plan', 'risks', 'retention', 'team', 'nps', 'kpi', 'protection'],
   rop: ['team', 'my_day', 'retention', 'funnel_managers', 'funnel_sources', 'kpi', 'my_plan'],
-  manager: ['my_day', 'my_plan', 'my_kpi'],
+  // «Мой месяц» сразу после «Моего дня» (замечание №34): план, факт, новые, рекурренты, тренер хаб, продления, звонки и диалоги
+  manager: ['my_day', 'my_month', 'my_plan', 'my_kpi'],
   desk: ['desk_day'],
   fin: ['fin_day', 'day', 'plan', 'risks'],
   trainer: ['trainer_day'],
@@ -318,6 +320,26 @@ export async function widgetData(db: Db, ctx: Ctx, id: string, q: Q) {
     const [tg, sf, cf] = await Promise.all([targets(db, ids, month), salesFact(db, ids, mi.from, mi.current ? t : mi.to), clientsFact(db, ids, mi.from, mi.current ? t : mi.to)]);
     const pf = planFact(mi, tg, sf, cf, id === 'my_plan' ? { userId: ctx.userId } : {});
     return { ...base, daysInMonth: mi.days, daysPassed: mi.passed, ...pf, personal: id === 'my_plan' };
+  }
+
+  // «Мой месяц» менеджера (замечание №34)
+  if (id === 'my_month') {
+    const to = mi.current ? t : mi.to;
+    const [tg, sf, cf] = await Promise.all([targets(db, ids, month), salesFact(db, ids, mi.from, to), clientsFact(db, ids, mi.from, to)]);
+    const pf = planFact(mi, tg, sf, cf, { userId: ctx.userId });
+    const n = (cat: string) => cf.filter((x) => x.category === cat && x.userId === ctx.userId).reduce((a, x) => a + x.n, 0);
+    const local = (col: string) => `${col} >= ($2::date)::timestamp at time zone c.timezone and ${col} < ($3::date + 1)::timestamp at time zone c.timezone`;
+    const x = (await db.query(`select
+        (select count(*) from memberships m join clubs c on c.id = m.club_id where m.club_id = any($1) and m.kind = 'subscription' and m.status = 'active' and m.created_by = $4)::int as recurring,
+        (select count(*) from opportunities o join pipelines pl on pl.id = o.pipeline_id join clubs c on c.id = o.club_id
+          where o.club_id = any($1) and pl.name = 'Тренер хаб' and o.owner_id = $4 and o.status = 'won' and ${local('o.closed_at')})::int as "hubWon",
+        (select count(*) from opportunities o join pipelines pl on pl.id = o.pipeline_id where o.club_id = any($1) and pl.name = 'Тренер хаб' and o.owner_id = $4 and o.status = 'open')::int as "hubOpen",
+        (select count(*) from calls k join clubs c on c.id = k.club_id where k.club_id = any($1) and k.user_id = $4 and ${local('k.started_at')})::int as calls,
+        (select count(distinct m.conversation_id) from msg_messages m join clubs c on c.id = m.club_id where m.club_id = any($1) and m.author_id = $4 and m.direction = 'out' and ${local('m.created_at')})::int as dialogs`,
+      [ids, mi.from, to, ctx.userId])).rows[0];
+    return { ...base, month, planKop: pf.total.planKop, factKop: pf.total.factKop, percent: pf.total.percent, light: pf.total.light,
+      newClients: n('new'), renewals: n('renewal'), returns: n('return'), subscriptions: n('subscription'), recurring: x.recurring,
+      trainerHub: { won: x.hubWon, open: x.hubOpen }, calls: x.calls, dialogs: x.dialogs };
   }
 
   if (id === 'team') {

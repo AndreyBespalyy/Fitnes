@@ -254,7 +254,7 @@ function Shell({ me, onLogout }: { me: Me; onLogout: () => void }) {
     ['access', 'Проходы и турникеты', can(me, 'acs.work') || can(me, 'acs.manage')],
     ['clubs', 'Клубы', can(me, 'clubs.manage')],
     ['tariffs', 'Тарифы', can(me, 'tariffs.manage') || can(me, 'memberships.sell')],
-    ['shop', 'Товары', can(me, 'tariffs.manage') || can(me, 'memberships.sell') || can(me, 'shifts.work')],
+    ['shop', 'Товары и услуги', can(me, 'tariffs.manage') || can(me, 'memberships.sell') || can(me, 'shifts.work')],
     ['desk', 'Ресепшн', can(me, 'acs.work')],
     ['trainer', can(me, 'memberships.sell') ? 'Столы тренеров' : 'Мой день', can(me, 'schedule.book') && (!can(me, 'memberships.sell') || can(me, 'schedule.manage'))],
     ['corp', 'Компании', can(me, 'tariffs.manage') || can(me, 'finance.work') || can(me, 'crm.view_all') || can(me, 'memberships.sell')],

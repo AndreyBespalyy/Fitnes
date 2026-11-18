@@ -32,7 +32,8 @@ test('у клубов есть готовые воронки по своей м�
 test('новый клуб из мастера сразу получает воронки', async () => {
   const club = (await req('POST', '/api/clubs', adm, { name: 'Клуб «Тест»', salesModel: 'subscription' })).json();
   const p = (await req('GET', `/api/pipelines?clubId=${club.id}`, adm)).json();
-  assert.equal(p.length, 4);
+  assert.equal(p.length, 5); // четыре подписочных + «Тренер хаб» (замечание №34)
+  assert.ok(p.some((x: { name: string }) => x.name === 'Тренер хаб'));
 });
 
 test('лид: создаётся клиент, сделка, назначение менеджеру и задача первого ответа', async () => {
