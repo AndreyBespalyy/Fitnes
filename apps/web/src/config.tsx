@@ -5,6 +5,12 @@ import { useClubPick } from './clubPick.tsx';
 import { api, type Club, type Me } from './api.ts';
 import { errText, toast } from './ui.ts';
 import { RulesDiff, RulesEditor, RulesJournal, type Rule } from './rulesEditor.tsx';
+import { can, navParams } from './api.ts';
+import { Settings as SalesOpsSettings } from './salesOps.tsx';
+import { NormsEditor } from './dash.tsx';
+import { AgentSettingsCard } from './agent.tsx';
+/** Эти разделы правятся во вкладке «Продажи» (сразу, с историей), а не через черновик и утверждение */
+const HIDDEN = ['club', 'kpi'];
 
 type Field = { path: string; section: string; label: string; type: 'int' | 'num' | 'bool' | 'text' | 'checklist' | 'money' | 'rules'; min?: number; max?: number; unit?: string; nullable?: boolean; hint?: string };
 type Item = { id: string; text: string; weight: number };
@@ -17,7 +23,7 @@ type Cfg = { live: Record<string, unknown>; fields: Field[]; sections: { id: str
 type VersionFull = Version & { diff: Diff[]; checks: Checks | null; checksCurrent: boolean; approvedCurrent: boolean; differsFromLive: number; canApprove: boolean };
 
 const STATUS: Record<string, [string, string]> = { draft: ['черновик', ''], approved: ['утверждена', 'ok'], published: ['рабочая', 'ok'], superseded: ['была рабочей', ''], rejected: ['отклонена', 'bad'] };
-const SOURCE: Record<string, string> = { human: 'вручную', ai: 'ИИ-помощник', preset: 'готовый набор', rollback: 'откат', initial: 'исходные' };
+const SOURCE: Record<string, string> = { human: 'вручную', ai: 'Дядя Витя', preset: 'готовый набор', rollback: 'откат', initial: 'исходные' };
 const get = (o: unknown, path: string) => path.split('.').reduce<unknown>((x, k) => (x && typeof x === 'object' ? (x as Record<string, unknown>)[k] : undefined), o);
 const dt = (s: string | null) => (s ? new Date(s).toLocaleString('ru-RU', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : '—');
 function show(f: Field | undefined, v: unknown): string {
@@ -28,21 +34,81 @@ function show(f: Field | undefined, v: unknown): string {
   return `${v}${f?.unit ? ` ${f.unit}` : ''}`;
 }
 
+// Все настройки клуба в одном разделе (повторная проверка CRM 18.11.2026, п. 4): вкладки «Продажи», «Абонементы, сообщения, правила»
+// (только здесь — черновик и утверждение: деньги и правила для клиентов), «Другие настройки» и «История изменений» по всем настройкам.
+type Page = 'sales' | 'rules' | 'other' | 'history';
 export function ConfigPage({ me, clubs, clubId }: { me: Me; clubs: Club[]; clubId: string }) {
   const [club, clubChips] = useClubPick(clubs, clubId);
+  const full = can(me, 'config.manage');
+  const [page, setPage] = useState<Page>(() => { const v = navParams('config').view as Page; return ['sales', 'rules', 'other', 'history'].includes(v) && (full || v === 'sales' || v === 'history') ? v : full ? 'rules' : 'sales'; });
+  if (!club) return <div className="card"><p style={{ margin: 0 }}>Клубов пока нет.</p></div>;
+  const tabs: [Page, string, boolean][] = [['rules', 'Абонементы, сообщения, правила', full], ['sales', 'Продажи', true], ['other', 'Другие настройки', full], ['history', 'История изменений', true]];
+  const go = (url: string) => window.dispatchEvent(new CustomEvent('crm-go', { detail: url }));
+  return (
+    <div style={{ display: 'grid', gap: 12 }}>
+      {clubChips}
+      <div className="tabs" role="group" aria-label="Настройки клуба" style={{ flexWrap: 'wrap' }}>
+        {tabs.filter((t) => t[2]).map(([k, t]) => <button key={k} aria-pressed={page === k} onClick={() => setPage(k)}>{t}</button>)}</div>
+      {page === 'rules' && full && <VersionedSettings key={club.id} club={club} />}
+      {page === 'sales' && <div style={{ display: 'grid', gap: 12 }}>
+        <p className="small muted" style={{ margin: 0 }}>Правила отдела продаж меняются сразу, каждое изменение — в «Истории изменений». Меняют РОП, управляющий и собственник.</p>
+        <SalesOpsSettings key={`s${club.id}`} clubId={club.id} />
+        <NormsEditor key={`n${club.id}`} club={club} />
+        <AgentSettingsCard key={`a${club.id}`} clubId={club.id} />
+        <div className="card row between" style={{ gap: 8, flexWrap: 'wrap' }}><span>Скрипты звонков: этапы, что говорить и что проверяет Дядя Витя.</span>
+          <button className="btn sm" onClick={() => go('/?tab=sales&view=scripts')}>Открыть скрипты</button></div>
+      </div>}
+      {page === 'other' && full && <div className="card" style={{ display: 'grid', gap: 8 }}>
+        <p className="small muted" style={{ margin: 0 }}>Настройки, которые живут рядом со своей работой. Каждое изменение тоже попадает в «Историю изменений».</p>
+        {OTHER.map(([t, d, url]) => <div key={url} className="row between" style={{ gap: 8, flexWrap: 'wrap' }}><span><b>{t}</b><br /><span className="small muted">{d}</span></span>
+          <button className="btn sm" onClick={() => go(url)}>Изменить</button></div>)}
+      </div>}
+      {page === 'history' && <ChangesHistory key={`h${club.id}`} clubId={club.id} />}
+    </div>
+  );
+}
+
+const OTHER: [string, string, string][] = [
+  ['Каналы сообщений', 'Telegram, WhatsApp, бот клиента', '/?tab=messaging'],
+  ['Досрочное продление и опросы', 'текст предложения, звонок без мессенджера, опросы после визитов', '/?tab=retention&view=early'],
+  ['Бонусная программа', 'баллы, уровни, сгорание', '/?tab=retention&view=referrals'],
+  ['Расписание', 'запись, отмена, лист ожидания', '/?tab=schedule'],
+  ['Проходы', 'турникеты и правила прохода', '/?tab=access'],
+  ['Телефония', 'номера и запись разговоров', '/?tab=telephony'],
+];
+
+function ChangesHistory({ clubId }: { clubId: string }) {
+  const [rows, setRows] = useState<{ id: string; action: string; title: string; at: string; by: string | null; versionNo: number | null; before: unknown; after: unknown }[] | null>(null);
+  const [err, setErr] = useState('');
+  const [open, setOpen] = useState<string | null>(null);
+  useEffect(() => { api<NonNullable<typeof rows>>('GET', `/api/config/changes?clubId=${clubId}`).then(setRows).catch((x) => setErr(errText(x))); }, [clubId]);
+  if (!rows) return err ? <div className="err">{err}</div> : <p className="muted">Загрузка…</p>;
+  return (
+    <div className="card" style={{ display: 'grid', gap: 6 }}>
+      <b>История изменений настроек</b>
+      {!rows.length && <p className="muted small" style={{ margin: 0 }}>Изменений пока не было.</p>}
+      {rows.map((r) => (
+        <div key={r.id} className="item" style={{ display: 'grid', gap: 4, cursor: 'pointer' }} onClick={() => setOpen(open === r.id ? null : r.id)}>
+          <div className="row between" style={{ gap: 8, flexWrap: 'wrap' }}><span><b>{r.title}</b>{r.versionNo != null ? ` · версия № ${r.versionNo}` : ''}</span>
+            <span className="small muted">{r.by ?? 'система'} · {dt(r.at)}</span></div>
+          {open === r.id && <pre className="small" style={{ whiteSpace: 'pre-wrap', margin: 0 }}>{r.before ? `Было: ${JSON.stringify(r.before)}\n` : ''}Стало: {JSON.stringify(r.after)}</pre>}
+        </div>))}
+    </div>
+  );
+}
+
+function VersionedSettings({ club }: { club: Club }) {
   const [cfg, setCfg] = useState<Cfg | null>(null);
   const [err, setErr] = useState('');
   const [open, setOpen] = useState<string | null>(null);
   const [edits, setEdits] = useState<Record<string, unknown>>({});
-  const [sec, setSec] = useState('club');
+  const [sec, setSec] = useState('membership');
   const [ask, setAsk] = useState('');
   const [busy, setBusy] = useState(false);
   const [aiRes, setAiRes] = useState<{ understood: boolean; unknown: string[]; errors?: string[]; engine: string } | null>(null);
   const [bt, setBt] = useState<Backtest[] | null>(null);
   const load = () => { if (club) api<Cfg>('GET', `/api/config?clubId=${club.id}`).then((r) => { setCfg(r); setErr(''); }).catch((x) => setErr(errText(x))); };
   useEffect(() => { setCfg(null); setOpen(null); setEdits({}); load(); }, [club?.id]);
-  void me;
-  if (!club) return <div className="card"><p style={{ margin: 0 }}>Клубов пока нет.</p></div>;
   if (!cfg) return err ? <div className="err">{err}</div> : null;
   const changes = Object.entries(edits).map(([path, value]) => ({ path, value }));
   const assistant = async () => {
@@ -62,7 +128,6 @@ export function ConfigPage({ me, clubs, clubId }: { me: Me; clubs: Club[]; clubI
 
   return (
     <div style={{ display: 'grid', gap: 12 }}>
-      {clubChips}
       <div className="card" style={{ display: 'grid', gap: 8 }}>
         <div className="row between" style={{ flexWrap: 'wrap', gap: 8 }}>
           <div><b>Настройки {club.name}</b><div className="small muted">Рабочая версия: {published ? `№ ${published.number} от ${dt(published.publishedAt)}, ${published.publishedBy ?? ''}` : 'исходные настройки клуба'}. Любое изменение — через черновик, проверку и утверждение.</div></div>
@@ -70,8 +135,8 @@ export function ConfigPage({ me, clubs, clubId }: { me: Me; clubs: Club[]; clubI
       </div>
 
       <div className="card" style={{ display: 'grid', gap: 8 }}>
-        <b>ИИ-помощник настройки</b>
-        <div className="small muted">Опишите словами, что поменять. Помощник подготовит черновик с разницей «было → станет»; рабочие настройки изменятся только после проверки и утверждения руководителем.</div>
+        <b>Дядя Витя: изменить настройки словами</b>
+        <div className="small muted">Опишите словами, что поменять. Дядя Витя подготовит черновик с разницей «было → станет»; рабочие настройки изменятся только после проверки и утверждения руководителем.</div>
         <textarea rows={2} value={ask} onChange={(e) => setAsk(e.target.value)} placeholder="Например: срок первого ответа 10 минут, норма звонков 50, включи поздравление с днём рождения" />
         <div className="row" style={{ flexWrap: 'wrap' }}>
           <button className="btn pri sm" disabled={busy || ask.trim().length < 3} onClick={assistant}>{busy ? 'Готовлю…' : 'Подготовить черновик'}</button>
@@ -80,7 +145,7 @@ export function ConfigPage({ me, clubs, clubId }: { me: Me; clubs: Club[]; clubI
         {aiRes && !aiRes.understood && <div className="err">Не понял просьбу: {aiRes.unknown.join('; ')}. Попробуйте назвать настройку, как она подписана ниже.</div>}
         {aiRes?.understood && aiRes.unknown.length > 0 && <div className="small muted">Не разобрал часть просьбы: {aiRes.unknown.join('; ')}</div>}
         {aiRes?.understood && aiRes.errors && aiRes.errors.length > 0 && <div className="small" style={{ color: 'var(--bad)' }}>В черновике есть ошибки, проверка их покажет: {aiRes.errors.join('; ')}</div>}
-        {!cfg.aiServer && <div className="small muted">ИИ-сервер ещё не подключён: помощник понимает типовые фразы о настройках этого экрана. После подключения будет понимать свободный текст.</div>}
+        {!cfg.aiServer && <div className="small muted">ИИ-сервер ещё не подключён: Дядя Витя понимает типовые фразы о настройках этого экрана. После подключения будет понимать свободный текст.</div>}
       </div>
 
       {open && <VersionView id={open} fields={cfg.fields} onClose={() => setOpen(null)} onChanged={load} onOpen={setOpen} />}
@@ -88,7 +153,7 @@ export function ConfigPage({ me, clubs, clubId }: { me: Me; clubs: Club[]; clubI
       <div className="card" style={{ display: 'grid', gap: 10 }}>
         <div className="row between" style={{ flexWrap: 'wrap', gap: 8 }}>
           <b>Изменить вручную</b>
-          <div className="tabs" role="group" aria-label="Раздел настроек" style={{ flexWrap: 'wrap' }}>{cfg.sections.map((s) => <button key={s.id} aria-pressed={sec === s.id} onClick={() => setSec(s.id)}>{s.title}</button>)}</div>
+          <div className="tabs" role="group" aria-label="Раздел настроек" style={{ flexWrap: 'wrap' }}>{cfg.sections.filter((s) => !HIDDEN.includes(s.id)).map((s) => <button key={s.id} aria-pressed={sec === s.id} onClick={() => setSec(s.id)}>{s.title}</button>)}</div>
         </div>
         <div style={{ display: 'grid', gap: 8 }}>
           {fields.map((f) => <FieldEdit key={f.path} f={f} live={get(cfg.live, f.path)} value={f.path in edits ? edits[f.path] : get(cfg.live, f.path)} changed={f.path in edits}

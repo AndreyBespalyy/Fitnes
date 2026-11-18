@@ -25,7 +25,7 @@ export const SECTIONS: { id: string; title: string; perm: string }[] = [
   { id: 'messaging', title: 'Сообщения клиентам', perm: P.messagesManage },
   { id: 'ai', title: 'Звонки и ИИ', perm: P.planManage },
   // Скрипты по видам звонков (для Дяди Вити и «Показать скрипт») — в «Отдел продаж → Скрипты звонков»; здесь общая оценка для «Обзоров»
-  { id: 'sales', title: 'Общий чек-лист разговора (оценка в «Обзорах»; скрипты — в «Отдел продаж → Скрипты звонков»)', perm: P.planManage },
+  { id: 'sales', title: 'Пункты для всех звонков (добавляются к проверке каждого скрипта в «Отдел продаж → Скрипты звонков»)', perm: P.planManage },
   { id: 'rules', title: 'Правила «если — то»', perm: P.retentionManage },
 ];
 
@@ -50,7 +50,11 @@ const MEMBERSHIP: [key: string, col: string, label: string, type: FieldType, min
   ['overdueBlockAfterDays', 'overdue_block_after_days', 'Закрыть проход при долге через', 'int', 0, 60, 'дн.'],
   ['subscriptionRetryAttempts', 'subscription_retry_attempts', 'Подписка: попыток списания', 'int', 1, 10, 'шт.'],
   ['subscriptionRetryIntervalDays', 'subscription_retry_interval_days', 'Подписка: дней между попытками', 'int', 1, 15, 'дн.'],
-  ['renewalReminderDays', 'renewal_reminder_days', 'Напомнить о продлении за', 'int', 1, 90, 'дн.'],
+  // Семья и договор — тоже правила абонементов: раньше правились только в «Тарифах», мимо утверждения (повторная проверка CRM 18.11.2026, п. 4)
+  ['familyDiscountPercent', 'family_discount_percent', 'Семья: скидка второму и следующим', 'int', 0, 50, '%'],
+  ['familyMaxMembers', 'family_max_members', 'Семья: человек не больше', 'int', 2, 12, 'чел.'],
+  ['contractRequiredForAccess', 'contract_required_for_access', 'Проход только с подписанным договором', 'bool', 0, 1],
+  ['renewalReminderDays', 'renewal_reminder_days', 'Напомнить о продлении за (досрочное продление: «Возврат клиентов»)', 'int', 7, 90, 'дн.'],
 ];
 const MSG: [key: string, col: string, label: string, type: FieldType, min: number, max: number, unit?: string][] = [
   ['workFrom', 'work_from', 'Рабочее время: с', 'int', 0, 23, 'ч'],
@@ -72,10 +76,11 @@ export const DEFAULT_CHECKLIST: ChecklistItem[] = [
 
 export function fieldsFor(events: string[]): Field[] {
   const f: Field[] = [
-    { path: 'club.firstResponseMinutes', section: 'club', label: 'Срок первого ответа на заявку', type: 'int', min: 1, max: 1440, unit: 'мин' },
+    { path: 'club.firstResponseMinutes', section: 'club', label: 'Норма ответа на заявку (одна на клуб: заявки, KPI, Дядя Витя)', type: 'int', min: 1, max: 1440, unit: 'мин' },
   ];
   for (const [k, , label, type, min, max, unit] of MEMBERSHIP) f.push({ path: `membership.${k}`, section: 'membership', label, type, min, max, unit });
-  for (const k of KPI) f.push({ path: `kpi.norms.${k.id}`, section: 'kpi', label: `Норма в день: ${k.name.toLowerCase()}`, type: 'num', min: 0, max: 10000, nullable: true, hint: 'пусто — без нормы' });
+  // Норма первого ответа — одна на клуб (club.firstResponseMinutes), отдельной нормы KPI нет (повторная проверка CRM 18.11.2026, п. 3)
+  for (const k of KPI.filter((x) => x.id !== 'first_response')) f.push({ path: `kpi.norms.${k.id}`, section: 'kpi', label: `Норма в день: ${k.name.toLowerCase()}`, type: 'num', min: 0, max: 10000, nullable: true, hint: 'пусто — без нормы' });
   f.push({ path: 'kpi.lightGreen', section: 'kpi', label: 'Светофор: зелёный от', type: 'int', min: 1, max: 200, unit: '% темпа плана' });
   f.push({ path: 'kpi.lightYellow', section: 'kpi', label: 'Светофор: жёлтый от', type: 'int', min: 1, max: 200, unit: '% темпа плана' });
   for (const [k, , label, type, min, max, unit] of MSG) f.push({ path: `messaging.${k}`, section: 'messaging', label, type, min, max, unit });
@@ -86,10 +91,21 @@ export function fieldsFor(events: string[]): Field[] {
     f.push({ path: `messaging.triggers.${e}.sendHour`, section: 'messaging', label: `«${n}»: не раньше`, type: 'int', min: 0, max: 23, unit: 'ч' });
   }
   f.push({ path: 'ai.fillControlHours', section: 'ai', label: 'Итог звонка проверить через', type: 'int', min: 1, max: 72, unit: 'ч' });
-  f.push({ path: 'sales.items', section: 'sales', label: 'Пункты чек-листа разговора', type: 'checklist' });
+  f.push({ path: 'sales.items', section: 'sales', label: 'Пункты для всех звонков', type: 'checklist' });
   f.push({ path: 'rules.list', section: 'rules', label: 'Правила «если — то»', type: 'rules' });
   return f;
 }
+
+/** Какие записи журнала — изменения настроек клуба (для «Настройки клуба → История изменений») */
+const CHANGE_TITLE: Record<string, string> = {
+  'config.published': 'Опубликована версия настроек', 'config.rolled_back': 'Откат настроек к прошлой версии',
+  'sales_ops.settings': 'Отдел продаж: ответ на заявку, обзвон', 'kpi.norms_changed': 'Нормы KPI и светофор', 'agent.settings': 'Настройки Дяди Вити',
+  'call_script.updated': 'Скрипт звонка изменён', 'call_script.reset': 'Скрипт звонка: вернули стандартный', 'club.membership_settings_changed': 'Правила абонементов',
+  'msg_settings.updated': 'Сообщения: рабочее время, автоответ, лимит', 'loyalty.settings': 'Бонусная программа', 'schedule.settings_changed': 'Расписание',
+  'ai.settings_changed': 'Звонки и ИИ', 'retention.early_settings': 'Досрочное продление', 'surveys.settings_changed': 'Опросы клиентов', 'club.updated': 'Карточка клуба',
+  'club.sales_model_changed': 'Модель продаж',
+};
+const SETTINGS_ACTIONS = Object.keys(CHANGE_TITLE).filter((k) => !k.startsWith('config.'));
 
 /* ---------- чтение и запись рабочих настроек ---------- */
 export type ConfigDoc = Record<string, unknown>;
@@ -105,13 +121,14 @@ export async function readLive(db: Db, clubId: string): Promise<ConfigDoc> {
   const ai = (await db.query('select fill_control_hours from ai_settings where club_id = $1', [clubId])).rows[0];
   const std = (await db.query('select items from sales_standards where club_id = $1 order by version_no desc limit 1', [clubId])).rows[0];
   const mdef: Record<string, unknown> = { freeze_enabled: true, freeze_max_days_per_year: 30, freeze_max_times_per_year: 2, freeze_min_days: 7, freeze_paid: false, freeze_price_kop: 0,
-    installments_enabled: true, installments_max_payments: 3, overdue_block_after_days: 3, subscription_retry_attempts: 3, subscription_retry_interval_days: 2, renewal_reminder_days: 14 };
+    installments_enabled: true, installments_max_payments: 3, overdue_block_after_days: 3, subscription_retry_attempts: 3, subscription_retry_interval_days: 2, renewal_reminder_days: 14,
+    family_discount_percent: 10, family_max_members: 6, contract_required_for_access: false };
   const msdef: Record<string, unknown> = { work_from: 9, work_to: 21, autoreply_enabled: true, autoreply_text: 'Здравствуйте! Мы получили ваше сообщение. Сейчас клуб не работает, менеджер ответит утром.', max_auto_per_week: 2 };
   return {
     club: { firstResponseMinutes: club.first_response_minutes },
     membership: Object.fromEntries(MEMBERSHIP.map(([k, col]) => [k, col === 'freeze_price_kop' ? Number(m[col] ?? mdef[col]) : m[col] ?? mdef[col]])),
     kpi: {
-      norms: Object.fromEntries(KPI.map((k) => [k.id, kv(k.id) ?? DEFAULT_NORMS[k.id] ?? null])),
+      norms: Object.fromEntries(KPI.filter((k) => k.id !== 'first_response').map((k) => [k.id, kv(k.id) ?? DEFAULT_NORMS[k.id] ?? null])),
       lightGreen: kv('light_green') ?? 100, lightYellow: kv('light_yellow') ?? 85,
     },
     messaging: {
@@ -251,7 +268,7 @@ export const PRESETS: Preset[] = [
     values: { 'club.firstResponseMinutes': 5, 'membership.freezeEnabled': true, 'membership.freezeMaxDaysPerYear': 30, 'membership.freezeMaxTimesPerYear': 2, 'membership.freezeMinDays': 7,
       'membership.freezePaid': false, 'membership.freezePriceKop': 0, 'membership.installmentsEnabled': true, 'membership.installmentsMaxPayments': 3, 'membership.overdueBlockAfterDays': 3,
       'membership.subscriptionRetryAttempts': 3, 'membership.subscriptionRetryIntervalDays': 2, 'membership.renewalReminderDays': 14,
-      ...Object.fromEntries(KPI.map((k) => [`kpi.norms.${k.id}`, DEFAULT_NORMS[k.id] ?? null])), 'kpi.lightGreen': 100, 'kpi.lightYellow': 85,
+      ...Object.fromEntries(KPI.filter((k) => k.id !== 'first_response').map((k) => [`kpi.norms.${k.id}`, DEFAULT_NORMS[k.id] ?? null])), 'kpi.lightGreen': 100, 'kpi.lightYellow': 85,
       'messaging.workFrom': 9, 'messaging.workTo': 21, 'messaging.maxAutoPerWeek': 2, ...triggerDays(7, 3, 14), 'ai.fillControlHours': 2, 'sales.items': DEFAULT_CHECKLIST } },
   { id: 'premium', name: 'Премиальный клуб', description: 'Меньше звонков, больше внимания каждому: длинная заморозка, рассрочка до 6 платежей, ранние напоминания о продлении, экскурсия в стандарте продаж.',
     values: { 'club.firstResponseMinutes': 5, 'membership.freezeMaxDaysPerYear': 60, 'membership.freezeMaxTimesPerYear': 3, 'membership.installmentsEnabled': true, 'membership.installmentsMaxPayments': 6,
@@ -376,7 +393,6 @@ const OFF = /(выключ|отключ|запрет|убер|не отправ|
 const RULES: { re: RegExp; path: string | ((t: string) => string | null); kind?: 'bool' | 'num' | 'trigger' | 'freeze' }[] = [
   { re: /(ж[её]лт)/i, path: 'kpi.lightYellow' },
   { re: /зел[её]н/i, path: 'kpi.lightGreen' },
-  { re: /норм\S*.*перв\S* ответ|перв\S* ответ\S*.*норм/i, path: 'kpi.norms.first_response' },
   { re: /перв\S* ответ|ответ\S* на (заявк|лид)|скорост\S* ответ/i, path: 'club.firstResponseMinutes' },
   { re: /звон(ок|ки|ков|ка)(?![а-я])(?!.*итог)/i, path: 'kpi.norms.calls' },
   { re: /назнач\S* встреч|встреч\S* назнач/i, path: 'kpi.norms.meetings_set' },
@@ -555,6 +571,18 @@ export function configRoutes(app: FastifyInstance, pool: pg.Pool) {
       return { live, fields, sections: SECTIONS.map(({ id, title }) => ({ id, title })), versions, presets: PRESETS.map(({ id, name, description }) => ({ id, name, description })),
         canApprove: can(ctx, P.configApprove), aiServer: !!aiConfigFromEnv() };
     });
+  });
+
+  // История изменений настроек клуба (повторная проверка CRM 18.11.2026, п. 4): всё, что поменяли — в разделах и через версии, — в одном списке
+  app.get('/api/config/changes', async (req) => {
+    const ctx = requireCtx(req);
+    if (!can(ctx, P.configManage) && !can(ctx, P.salesManage)) throw forbidden();
+    const clubId = requireClub(ctx, (req.query as { clubId?: string }).clubId);
+    return withCtx(pool, ctx, async (db) => (await db.query(`select a.id::text, a.action, a.at, a.before, a.after, u.full_name as "by", v.number as "versionNo"
+        from audit_log a left join users u on u.id = a.actor_id
+        left join config_versions v on a.object_type = 'config_version' and v.id::text = a.object_id
+       where ((a.object_type = 'club' and a.object_id = $1::text and a.action = any($2::text[])) or (v.club_id::text = $1::text and a.action in ('config.published', 'config.rolled_back')))
+       order by a.at desc limit 200`, [clubId, SETTINGS_ACTIONS])).rows.map((r) => ({ ...r, title: CHANGE_TITLE[r.action] ?? r.action })));
   });
 
   app.get('/api/config/versions/:id', async (req) => {

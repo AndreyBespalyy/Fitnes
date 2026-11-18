@@ -103,7 +103,7 @@ export function adviceFor(topic: TopicCode, role: string, summary: string, chatT
       return [{ body: 'Новый коллега. Помогите ему освоиться: покажите CRM и ваши стандарты работы.', action: task(`Помочь новому сотруднику освоиться${about(s)}`, 72, tab) }];
     case 'meeting': {
       const who = people.slice(0, 8).join(', ');
-      return [{ body: 'Договариваетесь собраться. Помощник подберёт время по расписанию каждого и разошлёт приглашения.',
+      return [{ body: 'Договариваетесь собраться. Дядя Витя подберёт время по расписанию каждого и разошлёт приглашения.',
         action: { type: 'assistant', prompt: `Назначь собрание${who ? `: ${who}` : ''}, на этой неделе с 10 до 18, 30 минут${chatTitle ? `. Тема: ${chatTitle}` : ''}`.slice(0, 400), label: 'Назначить собрание' } }];
     }
     case 'equipment':

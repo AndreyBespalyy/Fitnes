@@ -164,9 +164,17 @@ test('ресепшн может создать лид, но не видит сд
   assert.equal((await req('GET', '/api/opportunities', desk)).statusCode, 403);
 });
 
-test('норму первого ответа меняет администратор', async () => {
-  const r = await req('PATCH', `/api/clubs/${centr.id}`, adm, { firstResponseMinutes: 10 });
-  assert.equal(r.json().firstResponseMinutes, 10);
-  assert.equal((await req('PATCH', `/api/clubs/${centr.id}`, adm, { firstResponseMinutes: 0 })).statusCode, 400);
-  await req('PATCH', `/api/clubs/${centr.id}`, adm, { firstResponseMinutes: 5 });
+test('одна норма ответа на заявку: РОП в «Отдел продаж → Настройки», администратор системы — нет (повторная проверка CRM 18.11.2026, п. 3)', async () => {
+  assert.equal((await req('PATCH', `/api/clubs/${centr.id}`, adm, { firstResponseMinutes: 10 })).statusCode, 403);
+  const r = await req('PUT', '/api/sales-ops/settings', rop, { clubId: centr.id, firstResponseMinutes: 10, leadReassignMinutes: 12 });
+  assert.equal(r.statusCode, 200, r.body);
+  assert.deepEqual(r.json().response, { firstResponseMinutes: 10, leadReassignMinutes: 12 });
+  const g = (await req('GET', `/api/sales-ops/settings?clubId=${centr.id}`, mgr)).json();
+  assert.equal(g.response.firstResponseMinutes, 10);
+  // Та же цифра — норма KPI «Первый ответ»; отдельно её в «Нормах KPI» не задать
+  const kn = (await req('GET', `/api/kpi-norms?clubId=${centr.id}`, rop)).json();
+  assert.equal(kn.norms.first_response, 10);
+  assert.ok(!kn.metrics.some((m: { id: string }) => m.id === 'first_response'));
+  assert.equal((await req('PUT', '/api/sales-ops/settings', rop, { clubId: centr.id, firstResponseMinutes: 0 })).statusCode, 400);
+  await req('PUT', '/api/sales-ops/settings', rop, { clubId: centr.id, firstResponseMinutes: 5, leadReassignMinutes: 10 });
 });

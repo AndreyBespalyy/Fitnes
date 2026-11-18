@@ -13,7 +13,7 @@ type Overview = { clubs: State[]; contract: Contract | null; usage: { clubs: num
 
 const d2 = (s: string | null) => (s ? s.split('-').reverse().join('.') : '—');
 
-export function OnboardingPage({ me, clubId, go, reloadClubs }: { me: Me; clubId: string; go: (tab: string) => void; reloadClubs: () => void }) {
+export function OnboardingPage({ me, clubId, go, canTab = () => true, reloadClubs }: { me: Me; clubId: string; go: (tab: string) => void; canTab?: (tab: string) => boolean; reloadClubs: () => void }) {
   const [o, setO] = useState<Overview | null>(null);
   const [sel, setSel] = useState<string>('');
   const [busy, setBusy] = useState(false);
@@ -91,7 +91,7 @@ export function OnboardingPage({ me, clubId, go, reloadClubs }: { me: Me; clubId
                 <td>{it.status === 'done' ? <span className="chip ok">сделано</span> : it.status === 'skipped' ? <span className="chip">не нужно</span> : <span className={`chip ${it.overdue ? 'bad' : 'warn'}`}>{it.overdue ? 'просрочено' : 'в работе'}</span>}
                   {it.by && <div className="small muted">{it.by}{it.at ? `, ${d2(it.at)}` : ''}</div>}</td>
                 <td><div className="row" style={{ gap: 4, flexWrap: 'wrap' }}>
-                  {it.status === 'todo' && <button className="btn sm" onClick={() => go(it.tab)}>Открыть</button>}
+                  {it.status === 'todo' && (canTab(it.tab) ? <button className="btn sm" onClick={() => go(it.tab)}>Открыть</button> : <span className="small muted">делает управляющий клуба</span>)}
                   {it.status === 'todo' && it.manualOnly && <button className="btn sm pri" onClick={() => setItem(s, it, 'done')}>Сделано</button>}
                   {it.status === 'todo' && it.optional && <button className="btn sm" onClick={() => setItem(s, it, 'skipped')}>Не нужно</button>}
                   {it.status !== 'todo' && it.by !== 'система' && <button className="btn sm" onClick={() => setItem(s, it, 'todo')}>Вернуть</button>}

@@ -97,7 +97,7 @@ export function WeeklyPage({ clubs, clubId }: { clubs: Club[]; clubId: string })
       <div className="card row" style={{ gap: 12, flexWrap: 'wrap', alignItems: 'center' }}>
         <div style={{ flex: 1, minWidth: 240 }}>
           <b>✦ Разбор недели</b>
-          <p className="small muted" style={{ margin: '4px 0 0' }}>Каждый понедельник в 9:00 помощник сравнивает прошлую неделю с позапрошлой: заявки, задачи, переписку, вопросы коллегам, звонки, сделки, занятия и бизнес-процессы. Руководители получают разбор, каждый сотрудник — свои цифры и подсказку.</p>
+          <p className="small muted" style={{ margin: '4px 0 0' }}>Каждый понедельник в 9:00 Дядя Витя сравнивает прошлую неделю с позапрошлой: заявки, задачи, переписку, вопросы коллегам, звонки, сделки, занятия и бизнес-процессы. Руководители получают разбор, каждый сотрудник — свои цифры и подсказку.</p>
         </div>
         {items && items.length > 0 && (
           <label className="f" style={{ minWidth: 200 }}>Неделя

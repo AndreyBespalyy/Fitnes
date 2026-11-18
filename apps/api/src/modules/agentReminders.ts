@@ -7,7 +7,7 @@ import { processMeetingReminders } from './agentMeetings.ts';
 import { advanceProcesses } from './agentProcesses.ts';
 import { can, requireCtx, requirePerm } from '../auth.ts';
 import { audit, withCtx, type Ctx, type Db } from '../db.ts';
-import { badRequest, notFound } from '../errors.ts';
+import { badRequest, forbidden, notFound } from '../errors.ts';
 import { PERMISSIONS as P } from '../roles.ts';
 import { staffOf } from './salesOps.ts';
 import { processWeeklyReview } from './agentWeekly.ts';
@@ -65,6 +65,8 @@ async function observe(db: Db, clubId: string, o: { personId?: string | null; op
     [clubId, o.personId ?? null, o.opportunityId ?? null, o.taskId ?? null, kind, body.slice(0, 1000)]);
 }
 
+/** Поля настроек помощника, которые меняет РОП: ответ клиентам и заявки, первый сигнал по просрочке */
+const SALES_KEYS: string[] = ['taskRopMinutes', 'replyWaitMinutes', 'leadReassignMinutes'];
 const hm = (min: number) => (min >= 1440 ? `${Math.floor(min / 1440)} дн.` : min >= 60 ? `${Math.floor(min / 60)} ч${min % 60 ? ` ${min % 60} мин` : ''}` : `${min} мин`);
 const personLink = (personId: string | null) => (personId ? { tab: 'tasks', p: { person: personId } } : { tab: 'tasks' });
 
@@ -85,11 +87,14 @@ export async function processTaskLadder(db: Db, clubId: string, s: AgentSettings
       sent += await card(db, clubId, [t.assignee_id], { kind: 'agent_task', title: `Просрочена задача: ${t.title}`, body: `${t.person ? `Клиент: ${t.person}. ` : ''}Выполните сейчас или перенесите срок.`,
         objectType: 'task', objectId: t.id, actions: [...acts, 'snooze_1h', 'snooze_tomorrow'], link: personLink(t.person_id) });
     }
-    const steps: [number, number, { id: string }[], string][] = [
-      [2, s.taskRopMinutes, heads.rop.length ? heads.rop : heads.gm, 'РОП'],
-      [3, s.taskGmMinutes, heads.gm, 'управляющий'],
-      [4, s.taskOwnerMinutes, heads.owner, 'собственник'],
-    ];
+    // Лестница по роли исполнителя (повторная проверка CRM 18.11.2026, п. 7): задачи продаж — РОП, потом управляющий;
+    // задачи тренера, ресепшна, финансиста — сразу управляющему (РОП им не начальник). Собственнику карточек нет:
+    // операционку он не ведёт, просрочки видит итогом в недельной сводке. Нет управляющего в клубе — сигнал собственнику.
+    const role = t.assignee_id ? await roleOf(db, t.assignee_id, clubId) : 'manager';
+    const gm = heads.gm.length ? heads.gm : heads.owner;
+    const steps: [number, number, { id: string }[], string][] = ['manager', 'rop'].includes(role)
+      ? [[2, s.taskRopMinutes, heads.rop.length ? heads.rop : gm, heads.rop.length ? 'РОП' : 'управляющий'], [3, s.taskGmMinutes, gm, 'управляющий']]
+      : [[2, s.taskRopMinutes, gm, 'управляющий']];
     for (const [level, after, to, role] of steps) {
       if (t.over < after) continue;
       const targets = to.map((u) => u.id).filter((id) => id !== t.assignee_id);
@@ -277,27 +282,31 @@ export function agentReminderRoutes(app: FastifyInstance, pool: pg.Pool) {
     const { clubId } = req.query as { clubId?: string };
     return withCtx(pool, ctx, async (db) => {
       if (!clubId || !(await db.query('select 1 from clubs where id = $1', [clubId])).rowCount) throw badRequest('Выберите клуб');
-      return { ...(await agentSettings(db, clubId)), canEdit: can(ctx, P.tariffsManage) };
+      // Управляющий и собственник меняют всё; РОП — то, что касается его отдела (повторная проверка CRM 18.11.2026, п. 10)
+      const scope = can(ctx, P.configManage) ? 'all' : can(ctx, P.salesManage) ? 'sales' : null;
+      return { ...(await agentSettings(db, clubId)), canEdit: !!scope, scope };
     });
   });
 
-  // Бизнес-настройки клуба: собственник по любому клубу, управляющий по своему (право tariffs.manage)
+  // Бизнес-настройки клуба: собственник по любому клубу, управляющий по своему; РОП — только поля своего отдела
   app.put('/api/agent/settings', async (req) => {
-    const ctx = requirePerm(req, P.tariffsManage);
+    const ctx = requireCtx(req);
+    const full = can(ctx, P.configManage);
+    if (!full && !can(ctx, P.salesManage)) throw forbidden('Настройки Дяди Вити меняют управляющий, собственник и РОП');
     const b = (req.body ?? {}) as Partial<AgentSettings> & { clubId?: string };
     return withCtx(pool, ctx, async (db) => {
       if (!b.clubId || !(await db.query('select 1 from clubs where id = $1', [b.clubId])).rowCount) throw badRequest('Выберите клуб');
       const cur = await agentSettings(db, b.clubId);
       const next = { ...cur };
-      if (b.enabled !== undefined) next.enabled = !!b.enabled;
-      if (b.morningHints !== undefined) next.morningHints = !!b.morningHints;
+      if (full && b.enabled !== undefined) next.enabled = !!b.enabled;
+      if (full && b.morningHints !== undefined) next.morningHints = !!b.morningHints;
       for (const [k, [min, max]] of Object.entries(LIMITS) as [keyof typeof LIMITS, [number, number]][]) {
-        if (b[k] === undefined) continue;
+        if (b[k] === undefined || (!full && !SALES_KEYS.includes(k))) continue;
         const v = Number(b[k]);
         if (!Number.isInteger(v) || v < min || v > max) throw badRequest(`Значение вне допустимых пределов (${min}–${max})`);
         next[k] = v;
       }
-      if (!(next.taskRopMinutes < next.taskGmMinutes && next.taskGmMinutes < next.taskOwnerMinutes)) throw badRequest('Сроки лестницы должны расти: РОП → управляющий → собственник');
+      if (!(next.taskRopMinutes < next.taskGmMinutes)) throw badRequest('Сигнал управляющему должен прийти позже первого сигнала руководителю');
       await db.query(`insert into agent_settings(club_id, tenant_id, enabled, task_rop_minutes, task_gm_minutes, task_owner_minutes, reply_wait_minutes, lead_reassign_minutes, quiet_from, quiet_to, updated_by, morning_hints, morning_hour)
         values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) on conflict (club_id) do update set enabled = $3, task_rop_minutes = $4, task_gm_minutes = $5, task_owner_minutes = $6,
         reply_wait_minutes = $7, lead_reassign_minutes = $8, quiet_from = $9, quiet_to = $10, updated_by = $11, morning_hints = $12, morning_hour = $13, updated_at = now()`,

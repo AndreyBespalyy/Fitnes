@@ -1,5 +1,6 @@
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
+import pg from 'pg';
 import { setupTestApp, login, PASSWORD } from './helpers.ts';
 
 let t: Awaited<ReturnType<typeof setupTestApp>>;
@@ -13,6 +14,7 @@ before(async () => {
 });
 after(async () => { await t.app.close(); await t.pool.end(); });
 
+const sql = async (q: string, p: unknown[] = []) => { const c = new pg.Client(t.ownerUrl); await c.connect(); try { return await c.query(q, p); } finally { await c.end(); } };
 const req = (method: string, url: string, who: string, payload?: unknown) =>
   t.app.inject({ method: method as 'GET', url, cookies: ck[who], payload: payload as object });
 let n = 0;
@@ -60,6 +62,10 @@ test('возврат: ресепшн запрашивает, управляющ�
   assert.equal((await req('POST', `/api/approvals/${ap.id}/decide`, 'o.smirnov', { decision: 'approve', password: PASSWORD })).statusCode, 200);
   const m = await s.m();
   assert.equal(m.status, 'cancelled');
+  // Повторная проверка CRM 18.11.2026, п. 9: управляющий узнал о запросе, ресепшн — о решении
+  const note = (login: string, kind: string) => sql(`select n.title from staff_notifications n join users u on u.id = n.user_id where u.login = $1 and n.kind = $2 order by n.created_at desc limit 1`, [login, kind]).then((r) => r.rows[0]?.title as string | undefined);
+  assert.match((await note('o.smirnov', 'approval')) ?? '', /^Нужно решение: возврат/);
+  assert.match((await note('d.lis', 'approval_decided')) ?? '', /^Согласовано: возврат/);
 });
 
 test('возврат больше лимита управляющего (15 000 ₽) утверждает только собственник', async () => {
@@ -73,6 +79,9 @@ test('возврат больше лимита управляющего (15 000 
   assert.match(r.json().message, /лимита/);
   assert.equal((await req('POST', `/api/approvals/${ap.id}/decide`, 'a.bespalyy', { decision: 'reject', password: PASSWORD })).statusCode, 400); // без причины
   assert.equal((await req('POST', `/api/approvals/${ap.id}/decide`, 'a.bespalyy', { decision: 'approve', password: PASSWORD })).statusCode, 200);
+  // Сверх лимита управляющего запрос приходит собственнику
+  const own = (await sql(`select n.title from staff_notifications n join users u on u.id = n.user_id where u.login = 'a.bespalyy' and n.kind = 'approval'`)).rows.map((r) => String(r.title).replace(/\s/g, ''));
+  assert.ok(own.some((x) => x.includes('20000₽')), JSON.stringify(own));
 });
 
 test('расходы: финансист запрашивает, управляющий до 50 000 ₽ сам, выше собственник', async () => {

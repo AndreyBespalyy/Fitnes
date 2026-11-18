@@ -11,6 +11,8 @@ export function LoginSecurity({ selfId }: { selfId: string }) {
   const [d, setD] = useState<Data | null>(null);
   const [err, setErr] = useState('');
   const [pick, setPick] = useState<Set<string>>(new Set());
+  // Включение — только после подтверждения со списком, кого коснётся (повторная проверка CRM 18.11.2026, п. 2)
+  const [confirmOn, setConfirmOn] = useState(false);
   const [issued, setIssued] = useState<{ fullName: string; login: string; tempPassword: string }[] | null>(null);
   const load = () => api<Data>('GET', '/api/security/login').then(setD).catch((x) => setErr(errText(x)));
   useEffect(() => { load(); }, []);
@@ -18,6 +20,7 @@ export function LoginSecurity({ selfId }: { selfId: string }) {
   if (!d) return null;
   const notOwn = d.users.filter((u) => u.status === 'active' && !u.own && u.id !== selfId);
   const toggle = async () => {
+    setConfirmOn(false);
     try { await api('PUT', '/api/security/login', { required: !d.required }); toast(d.required ? 'Обязательные личные пароли выключены' : 'Теперь каждый при входе задаёт свой пароль'); load(); } catch (x) { setErr(errText(x)); }
   };
   const reset = async () => {
@@ -31,8 +34,14 @@ export function LoginSecurity({ selfId }: { selfId: string }) {
       <div className="row between" style={{ gap: 10, flexWrap: 'wrap' }}>
         <div><b>Личные пароли обязательны</b>
           <div className="small muted">Если включено, сотрудник, который ни разу не задавал свой пароль или входит с простым паролем, при входе обязан сменить его. Так общий тестовый пароль перестаёт работать для всех сразу.</div></div>
-        <button className={`btn sm ${d.required ? '' : 'pri'}`} onClick={toggle}>{d.required ? 'Выключить' : 'Включить'}</button>
+        <button className={`btn sm ${d.required ? '' : 'pri'}`} onClick={() => (d.required || !notOwn.length ? void toggle() : setConfirmOn(true))}>{d.required ? 'Выключить' : 'Включить'}</button>
       </div>
+      {confirmOn && (
+        <div className="item confirm-row" role="alertdialog" aria-label="Подтверждение" style={{ display: 'grid', gap: 6 }}>
+          <span>При следующем входе сменить пароль придётся <b>{notOwn.length}</b> сотрудникам: {notOwn.slice(0, 12).map((u) => u.fullName).join(', ')}{notOwn.length > 12 ? ` и ещё ${notOwn.length - 12}` : ''}.
+            Пока они не зададут свой пароль, работать в CRM не смогут. Предупредите их заранее.</span>
+          <div className="row"><button className="btn pri sm" onClick={() => void toggle()}>Включить</button><button className="btn sm" onClick={() => setConfirmOn(false)}>Отмена</button></div>
+        </div>)}
       <div className="small">{notOwn.length ? <>Ещё не задали свой пароль: <b>{notOwn.length}</b> из {d.users.filter((u) => u.status === 'active').length} активных.</> : 'Все активные сотрудники задали свои пароли.'}</div>
 
       {issued && (

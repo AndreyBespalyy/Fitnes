@@ -662,3 +662,6 @@ input[type="checkbox"],input[type="radio"]{accent-color:var(--accent)}
 @media (max-width:560px){.cs-if div{grid-template-columns:1fr;gap:2px}}
 .cs-never{padding:8px 10px;border-radius:8px;background:color-mix(in srgb,var(--bad, #e5484d) 12%,transparent)}
 .modal.cs{max-height:90vh;overflow:auto}
+
+/* Подтверждение действия с деньгами или доступом (повторная проверка CRM 18.11.2026) */
+.confirm-row { border: 1px solid var(--accent); background: color-mix(in srgb, var(--accent) 8%, transparent); }

@@ -63,8 +63,8 @@ test('1. вход с временным паролем: обязательная
 
 test('2. менеджер создаёт лид: появляется у клиента и задача первого ответа', async () => {
   const { ctx, p } = await open('m.volkova');
-  await tab(p, 'Лиды');
-  await p.getByRole('button', { name: '+ Лид' }).click();
+  // «Лиды» у менеджера убраны из меню: «+ Лид» — в «Мой день» на рабочем столе (повторная проверка CRM 18.11.2026, п. 14)
+  await p.getByRole('button', { name: '+ Лид' }).first().click();
   await p.getByPlaceholder('Анна Иванова').fill('Тест Интерфейсов');
   await p.getByPlaceholder('+7 900 000-00-00').fill('+7 916 777-00-01');
   await p.getByLabel('Откуда узнал (обязательно)').selectOption({ index: 1 });
@@ -86,6 +86,8 @@ test('3. продажа абонемента в карточке и оплата
   await p.getByRole('button', { name: 'Оформить' }).click();
   await toast(p, /Продано/);
   await p.getByRole('button', { name: 'Картой' }).first().click();
+  // Оплата — только после подтверждения (повторная проверка CRM 18.11.2026, п. 1)
+  await p.getByRole('alertdialog', { name: 'Подтверждение' }).getByRole('button', { name: 'Подтвердить' }).click();
   await toast(p, /Оплата картой отмечена/);
   const m = await sql(`select c.status from charges c join memberships m on m.id = c.membership_id join persons pr on pr.id = m.person_id where pr.full_name = 'Тест Интерфейсов'`);
   assert.ok(m.length && m.every((x) => x.status === 'paid'));
@@ -155,7 +157,8 @@ test('6. расписание: запись клиента на занятие',
 test('7. настройки клуба: черновик, проверка, утверждение и публикация', async () => {
   const { ctx, p } = await open('o.smirnov');
   await tab(p, 'Настройки клуба');
-  await p.getByRole('button', { name: 'Нормы KPI и светофор плана' }).click();
+  // С утверждением — только деньги и правила для клиентов; нормы KPI — во вкладке «Продажи» (повторная проверка CRM 18.11.2026, п. 4)
+  await p.getByRole('button', { name: 'Абонементы: заморозка, рассрочка, долги' }).click();
   const input = p.locator('.card').filter({ hasText: 'Изменить вручную' }).locator('input[inputmode=decimal]').first();
   const was = await input.inputValue();
   await input.fill(String(Number(was || 0) + 5));

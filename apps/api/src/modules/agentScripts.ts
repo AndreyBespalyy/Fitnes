@@ -8,6 +8,7 @@
 import { aiEvaluateCall, type AiConfig } from '../lib/aiClient.ts';
 import type { Db } from '../db.ts';
 import { botSay } from './agentMeetings.ts';
+import { standardAt } from './config.ts';
 
 export type ScriptItem = { id: string; text: string; how: string };
 export type Script = { code: string; title: string; steps: ScriptItem[]; never: ScriptItem[] };
@@ -22,7 +23,7 @@ const NEVER_COMMON = [
 
 export const SCRIPTS: Script[] = [
   { code: 'lead', title: 'Звонок по заявке', steps: [
-    step('contact', 'Контакт: представился, поблагодарил за заявку, спросил, удобно ли говорить', '«[Имя], добрый день! Это [Имя] из Сандов Фитнес. Вы оставляли заявку — спасибо. Удобно две минуты?»'),
+    step('contact', 'Контакт: представился, поблагодарил за заявку, спросил, удобно ли говорить', '«[Имя], добрый день! Это [Имя] из {клуба}. Вы оставляли заявку — спасибо. Удобно две минуты?»'),
     step('road', 'Спросил, рядом ли клиент живёт или работает', '«Вы рядом живёте или работаете?»'),
     step('expect', 'Спросил, чего клиент ждёт от занятий (тонус, вес, осанка, сила, спина)', '«А чего вы ждёте от занятий? Что должно измениться — тонус, вес, осанка, сила, спина?»'),
     step('block', 'Спросил, что мешало заниматься раньше', '«А что мешало заниматься раньше?»'),
@@ -31,11 +32,11 @@ export const SCRIPTS: Script[] = [
     step('trial', 'Пригласил на бесплатную пробную тренировку с тренером', '«Приходите на пробную тренировку с тренером — бесплатно. Он подберёт программу под вашу задачу»'),
     step('time', 'Назвал конкретный день и время (выбор: будни/выходные, утро/вечер)', '«Вам удобнее в будни или на выходных?» → «Утром или вечером?» → «Тогда четверг, 19:00 — записываю»'),
     step('final', 'Итог: адрес, паспорт, сообщение в мессенджер', '«{адрес}. Возьмите паспорт — пропускная система. Отправлю адрес и время — Телеграм или Ватсап?»'),
-  ], never: [never('n_price_first', 'цена до вопросов о задаче клиента', 'Сначала задача: «От 2 690 ₽ в месяц, зависит от формата. Но цифра без задачи ничего не значит — на пробной подберём под вас»'), ...NEVER_COMMON] },
+  ], never: [never('n_price_first', 'цена до вопросов о задаче клиента', 'Сначала задача: «От {цена} в месяц, зависит от формата. Но цифра без задачи ничего не значит — на пробной подберём под вас»'), ...NEVER_COMMON] },
 
   { code: 'incoming', title: 'Входящий звонок', steps: [
-    step('contact', 'Контакт: «Сандов Фитнес, добрый день! Меня зовут…»', '«Сандов Фитнес, добрый день! Меня зовут [Имя]. Слушаю вас»'),
-    step('price', 'На вопрос о цене — ориентир «от 2 690 ₽» и вопрос о задаче', '«Варианты от 2 690 ₽ в месяц, зависит от формата. Чтобы не путать вас цифрами — какую задачу ставите?»'),
+    step('contact', 'Контакт: «{клуб}, добрый день! Меня зовут…»', '«{клуб}, добрый день! Меня зовут [Имя]. Слушаю вас»'),
+    step('price', 'На вопрос о цене — ориентир «от {цена}» и вопрос о задаче', '«Варианты от {цена} в месяц, зависит от формата. Чтобы не путать вас цифрами — какую задачу ставите?»'),
     step('expect', 'Спросил, чего клиент ждёт от занятий', '«А чего ждёте от занятий? Что должно измениться — тонус, вес, спина, сила?»'),
     step('exp', 'Спросил про опыт тренировок и что важно для комфорта', '«Был опыт тренировок? Что важно, чтобы было комфортно?»'),
     step('present', 'Презентация: три факта о клубе под запрос', 'Три факта под его слова: зал 1 100 м², групповые, круглосуточно, сауна и полотенца, бокс'),
@@ -45,7 +46,7 @@ export const SCRIPTS: Script[] = [
   ], never: [never('n_pricelist', 'прайс списком', 'Одна цифра-ориентир и вопрос о задаче'), never('n_nopool', '«бассейна нет, извините» (сначала — что есть)', '«Клуб без бассейна. Зато 2 500 м², зал 1 100 м², круглосуточно, сауна и полотенца в абонементе»'), NEVER_COMMON[1]] },
 
   { code: 'base', title: 'Звонок по базе', steps: [
-    step('contact', 'Контакт: напомнил, откуда знакомы (заявка / гостевой визит), спросил, удобно ли', '«[Имя], добрый день! Это [Имя] из Сандов Фитнес, мы с вами раньше общались. Удобно пару минут?»'),
+    step('contact', 'Контакт: напомнил, откуда знакомы (заявка / гостевой визит), спросил, удобно ли', '«[Имя], добрый день! Это [Имя] из {клуба}, мы с вами раньше общались. Удобно пару минут?»'),
     step('reason', 'Назвал повод: бесплатная пробная тренировка с тренером на этой неделе', '«Звоню с конкретным предложением: бесплатная пробная тренировка с тренером по вашей задаче»'),
     step('now', 'Спросил, тренируется ли клиент сейчас', '«Скажите, вы сейчас тренируетесь?»'),
     step('expect', 'Спросил, чего клиент ждёт от занятий', '«А чего ждёте от занятий? Что должно измениться — тонус, вес, спина, вернуться в форму?»'),
@@ -56,7 +57,7 @@ export const SCRIPTS: Script[] = [
   ], never: [never('n_fake', 'выдуманная акция', 'Только действующие условия: бесплатная пробная, рассрочка на 10 платежей'), NEVER_COMMON[0]] },
 
   { code: 'confirm', title: 'Подтверждение встречи', steps: [
-    step('contact', 'Контакт: представился, спросил, удобно ли', '«[Имя], добрый день! Это [Имя] из Сандов Фитнес. Удобно две минуты?»'),
+    step('contact', 'Контакт: представился, спросил, удобно ли', '«[Имя], добрый день! Это [Имя] из {клуба}. Удобно две минуты?»'),
     step('remind', 'Напомнил день и время встречи, что ждёт тренер', '«Звоню напомнить: мы встречаемся в четверг в 19:00, вас ждёт тренер»'),
     step('road', 'Предложил помочь с дорогой, назвал адрес', '«Помощь, как добраться, нужна? {адрес}»'),
     step('passport', 'Напомнил взять паспорт', '«Возьмите, пожалуйста, паспорт — пропускная система»'),
@@ -64,7 +65,7 @@ export const SCRIPTS: Script[] = [
   ], never: [never('n_still', '«всё в силе?» / «вы придёте?» / «позвоните, если не сможете»', 'Утверждение вместо вопроса: «Звоню напомнить: мы встречаемся в четверг в 19:00, вас ждёт тренер»')] },
 
   { code: 'renewal', title: 'Продление', steps: [
-    step('contact', 'Начало: представился, спросил, есть ли пара минут', '«[Имя], здравствуйте! Это [Имя] из Сандов Фитнес. Есть пара минут?»'),
+    step('contact', 'Начало: представился, спросил, есть ли пара минут', '«[Имя], здравствуйте! Это [Имя] из {клуба}. Есть пара минут?»'),
     step('why', 'Объяснил, зачем звонит: поблагодарить и узнать мнение о клубе', '«Звоню поблагодарить вас за то, что вы с нами, и узнать мнение о клубе — что нравится, что изменить»'),
     step('feedback', 'Спросил, что нравится и что улучшить, отреагировал на ответы', '«Что особенно нравится? А что хотелось бы улучшить?»'),
     step('early', 'Предложил условия раннего продления', '«Сейчас для вас действуют условия раннего продления — чтобы успеть зафиксировать выгодную стоимость. Удобно обсудить?»'),
@@ -79,14 +80,51 @@ export const SCRIPTS: Script[] = [
   ], never: [never('n_argue', 'спор с клиентом и дожим после второго «нет»', 'После второго «нет» — вежливо закончить и поставить тег'), never('n_nodate', 'разговор без даты следующего шага', 'Всегда договаривайтесь о дате: «Помечу и позвоню ровно тогда — через месяц?»')] },
 ];
 
-/** Скрипт клуба (проверка CRM 17.11.2026, п. 4): правки РОПа из «Отдел продаж → Скрипты звонков», иначе стандартный текст.
- *  {адрес} — адрес из карточки клуба. */
+/** Подстановки клуба (повторная проверка CRM 18.11.2026, п. 12): раньше в стандартных скриптах было зашито «Сандов Фитнес»
+ *  и «от 2 690 ₽» — в любом клубе сети менеджер называл чужое имя и чужую цену.
+ *  {клуб} — название клуба, {клуба} — оно же для «из …», {цена} — самая низкая цена за месяц из прейскуранта, {адрес} — адрес. */
+export async function clubVars(db: Db, clubId: string): Promise<Record<string, string>> {
+  const c = (await db.query(`select name, address from clubs where id = $1`, [clubId])).rows[0] as { name: string; address: string | null } | undefined;
+  const r = (await db.query(
+    `select min(case when p.kind = 'term' then v.amount_kop / greatest(1, round(coalesce(p.duration_days, 30) / 30.0)) else v.amount_kop end) as kop
+       from products p
+       join lateral (select amount_kop from price_versions where product_id = p.id and valid_from <= now() order by valid_from desc limit 1) v on true
+      where p.club_id = $1 and p.is_active and p.kind in ('term', 'subscription')`, [clubId])).rows[0];
+  const name = c?.name || 'клуб';
+  const m = /^клуб\s+(.+)$/i.exec(name);
+  const kop = r?.kop != null ? Number(r.kop) : null;
+  return {
+    '{клуба}': m ? `клуба ${m[1]}` : name, '{клуб}': name,
+    '{цена}': kop ? `${(Math.round(kop / 1000) * 10).toLocaleString('ru-RU')} ₽` : '[цена из прейскуранта]',
+    '{адрес}': c?.address || 'адрес клуба',
+  };
+}
+export const fillVars = (vars: Record<string, string>, s: string) => Object.entries(vars).reduce((a, [k, v]) => a.replaceAll(k, v), s);
+
+/** Скрипт клуба (проверка CRM 17.11.2026, п. 4): правки РОПа из «Отдел продаж → Скрипты звонков», иначе стандартный текст. */
 export async function clubScript(db: Db, clubId: string, code: string): Promise<Script> {
   const base = SCRIPTS.find((s) => s.code === code) ?? SCRIPTS[0];
   const own = (await db.query(`select data from club_call_scripts where club_id = $1 and code = $2`, [clubId, base.code])).rows[0]?.data as { steps?: ScriptItem[]; neverItems?: ScriptItem[] } | undefined;
-  const addr = ((await db.query(`select address from clubs where id = $1`, [clubId])).rows[0]?.address as string | null) || 'адрес клуба';
-  const fill = (x: ScriptItem) => ({ ...x, text: x.text.replaceAll('{адрес}', addr), how: x.how.replaceAll('{адрес}', addr) });
+  const vars = await clubVars(db, clubId);
+  const fill = (x: ScriptItem) => ({ ...x, text: fillVars(vars, x.text), how: fillVars(vars, x.how) });
   return { ...base, steps: (own?.steps?.length ? own.steps : base.steps).map(fill), never: (own?.neverItems?.length ? own.neverItems : base.never).map(fill) };
+}
+
+/** Один стандарт звонка (повторная проверка CRM 18.11.2026, п. 6): что проверяется в разговоре —
+ *  этапы скрипта, «пункты для всех звонков» (бывший общий чек-лист из «Настроек клуба») и то, чего говорить нельзя.
+ *  По этому же списку — разбор Дяди Вити, «Обзоры → Качество звонков», ручная оценка РОПа и рейтинг. */
+export type CheckItem = ScriptItem & { kind: 'step' | 'common' | 'never' };
+export async function checkList(db: Db, clubId: string, code: string, at: Date | string = new Date()) {
+  const sc = await clubScript(db, clubId, code);
+  const std = await standardAt(db, clubId, at);
+  const version = Number((await db.query(`select max(version_no) as v from club_call_script_versions where club_id = $1 and code = $2 and created_at <= $3`, [clubId, sc.code, at])).rows[0]?.v ?? 0);
+  const stepTexts = new Set(sc.steps.map((x) => x.text.toLowerCase()));
+  const items: CheckItem[] = [
+    ...sc.steps.map((x) => ({ ...x, kind: 'step' as const })),
+    ...std.items.filter((i) => !stepTexts.has(i.text.toLowerCase())).map((i) => ({ id: `c_${i.id}`.slice(0, 30), text: i.text, how: '', kind: 'common' as const })),
+    ...sc.never.map((x) => ({ ...x, kind: 'never' as const })),
+  ];
+  return { script: sc, version, standard: std, items };
 }
 
 /** Какой скрипт подходит разговору: входящий — по направлению, остальное — по словам из расшифровки */
@@ -104,10 +142,10 @@ export function pickScript(direction: string, text: string): Script {
 /** Телефоны и почта не уходят в ИИ (152-ФЗ) */
 const maskPii = (s: string) => s.replace(/[\w.+-]+@[\w-]+\.[\w.]+/g, '[почта]').replace(/(?:\+7|8)?[\s(-]*\d{3}[\s)-]*\d{3}[\s-]*\d{2}[\s-]*\d{2}/g, '[телефон]');
 
-type Item = ScriptItem & { kind: 'step' | 'never'; ok: boolean | null; quote?: string };
+type Item = ScriptItem & { kind: 'step' | 'common' | 'never'; ok: boolean | null; quote?: string };
 type Tr = { text: string; segments?: { speaker: string | null; start: number; end: number; text: string }[] };
 
-const STAGE: Record<string, string> = { contact: 'Контакт', road: 'Дорога', expect: 'Ожидания', block: 'Что мешало', react: 'Реакция его словами', present: 'Презентация',
+export const STAGE: Record<string, string> = { contact: 'Контакт', road: 'Дорога', expect: 'Ожидания', block: 'Что мешало', react: 'Реакция его словами', present: 'Презентация',
   trial: 'Повод прийти', time: 'День и время', final: 'Итог', price: 'Вопрос о цене', exp: 'Опыт и критерий', reason: 'Повод звонка', now: 'Тренируется ли сейчас',
   changed: 'Что изменилось', remind: 'Напоминание', passport: 'Паспорт', why: 'Зачем звоню', feedback: 'Обратная связь', early: 'Раннее продление', close: 'Закрытие',
   clarify: 'Уточнение при отказе', next: 'Следующий шаг с датой' };
@@ -130,8 +168,8 @@ export async function scriptCheckCalls(db: Db, tenantId: string, ai: AiConfig, l
   let n = 0;
   for (const c of calls) {
     const tr = c.transcript as Tr;
-    const sc = await clubScript(db, c.club_id, pickScript(c.direction, tr.text ?? '').code);
-    const all: (ScriptItem & { kind: 'step' | 'never' })[] = [...sc.steps.map((x) => ({ ...x, kind: 'step' as const })), ...sc.never.map((x) => ({ ...x, kind: 'never' as const }))];
+    const cl = await checkList(db, c.club_id, pickScript(c.direction, tr.text ?? '').code, c.started_at);
+    const sc = cl.script; const all = cl.items;
     let r: Awaited<ReturnType<typeof aiEvaluateCall>>;
     try {
       const masked = { text: maskPii(tr.text ?? ''), segments: (tr.segments ?? []).map((s) => ({ ...s, text: maskPii(s.text) })) };
@@ -143,10 +181,14 @@ export async function scriptCheckCalls(db: Db, tenantId: string, ai: AiConfig, l
     const missed = items.filter((i) => i.ok === false);
     const score = Math.round((rated.filter((i) => i.ok).length / rated.length) * 100);
     const summary = (c.essence as string | null)?.trim() || null;
-    const ins = await db.query(`insert into call_script_checks(tenant_id, club_id, call_id, user_id, script_code, items, missed, score, summary, engine)
-      values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) on conflict (call_id) do nothing`,
-    [tenantId, c.club_id, c.id, c.user_id, sc.code, JSON.stringify(items), missed.length, score, summary, r.engine ?? 'ИИ-сервер']);
+    const ins = await db.query(`insert into call_script_checks(tenant_id, club_id, call_id, user_id, script_code, items, missed, score, summary, engine, script_version)
+      values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) on conflict (call_id) do nothing`,
+    [tenantId, c.club_id, c.id, c.user_id, sc.code, JSON.stringify(items), missed.length, score, summary, r.engine ?? 'ИИ-сервер', cl.version]);
     if (!ins.rowCount) continue;
+    // Та же оценка — в «Обзоры → Качество звонков» (одна оценка звонка, а не две по разным правилам)
+    const evItems = items.map((i) => ({ id: i.id, text: i.kind === 'never' ? `Не прозвучало: ${i.text}` : i.text, weight: 1, ok: i.ok, comment: i.quote }));
+    await db.query(`insert into call_evaluations(tenant_id, club_id, call_id, user_id, standard_id, standard_version, items, score, source, engine) values ($1,$2,$3,$4,$5,$6,$7,$8,'ai',$9)
+      on conflict (call_id, source) do nothing`, [tenantId, c.club_id, c.id, c.user_id, cl.standard.id, cl.version, JSON.stringify(evItems), score, r.engine ?? 'ИИ-сервер']);
     n++;
     if (missed.length) await warn(db, tenantId, c, sc, items, missed, summary);
   }
