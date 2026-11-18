@@ -1,5 +1,6 @@
 // Отдел продаж: заявки и скорость ответа, списки обзвона, окно продлений, новички, воронка «где теряем», стоп-лист, дубли, настройки.
 // Плюс блок «Обзвон» в карточке клиента (стоп-лист и теги) и кнопка «Беру в работу».
+import { MessengerButtons } from './mobile.tsx';
 import { useEffect, useState } from 'react';
 import { ToConfig } from './toConfig.tsx';
 import { useClubPick } from './clubPick.tsx';
@@ -86,7 +87,7 @@ export function LeadsSpeed({ clubId, openPerson }: { clubId: string; openPerson:
             <thead><tr><th>Клиент</th><th>Источник</th><th>Ответственный</th><th>Ждёт</th><th></th></tr></thead>
             <tbody>{data.waiting.map((w) => (
               <tr key={w.id} className={w.waited > s.norm ? 'over' : ''}>
-                <td><button className="link" onClick={() => openPerson(w.personId)}>{w.name}</button><div className="small muted">{w.phone ?? ''} · {dt(w.createdAt)}</div></td>
+                <td><button className="link" onClick={() => openPerson(w.personId)}>{w.name}</button><div className="small muted">{w.phone ?? ''} · {dt(w.createdAt)}</div><div className="row" style={{ gap: 4, marginTop: 4 }}><MessengerButtons personId={w.personId} short /></div></td>
                 <td>{w.source ?? '—'}</td><td>{w.manager ?? <span className="chip bad">не назначен</span>}</td>
                 <td className={w.waited > s.norm ? 'bad num' : 'num'}>{Math.max(0, w.waited)} мин{w.escalated && <div className="chip bad">у РОПа</div>}</td>
                 <td><TakeLeadButton leadId={w.id} onDone={load} /></td>
@@ -121,7 +122,7 @@ function Rows({ rows, openPerson }: { rows: CRow[]; openPerson: (id: string) => 
   if (!rows.length) return <p className="muted small" style={{ margin: 0 }}>Пусто.</p>;
   return <div className="tbl"><table>
     <thead><tr><th>Клиент</th><th>Почему</th><th>Оплатил</th><th>Последний визит</th><th>Теги</th></tr></thead>
-    <tbody>{rows.map((r) => <tr key={r.personId}><td><button className="link" onClick={() => openPerson(r.personId)}>{r.name}</button><div className="small muted">{r.phone}</div></td>
+    <tbody>{rows.map((r) => <tr key={r.personId}><td><button className="link" onClick={() => openPerson(r.personId)}>{r.name}</button><div className="small muted">{r.phone}</div><div className="row" style={{ gap: 4, marginTop: 4 }}><MessengerButtons personId={r.personId} short /></div></td>
       <td className="small">{r.why}</td><td className="num">{rubles(r.paidKop)}</td><td>{r.lastVisit ? d2(r.lastVisit) : '—'}</td>
       <td>{r.tags.map((t) => <span key={t} className="chip" style={{ marginRight: 4 }}>{t}</span>)}</td></tr>)}</tbody>
   </table></div>;
@@ -181,7 +182,7 @@ function Renewals({ clubId, openPerson }: { clubId: string; openPerson: (id: str
       <div className="card"><div className="tbl"><table>
         <thead><tr><th>Клиент</th><th>Абонемент</th><th>Заканчивается</th><th>Визитов за 30 дн.</th><th>Ответственный</th><th>Звонили</th></tr></thead>
         <tbody>{rows.map((r) => <tr key={r.id} className={r.expired ? 'over' : ''}>
-          <td><button className="link" onClick={() => openPerson(r.personId)}>{r.name}</button><div className="small muted">{r.phone}</div></td>
+          <td><button className="link" onClick={() => openPerson(r.personId)}>{r.name}</button><div className="small muted">{r.phone}</div><div className="row" style={{ gap: 4, marginTop: 4 }}><MessengerButtons personId={r.personId} short /></div></td>
           <td>{r.product}</td><td className={r.expired ? 'bad' : ''}>{d2(r.endsOn)}{r.expired && <div className="small">уже закончился</div>}</td><td className="num">{r.visits30}</td>
           <td>{r.owner ?? '—'}</td><td>{r.called ? <span className="chip ok">{dt(r.lastCallAt)}</span> : <span className="chip warn">нет</span>}</td></tr>)}</tbody>
       </table></div>{rows.length === 0 && <p className="muted" style={{ margin: 0 }}>Пусто.</p>}</div>
@@ -200,7 +201,7 @@ function Newbies({ clubId, openPerson }: { clubId: string; openPerson: (id: stri
       <div className="kpis"><Kpi label={`Новичков за ${data.days} дн.`} value={data.total} /><Kpi label="Мало визитов" value={data.list.length} cls={data.list.length ? 'bad' : ''} /></div>
       <div className="card"><div className="tbl"><table>
         <thead><tr><th>Клиент</th><th>Абонемент</th><th>С</th><th>День</th><th>Визитов в 1-й месяц</th><th>Менеджер</th></tr></thead>
-        <tbody>{data.list.map((r) => <tr key={r.id}><td><button className="link" onClick={() => openPerson(r.personId)}>{r.name}</button><div className="small muted">{r.phone}</div></td>
+        <tbody>{data.list.map((r) => <tr key={r.id}><td><button className="link" onClick={() => openPerson(r.personId)}>{r.name}</button><div className="small muted">{r.phone}</div><div className="row" style={{ gap: 4, marginTop: 4 }}><MessengerButtons personId={r.personId} short /></div></td>
           <td>{r.product}</td><td>{d2(r.startedOn)}</td><td>{r.day}{!r.firstMonthOver && <div className="small muted">месяц идёт</div>}</td><td className="num bad">{r.visits}</td><td>{r.owner ?? '—'}</td></tr>)}</tbody>
       </table></div>{data.list.length === 0 && <p className="muted" style={{ margin: 0 }}>Таких нет.</p>}</div>
     </>

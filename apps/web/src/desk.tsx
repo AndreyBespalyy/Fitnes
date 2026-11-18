@@ -1,5 +1,6 @@
 // Быстрый режим ресепшна: один экран под планшет. Поиск по телефону, карте или имени → карточка с фото и решением о проходе →
 // крупные кнопки. Горячие клавиши для компьютера: «/» или F2 — поиск, Enter — первый найденный, 1–5 — действия, Esc — следующий клиент.
+import { ContactButtons } from './mobile.tsx';
 import { useEffect, useRef, useState } from 'react';
 import { api, can, type Club, type Me } from './api.ts';
 import { errText, toast } from './ui.ts';
@@ -154,6 +155,7 @@ export function DeskPage({ me, clubs, clubId, openPerson }: { me: Me; clubs: Clu
             <Photo card={card} v={photoV} onSaved={() => setPhotoV((x) => x + 1)} />
             <div style={{ display: 'grid', gap: 4, minWidth: 0 }}>
               <button className="link desk-name" onClick={() => openPerson(card.id)}>{card.name}</button>
+              <span className="row" style={{ gap: 6, flexWrap: 'wrap' }}><ContactButtons me={me} personId={card.id} clubId={clubId} /></span>
               <span className="small muted">{card.phone ?? ''}{card.depositKop ? ` · депозит ${rub(card.depositKop)}` : ''}{card.points ? ` · баллов ${card.points.balance.toLocaleString('ru-RU')}` : ''}{card.inside ? ' · сейчас в клубе' : ''}</span>
               {card.birthday && <span className="chip acc">Сегодня день рождения — поздравьте!</span>}
               <div className={`desk-verdict ${card.verdict.allow ? 'ok' : 'no'}`}>{card.verdict.allow ? '✓ Можно' : '✕ Нельзя'}: {card.verdict.reason}</div>

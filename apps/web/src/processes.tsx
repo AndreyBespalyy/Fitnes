@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react';
 import { useClubPick } from './clubPick.tsx';
 import { api, can, type Club, type Go, type Me } from './api.ts';
-import { DialButton, MessengerButtons } from './mobile.tsx';
+import { canWriteClients, DialButton, MessengerButtons } from './mobile.tsx';
 import { dt, errText, toast } from './ui.ts';
 import { SituationButton } from './agent.tsx';
 
@@ -117,7 +117,7 @@ function StepHints({ me, p, step, clubId, openPerson, go, canTab, onDone }: { me
           if (h === 'call' && p.personId) return <span key={h} style={{ display: 'contents' }}><DialButton personId={p.personId} label={`${HINT_META.call[0]} ${HINT_META.call[1]}`} className="proc-hint" />
             {!step.hints!.includes('write') && <MessengerButtons me={me} personId={p.personId} clubId={clubId} className="proc-hint" />}</span>;
           // «Написать клиенту» — сразу в WhatsApp или Telegram; без права на переписку — как раньше, карточка клиента
-          if (h === 'write' && p.personId && can(me, 'messages.work')) return <MessengerButtons key={h} me={me} personId={p.personId} clubId={clubId} className="proc-hint" />;
+          if (h === 'write' && p.personId && canWriteClients(me)) return <MessengerButtons key={h} me={me} personId={p.personId} clubId={clubId} className="proc-hint" />;
           if ((h === 'write' || h === 'card') && p.personId) return btn(h, () => openPerson(p.personId!));
           // Раздел, закрытый этой роли, в подсказках не показываем (повторная проверка CRM 18.11.2026, п. 11)
           if (h === 'team' || h === 'schedule' || h === 'staff') return go && canTab(h) ? btn(h, () => go({ tab: h })) : null;
