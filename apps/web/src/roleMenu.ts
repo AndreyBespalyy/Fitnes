@@ -10,7 +10,8 @@ export const ROLE_MENU: Record<string, string[]> = {
   // Собственник: только отчёты — финансы, посещаемость, выплаты, проблемные моменты. Без операционки.
   // Тарифы и настройки клуба — отдельным блоком «Настройки» внизу меню. «Перенос из 1С» — тоже там (17.11.2026).
   // «Товары» — в «Настройки» рядом с «Тарифами»: товары добавляют собственник и управляющий (проверка CRM 17.11.2026).
-  owner: ['problems', 'finance', 'pnl', 'load', 'cohorts', 'payouts', 'weekly', 'learn', 'reviews', 'staff', 'activity', 'tariffs', 'shop', 'config', 'telephony', 'privacy', 'import', 'system', 'notes', 'usage'],
+  // «Проходы и турникеты» — тоже в «Настройки»: подключение СКУД PocketKey и терминалы, без экрана ресепшн (18.11.2026).
+  owner: ['problems', 'finance', 'pnl', 'load', 'cohorts', 'payouts', 'weekly', 'learn', 'reviews', 'staff', 'activity', 'tariffs', 'shop', 'config', 'telephony', 'access', 'privacy', 'import', 'system', 'notes', 'usage'],
   // Управляющий: отчёты собственника по своему клубу + управление клубом. Без сетевых разделов и рабочих экранов сотрудников.
   // «Выплаты» и «Статистика сотрудников» — как у собственника, по своему клубу (проверка CRM 17.11.2026).
   gm: ['problems', 'finance', 'pnl', 'load', 'cohorts', 'payouts', 'weekly', 'learn', 'reviews', 'staff', 'activity', 'sales', 'calls', 'tasks', 'processes', 'schedule', 'home',

@@ -314,7 +314,7 @@ function Shell({ me, onLogout }: { me: Me; onLogout: () => void }) {
   return (
     <>
       <div className="shell">
-      <SideNav items={visible.map(([k, t]) => [k, t])} groupOf={ownerOnly(me) ? { tariffs: 'setup', shop: 'setup', load: 'money' } : undefined} tab={tab} setTab={(t) => setTab(t as Tab)} open={more}
+      <SideNav items={visible.map(([k, t]) => [k, t])} groupOf={ownerOnly(me) ? { tariffs: 'setup', shop: 'setup', access: 'setup', load: 'money' } : undefined} tab={tab} setTab={(t) => setTab(t as Tab)} open={more}
         brand={<div className="brand"><i />Клубная ОС</div>}
         club={clubs.length === 1 && !me.allClubs ? clubPick('club-pick') : null} />
       <div className="main-col">
