@@ -1,6 +1,9 @@
 // Шаг 13. Рабочий стол из виджетов: дашборды собственника, управляющего, РОПа и менеджера,
 // план продаж по клубу и менеджерам, нормы KPI, отчёт по продажам, словарь метрик, выгрузки.
 import { PlanDrill } from './insights.tsx';
+import { MyDay } from './myDay.tsx';
+import { useClubPick } from './clubPick.tsx';
+import { ToConfig } from './toConfig.tsx';
 import { Fragment, useEffect, useRef, useState } from 'react';
 import { api, can, type Club, type Go, type Me } from './api.ts';
 import { errText, toast } from './ui.ts';
@@ -32,6 +35,8 @@ export function DashPage({ me, clubs, clubId, openPerson, go: goTo, canGo, pickC
   const [range, setRange] = useState<{ from: string; to: string }>({ from: `${todayIso().slice(0, 7)}-01`, to: todayIso() });
   const [tick, setTick] = useState(0);
   const [metrics, setMetrics] = useState<Metric[]>([]);
+  // «Все клубы» вверху: план и нормы — по клубу, выбранному кнопками на странице (повторная проверка CRM 18.11.2026, п. 15)
+  const [pc, pcChips] = useClubPick(clubs, clubId);
   const [err, setErr] = useState('');
   const load = () => api<Layout>('GET', '/api/dash/layout').then(setLayout).catch((e) => setErr(errText(e)));
   useEffect(() => { load(); api<Metric[]>('GET', '/api/dash/metrics').then(setMetrics).catch(() => {}); }, []);
@@ -64,13 +69,14 @@ export function DashPage({ me, clubs, clubId, openPerson, go: goTo, canGo, pickC
         </div>}
       </div>
       {drill && <PlanDrill clubId={drill.clubId} month={drill.month} category={drill.category} userId={drill.userId} onClose={() => setDrill(null)} openPerson={openPerson} />}
+      {view === 'desk' && me.roles.some((r) => r.code === 'manager') && <MyDay clubs={clubs} clubId={clubId} openPerson={openPerson} />}
       {view === 'desk' && (layout.widgets.length ? layout.widgets.map((w) => <Widget key={`${w}-${clubId}`} exportable={office} id={w} q={q} tick={tick} metrics={metrics} openPerson={openPerson} nav={nav} pickClub={pickClub}
         onDrill={(x) => { const c = club?.id ?? (clubs.length === 1 ? clubs[0].id : null); if (!c) { toast('Выберите клуб вверху страницы, чтобы раскрыть цифру до клиентов'); return; } setDrill({ ...x, month, clubId: c }); }}
         title={layout.available.find((a) => a.id === w)?.title ?? w} />)
         : <div className="card"><p>На рабочем столе пока нет виджетов. Нажмите «Настроить» и выберите нужные.</p></div>)}
       {view === 'edit' && <LayoutEditor layout={layout} onSaved={() => { load(); setView('desk'); }} />}
-      {view === 'plan' && (club ? <PlanEditor club={club} month={month} setMonth={setMonth} /> : <SelectClub />)}
-      {view === 'norms' && (club ? <NormsEditor club={club} /> : <SelectClub />)}
+      {view === 'plan' && (pc ? <>{pcChips}<PlanEditor key={pc.id} club={pc} month={month} setMonth={setMonth} /></> : <SelectClub />)}
+      {view === 'norms' && (pc ? <>{pcChips}{(manage || can(me, 'sales.manage')) && <ToConfig view="sales" text="Нормы KPI и светофор меняются в «Настройки клуба → Продажи» — там же норма ответа на заявку, обзвон и Дядя Витя." />}<NormsEditor key={pc.id} club={pc} readOnly /></> : <SelectClub />)}
       {view === 'sales' && <SalesReport clubId={clubId} />}
       {view === 'metrics' && <MetricsDictionary metrics={metrics} />}
     </>
@@ -404,12 +410,12 @@ function PlanEditor({ club, month, setMonth }: { club: Club; month: string; setM
 }
 
 /* ---------- нормы KPI ---------- */
-function NormsEditor({ club }: { club: Club }) {
-  const [d, setD] = useState<{ metrics: { id: string; name: string }[]; norms: Record<string, number | null>; light: { green: number; yellow: number }; canEdit: boolean } | null>(null);
+export function NormsEditor({ club, readOnly }: { club: Club; readOnly?: boolean }) {
+  const [d, setD] = useState<{ metrics: { id: string; name: string }[]; firstResponseMinutes?: number | null; norms: Record<string, number | null>; light: { green: number; yellow: number }; canEdit: boolean } | null>(null);
   const [f, setF] = useState<Record<string, string>>({});
   const [lg, setLg] = useState({ green: '100', yellow: '85' });
   const [err, setErr] = useState('');
-  const load = () => api<NonNullable<typeof d>>('GET', `/api/kpi-norms?clubId=${club.id}`).then((x) => { setD(x); setLg({ green: String(x.light.green), yellow: String(x.light.yellow) }); setF(Object.fromEntries(x.metrics.map((m) => [m.id, x.norms[m.id] === null ? '' : String(x.norms[m.id])]))); }).catch((e) => setErr(errText(e)));
+  const load = () => api<NonNullable<typeof d>>('GET', `/api/kpi-norms?clubId=${club.id}`).then((x) => { if (readOnly) x = { ...x, canEdit: false }; setD(x); setLg({ green: String(x.light.green), yellow: String(x.light.yellow) }); setF(Object.fromEntries(x.metrics.map((m) => [m.id, x.norms[m.id] === null ? '' : String(x.norms[m.id])]))); }).catch((e) => setErr(errText(e)));
   useEffect(() => { load(); }, [club.id]);
   if (!d) return err ? <p className="err">{err}</p> : <p className="muted">Загрузка…</p>;
   const save = async () => {
@@ -425,6 +431,7 @@ function NormsEditor({ club }: { club: Club }) {
       <div className="grid2" style={{ gridTemplateColumns: 'repeat(auto-fit,minmax(200px,1fr))' }}>
         {d.metrics.map((m) => <label key={m.id} className="f">{m.name}<input inputMode="decimal" value={f[m.id] ?? ''} disabled={!d.canEdit} onChange={(e) => setF({ ...f, [m.id]: e.target.value })} /></label>)}
       </div>
+      {d.firstResponseMinutes != null && <p className="small muted" style={{ margin: 0 }}>Первый ответ на заявку: норма {d.firstResponseMinutes} мин — одна на клуб, задаётся в «Отдел продаж → Настройки → Ответ на заявку».</p>}
       <h3 style={{ margin: '6px 0 0' }}>Светофор плана</h3>
       <p className="small muted" style={{ margin: 0 }}>Сравнивается факт с планом на сегодняшний день месяца. Зелёный — не ниже первого порога, жёлтый — не ниже второго, иначе красный.</p>
       <div className="grid2" style={{ gridTemplateColumns: 'repeat(auto-fit,minmax(200px,1fr))' }}>

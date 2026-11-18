@@ -1,6 +1,7 @@
 // Шаг 10. Переписка с клиентами: единое окно (Telegram и WhatsApp), чат в карточке клиента,
 // настройки: каналы, шаблоны, автосообщения, рабочее время и автоответ.
 import { useEffect, useRef, useState, type FormEvent } from 'react';
+import { ToConfig } from './toConfig.tsx';
 import { api, can, type Club, type Me, navParams } from './api.ts';
 import { dt, errText, toast } from './ui.ts';
 import { Md } from './fiscal.tsx';
@@ -18,7 +19,7 @@ type Preview = { ready: { personId: string; name: string; text: string }[]; skip
 
 const MESSENGER: Record<string, string> = { telegram: 'Telegram', whatsapp: 'WhatsApp' };
 const EVENT: Record<string, [string, string]> = {
-  membership_ending: ['Абонемент заканчивается', 'за сколько дней до окончания'],
+  membership_ending: ['Абонемент заканчивается', 'за сколько дней до окончания (не придёт, если клиенту уже ушло досрочное продление из «Возврата клиентов»)'],
   debt_overdue: ['Долг по оплате', 'через сколько дней после срока платежа'],
   inactive: ['Давно не был в клубе', 'сколько дней без посещений'],
   birthday: ['День рождения', ''],
@@ -280,16 +281,17 @@ function Triggers({ clubId }: { clubId: string }) {
     <>
       <div className="note">Автосообщения уходят сами раз в день в выбранный час, только в рабочее время клуба. Одному клиенту — не больше лимита в неделю, повторно за тот же повод — никогда.
         Отписавшимся не уходят. Рекламные — только клиентам с согласием. По умолчанию всё выключено: включите нужные и посмотрите, кому уйдёт.</div>
+      <ToConfig view="rules" text="Включить автосообщение, за сколько дней и в котором часу — в «Настройки клуба → Сообщения клиентам», с утверждением. Здесь — шаблон и проверка." />
       {err && <div className="err">{err}</div>}
       <div className="card tbl"><table>
         <thead><tr><th>Включено</th><th>Повод</th><th>Дней</th><th>Шаблон</th><th>Час</th><th>Рекламное</th><th>За 30 дней</th><th /></tr></thead>
         <tbody>{list.map((t) => (
           <tr key={t.id}>
-            <td><input type="checkbox" style={{ width: 18, height: 18 }} checked={t.enabled} onChange={(e) => upd(t.id, { enabled: e.target.checked })} /></td>
+            <td><input type="checkbox" style={{ width: 18, height: 18 }} checked={t.enabled} disabled title="Включается в «Настройки клуба»" onChange={(e) => upd(t.id, { enabled: e.target.checked })} /></td>
             <td><b>{EVENT[t.event]?.[0]}</b>{EVENT[t.event]?.[1] && <div className="small">{EVENT[t.event][1]}</div>}</td>
-            <td>{EVENT[t.event]?.[1] ? <input type="number" min={0} max={365} style={{ width: 70 }} defaultValue={t.days} onBlur={(e) => Number(e.target.value) !== t.days && upd(t.id, { days: Number(e.target.value) })} /> : '—'}</td>
+            <td>{EVENT[t.event]?.[1] ? <input type="number" min={0} max={365} style={{ width: 70 }} defaultValue={t.days} disabled onBlur={(e) => Number(e.target.value) !== t.days && upd(t.id, { days: Number(e.target.value) })} /> : '—'}</td>
             <td><select className="f" value={t.templateId} onChange={(e) => upd(t.id, { templateId: e.target.value })}>{tpl.map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}</select></td>
-            <td><select className="f" value={t.sendHour} onChange={(e) => upd(t.id, { sendHour: Number(e.target.value) })}>{Array.from({ length: 24 }, (_, h) => <option key={h} value={h}>{h}:00</option>)}</select></td>
+            <td><select className="f" value={t.sendHour} disabled onChange={(e) => upd(t.id, { sendHour: Number(e.target.value) })}>{Array.from({ length: 24 }, (_, h) => <option key={h} value={h}>{h}:00</option>)}</select></td>
             <td><input type="checkbox" style={{ width: 18, height: 18 }} checked={t.marketing} onChange={(e) => upd(t.id, { marketing: e.target.checked })} /></td>
             <td className="num">{t.sent30}</td>
             <td className="r"><button className="btn sm" onClick={() => preview(t.id)}>Кому уйдёт сегодня</button></td>
@@ -352,11 +354,14 @@ function Settings({ clubId }: { clubId: string }) {
   const [err, setErr] = useState('');
   useEffect(() => { api<typeof s>('GET', `/api/msg/settings/${clubId}`).then(setS).catch((e) => setErr(errText(e))); }, [clubId]);
   if (!s) return <p className="muted">{err || 'Загрузка…'}</p>;
-  const save = async (e: FormEvent) => { e.preventDefault(); setErr(''); try { await api('PUT', `/api/msg/settings/${clubId}`, s); toast('Сохранено'); } catch (x) { setErr(errText(x)); } };
+  const ro = true; // меняется в «Настройки клуба» (с утверждением), здесь — просмотр
+  const save = async (e: FormEvent) => { e.preventDefault(); if (ro) return; setErr(''); try { await api('PUT', `/api/msg/settings/${clubId}`, s); toast('Сохранено'); } catch (x) { setErr(errText(x)); } };
   const hours = (from: number, to: number) => Array.from({ length: to - from + 1 }, (_, i) => from + i);
   return (
     <form className="card" onSubmit={save} style={{ display: 'grid', gap: 10, maxWidth: 640 }}>
       <h2>Рабочее время переписки</h2>
+      <ToConfig view="rules" text="Рабочее время, автоответ и лимит автосообщений меняются в «Настройки клуба → Сообщения клиентам», с утверждением и историей." />
+      <fieldset disabled={ro} style={{ border: 0, padding: 0, margin: 0, display: 'grid', gap: 10 }}>
       <div className="row">
         <label className="f">С<select className="f" value={s.workFrom} onChange={(e) => setS({ ...s, workFrom: Number(e.target.value) })}>{hours(0, 23).map((h) => <option key={h} value={h}>{h}:00</option>)}</select></label>
         <label className="f">До<select className="f" value={s.workTo} onChange={(e) => setS({ ...s, workTo: Number(e.target.value) })}>{hours(1, 24).map((h) => <option key={h} value={h}>{h}:00</option>)}</select></label>
@@ -364,9 +369,9 @@ function Settings({ clubId }: { clubId: string }) {
       <label className="row"><input type="checkbox" style={{ width: 18, height: 18 }} checked={s.autoreplyEnabled} onChange={(e) => setS({ ...s, autoreplyEnabled: e.target.checked })} />
         Автоответ на сообщения в нерабочее время (не чаще раза в 12 часов одному клиенту)</label>
       <label className="f">Текст автоответа<textarea rows={3} value={s.autoreplyText} onChange={(e) => setS({ ...s, autoreplyText: e.target.value })} /></label>
-      <label className="f">Не больше автосообщений одному клиенту в неделю<input type="number" min={0} max={14} value={s.maxAutoPerWeek} onChange={(e) => setS({ ...s, maxAutoPerWeek: Number(e.target.value) })} /></label>
+      <label className="f">Не больше автосообщений одному клиенту в неделю<input type="number" min={0} max={14} value={s.maxAutoPerWeek} onChange={(e) => setS({ ...s, maxAutoPerWeek: Number(e.target.value) })} /><span className="muted small">Считаются все рассылки клуба: автосообщения, правила, возврат клиентов, досрочное продление, опросы. Ответы бота и напоминания о записи не считаются.</span></label>
+      </fieldset>
       {err && <div className="err">{err}</div>}
-      <div><button className="btn pri">Сохранить</button></div>
     </form>
   );
 }

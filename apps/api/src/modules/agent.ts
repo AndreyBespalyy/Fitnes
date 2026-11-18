@@ -29,7 +29,7 @@ export type Facts = {
   opportunity: null | { id: string; pipeline: string; stage: string; status: string; owner: string | null; amountExpected: string | null; createdAt: string;
     lostReason: string | null; daysInStage: number; stageHistory: { at: string; from: string | null; to: string; actor: string | null; comment: string | null }[] };
   tasks: { title: string; kind: string; dueAt: string; doneAt: string | null; result: string | null; assignee: string | null; overdue: boolean }[];
-  leads: { at: string; source: string | null; comment: string | null; firstResponseMin: number | null }[];
+  leads: { at: string; source: string | null; comment: string | null; firstResponseMin: number | null; late?: boolean }[];
   meetings: { at: string; status: string }[];
   calls: { at: string; direction: string; manager: string | null; durationSec: number | null; essence: string | null; need: string | null; objections: string[];
     agreements: string | null; outcome: string | null; nextStep: string | null; transcript: string | null }[];
@@ -59,9 +59,10 @@ async function personFacts(db: Db, personId: string, oppId: string | null, f: Fa
      order by coalesce(t.done_at, t.due_at) desc limit 20`, [personId, oppId])).rows
     .map((r) => ({ title: r.title, kind: KIND[r.kind] ?? r.kind, dueAt: r.due_at, doneAt: r.done_at, result: r.result, assignee: r.assignee, overdue: r.overdue }));
   f.leads = (await db.query(
-    `select l.created_at, s.name as source, l.comment, extract(epoch from l.first_response_at - l.created_at) / 60 as frm
+    `select l.created_at, s.name as source, l.comment, extract(epoch from l.first_response_at - l.created_at) / 60 as frm,
+       (l.first_response_at is null or l.first_response_at > l.first_response_due_at) as late
      from leads l left join lead_sources s on s.id = l.source_id where l.person_id = $1 order by l.created_at desc limit 5`, [personId])).rows
-    .map((r) => ({ at: r.created_at, source: r.source, comment: r.comment, firstResponseMin: r.frm == null ? null : Math.round(Number(r.frm)) }));
+    .map((r) => ({ at: r.created_at, source: r.source, comment: r.comment, firstResponseMin: r.frm == null ? null : Math.round(Number(r.frm)), late: !!r.late }));
   f.meetings = (await db.query(`select scheduled_at, status from meetings where person_id = $1 order by scheduled_at desc limit 5`, [personId])).rows
     .map((r) => ({ at: r.scheduled_at, status: MEETING[r.status] ?? r.status }));
   f.calls = (await db.query(
@@ -282,7 +283,7 @@ export function rulesBrief(f: Facts) {
     out.push('');
   }
   if (f.observations.length) {
-    out.push('**Наблюдения ИИ-помощника**');
+    out.push('**Наблюдения Дяди Вити**');
     for (const o of f.observations.slice(0, 4)) out.push(`• ${fmtDate(o.at, tz)}: ${cut(o.text, 200)}`);
   }
   return fitBrief(out.join('\n'));

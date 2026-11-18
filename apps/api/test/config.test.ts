@@ -152,6 +152,13 @@ test('наборы под тип клуба, история настройки �
   await assert.rejects(sql(`update config_versions set data = '{}' where id = $1`, [d.id]), /уже не черновик/);
   // Менеджер не видит конструктор настроек
   assert.equal((await req('GET', `/api/config?clubId=${centr}`, 'm.volkova')).statusCode, 403);
+  // Общая история изменений настроек клуба: публикации и откат видны управляющему и РОПу, менеджеру — нет (повторная проверка CRM 18.11.2026, п. 4)
+  const ch = await req('GET', `/api/config/changes?clubId=${centr}`, 'o.smirnov');
+  assert.equal(ch.statusCode, 200, ch.body);
+  const acts = ch.json().map((x: { action: string }) => x.action);
+  assert.ok(acts.includes('config.published') && acts.includes('config.rolled_back'), JSON.stringify(acts));
+  assert.equal((await req('GET', `/api/config/changes?clubId=${centr}`, 'o.astafeva')).statusCode, 200);
+  assert.equal((await req('GET', `/api/config/changes?clubId=${centr}`, 'm.volkova')).statusCode, 403);
 });
 
 test('стандарт продаж версионируется: прошлая версия действует для прошлых звонков', async () => {

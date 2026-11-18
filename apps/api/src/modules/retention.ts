@@ -16,7 +16,7 @@ import { processNewbies } from './newbie.ts';
 import { churnPlays, trackChurnOutcomes } from './churn.ts';
 import { processOnlineOrders } from './onlineBuy.ts';
 import { processCompanyInvoices } from './familyCorp.ts';
-import { conversationFor, deliver, queueMessage, renderTemplate } from './messaging.ts';
+import { autoLimitReason, conversationFor, deliver, queueMessage, renderTemplate } from './messaging.ts';
 import type { Fetch } from './msgProviders.ts';
 
 type Actor = { tenantId: string; userId: string | null };
@@ -99,6 +99,8 @@ export async function launchCampaign(db: Db, f: Fetch | null, ctx: Pick<Ctx, 'te
   for (const p of list) {
     let [ch, reason] = channelFor(p, hasWa, c.call_without_messenger);
     let mid: string | null = null; let tid: string | null = null;
+    const lim = ch === 'message' ? await autoLimitReason(db, p.personId, c.club_id) : null;
+    if (lim) { ch = c.call_without_messenger ? 'call' : 'skip'; reason = lim; }
     if (ch === 'message') {
       const text = await renderTemplate(db, c.template, p.personId, c.club_id, { предложение: c.offer || 'специальное предложение для возвращения' });
       mid = await sendText(db, f, ctx, p.personId, c.club_id, text);
@@ -138,8 +140,12 @@ export async function trackResults(db: Db, actor: Actor, clubId: string) {
 
 /** Досрочное продление: предложения клиентам, у кого абонемент заканчивается через early_days дней */
 export async function earlyRenewals(db: Db, f: Fetch | null, actor: Actor, clubId: string, today: string) {
-  const s = (await db.query('select * from club_retention_settings where club_id = $1', [clubId])).rows[0]
+  const s0 = (await db.query('select * from club_retention_settings where club_id = $1', [clubId])).rows[0]
     ?? { early_enabled: true, early_days: 30, early_call_without_messenger: true, early_template: null };
+  // Одно правило продления (повторная проверка CRM 18.11.2026, п. 5): «за сколько дней» — это «Напомнить о продлении за N дн.»
+  // из настроек абонементов; автосообщение «Окончание абонемента» не пишет тем, кому уже ушло предложение досрочного продления.
+  const rd = (await db.query('select renewal_reminder_days as d from club_membership_settings where club_id = $1', [clubId])).rows[0]?.d;
+  const s = { ...s0, early_days: Number(rd ?? s0.early_days) };
   if (!s.early_enabled) return 0;
   const template = s.early_template ?? EARLY_TEMPLATE;
   const list = (await db.query(`select m.id, m.person_id, m.product_id, m.product_name, to_char(m.ends_on, 'YYYY-MM-DD') as ends_on, p.messaging_opt_out, pr.is_active,
@@ -157,12 +163,14 @@ export async function earlyRenewals(db: Db, f: Fetch | null, actor: Actor, clubI
     if (!m.is_active || !m.pv_id) { await ins('skipped', 'тариф снят с продажи: подберите другой при продлении', null, null); continue; }
     const price = rub(Number(m.pv_amount));
     const text = await renderTemplate(db, template, m.person_id, clubId, { абонемент: m.product_name, дата_окончания: ru(m.ends_on), цена: price });
-    const mid = m.messaging_opt_out ? null : await sendText(db, f, actor, m.person_id, clubId, text);
+    const lim = m.messaging_opt_out ? null : await autoLimitReason(db, m.person_id, clubId);
+    const mid = m.messaging_opt_out || lim ? null : await sendText(db, f, actor, m.person_id, clubId, text);
     if (mid) { await ins('sent', null, mid, null); n++; continue; }
+    const why = m.messaging_opt_out ? 'отказался от сообщений' : lim ?? 'нет мессенджера';
     if (s.early_call_without_messenger) {
       const tid = await task(db, actor, clubId, m.person_id, `Досрочное продление «${m.product_name}»: предложить по текущей цене ${price}, цена держится до ${ru(m.ends_on)}`, 48);
-      await ins('call', m.messaging_opt_out ? 'отказался от сообщений' : 'нет мессенджера', null, tid); n++;
-    } else await ins('skipped', m.messaging_opt_out ? 'отказался от сообщений' : 'нет мессенджера', null, null);
+      await ins('call', why, null, tid); n++;
+    } else await ins('skipped', why, null, null);
   }
   return n;
 }
@@ -311,6 +319,8 @@ export function retentionRoutes(app: FastifyInstance, pool: pg.Pool, opts: { fet
       await club(db, clubId);
       const s = (await db.query(`select early_enabled as "enabled", early_days as "days", early_call_without_messenger as "callWithoutMessenger", early_template as template
         from club_retention_settings where club_id = $1`, [clubId])).rows[0] ?? { enabled: true, days: 30, callWithoutMessenger: true, template: EARLY_TEMPLATE };
+      const rd = (await db.query('select renewal_reminder_days as d from club_membership_settings where club_id = $1', [clubId])).rows[0]?.d;
+      if (rd != null) s.days = Number(rd);
       const offers = (await db.query(`select o.id, o.person_id as "personId", p.full_name as name, m.product_name as product, o.amount_kop as "amountKop", to_char(o.valid_until, 'YYYY-MM-DD') as "validUntil",
           o.status, o.skip_reason as reason, o.replied_at as "repliedAt", o.created_at as "createdAt", (n.id is not null) as renewed
         from renewal_offers o join persons p on p.id = o.person_id join memberships m on m.id = o.membership_id
@@ -333,6 +343,7 @@ export function retentionRoutes(app: FastifyInstance, pool: pg.Pool, opts: { fet
         on conflict (club_id) do update set early_enabled = excluded.early_enabled, early_days = excluded.early_days, early_call_without_messenger = excluded.early_call_without_messenger,
           updated_by = excluded.updated_by, updated_at = now()`, [b.clubId, ctx.tenantId, b.enabled !== false, days, b.callWithoutMessenger !== false, ctx.userId]);
       if (b.template?.trim()) await db.query('update club_retention_settings set early_template = $2 where club_id = $1', [b.clubId, b.template.trim()]);
+      await db.query('update club_membership_settings set renewal_reminder_days = $2 where club_id = $1', [b.clubId, days]);
       await audit(db, ctx, 'retention.early_settings', 'club', b.clubId!, null, { enabled: b.enabled !== false, days });
       return { ok: true };
     });

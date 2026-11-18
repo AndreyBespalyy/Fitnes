@@ -260,9 +260,9 @@ function QualityView({ clubId }: { clubId: string }) {
   );
 }
 
-/** Оценка разговора по чек-листу стандарта (в карточке разговора) */
+/** Оценка разговора по скрипту — тот же список, что у Дяди Вити (в карточке разговора) */
 export function CallEvaluation({ callId }: { callId: string }) {
-  const [d, setD] = useState<{ standard: { versionNo: number; items: { id: string; text: string; weight: number }[] }; evaluations: { source: string; items: { id: string; text: string; weight: number; ok: boolean | null; comment?: string }[]; score: number; standardVersion: number; by: string | null; at: string; engine: string | null }[]; canEvaluate: boolean } | null>(null);
+  const [d, setD] = useState<{ standard: { versionNo: number; title?: string; items: { id: string; text: string; weight: number }[] }; evaluations: { source: string; items: { id: string; text: string; weight: number; ok: boolean | null; comment?: string }[]; score: number; standardVersion: number; by: string | null; at: string; engine: string | null }[]; canEvaluate: boolean } | null>(null);
   const [marks, setMarks] = useState<Record<string, boolean | null>>({});
   const load = () => api<NonNullable<typeof d>>('GET', `/api/calls/${callId}/evaluation`).then((x) => { setD(x); const rop = x.evaluations.find((e) => e.source === 'rop'); setMarks(Object.fromEntries((rop?.items ?? x.standard.items.map((i) => ({ ...i, ok: null }))).map((i) => [i.id, i.ok ?? null]))); }).catch(() => setD(null));
   useEffect(() => { load(); }, [callId]);
@@ -272,13 +272,13 @@ export function CallEvaluation({ callId }: { callId: string }) {
   const save = async () => { try { const r = await api<{ score: number }>('POST', `/api/calls/${callId}/evaluation`, { items: Object.entries(marks).map(([id, ok]) => ({ id, ok })) }); toast(`Оценка сохранена: ${r.score} %`); load(); } catch (x) { toast(errText(x)); } };
   return (
     <div className="card" style={{ display: 'grid', gap: 6 }}>
-      <h2 style={{ margin: 0 }}>Разговор по стандарту {rop ? `· ${rop.score} %` : ''}</h2>
-      <div className="small muted">Чек-лист версии {rop?.standardVersion ?? d.standard.versionNo} — действовал в момент звонка.{ai ? ` Оценка ИИ: ${ai.score} %.` : ''}{rop?.by ? ` Оценил ${rop.by} ${dt(rop.at)}.` : ''}</div>
+      <h2 style={{ margin: 0 }}>Разговор по скрипту{d.standard.title ? ` «${d.standard.title}»` : ''} {rop ? `· ${rop.score} %` : ''}</h2>
+      <div className="small muted">Этапы скрипта и пункты для всех звонков, версия {rop?.standardVersion ?? d.standard.versionNo} — действовала в момент звонка.{ai ? ` Оценка Дяди Вити: ${ai.score} %.` : ''}{rop?.by ? ` Оценил ${rop.by} ${dt(rop.at)}.` : ''}</div>
       {items.map((i) => {
         const aiItem = ai?.items.find((x) => x.id === i.id);
         return (
           <div key={i.id} className="row between" style={{ gap: 6, flexWrap: 'wrap' }}>
-            <span className="small" style={{ flex: '1 1 240px' }}>{i.text} <span className="muted">(вес {i.weight}){aiItem && aiItem.ok !== null ? ` · ИИ: ${aiItem.ok ? 'да' : 'нет'}` : ''}</span></span>
+            <span className="small" style={{ flex: '1 1 240px' }}>{i.text} <span className="muted">{aiItem && aiItem.ok !== null ? `Дядя Витя: ${aiItem.ok ? 'да' : 'нет'}` : ''}</span></span>
             {d.canEvaluate ? <span className="row" style={{ gap: 4 }}>
               <button className={`btn sm ${marks[i.id] === true ? 'pri' : ''}`} onClick={() => setMarks({ ...marks, [i.id]: true })}>да</button>
               <button className={`btn sm ${marks[i.id] === false ? 'pri' : ''}`} onClick={() => setMarks({ ...marks, [i.id]: false })}>нет</button>

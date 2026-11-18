@@ -9,7 +9,8 @@ import { audit, withCtx, type Db } from '../db.ts';
 import { badRequest, forbidden, notFound } from '../errors.ts';
 import { PERMISSIONS as P } from '../roles.ts';
 import { addressName, givenName } from '../lib/names.ts';
-import { SCRIPTS, type ScriptItem } from './agentScripts.ts';
+import { SCRIPTS, STAGE, clubVars, type ScriptItem } from './agentScripts.ts';
+import { standardAt } from './config.ts';
 
 type Line = [stage: string, text: string];
 type Book = { code: string; title: string; lines: Line[]; ifSays: Line[]; never: string };
@@ -17,7 +18,7 @@ type Book = { code: string; title: string; lines: Line[]; ifSays: Line[]; never:
 /** {к} — имя клиента, {я} — имя менеджера, {когда} — день и время встречи, {откуда} — откуда знакомы, {до} — дата окончания абонемента */
 const BOOK: Book[] = [
   { code: 'lead', title: 'Звонок по заявке', lines: [
-    ['Контакт', '«{к}, добрый день! Это {я} из Сандов Фитнес. Вы оставляли заявку — спасибо. Удобно две минуты?»'],
+    ['Контакт', '«{к}, добрый день! Это {я} из {клуба}. Вы оставляли заявку — спасибо. Удобно две минуты?»'],
     ['Дорога', '«Вы рядом живёте или работаете?»'],
     ['Ожидания', '«А чего вы ждёте от занятий? Что должно измениться — тонус, вес, осанка, сила, спина?» Если «просто позаниматься»: «А главное что — тело подтянулось, вес пошёл вниз, или спина перестала беспокоить?»'],
     ['Что мешало', '«А что мешало заниматься раньше?»'],
@@ -27,7 +28,7 @@ const BOOK: Book[] = [
     ['День и время', '«Вам удобнее в будни или на выходных?» → «Утром или вечером?» → «Тогда {когда} — записываю»'],
     ['Итог', '«{адрес}. Возьмите паспорт — пропускная система. Отправлю адрес и время в мессенджер. Телеграм или Ватсап?»'],
   ], ifSays: [
-    ['«Только цену»', '«От 2 690 ₽ в месяц, зависит от формата. Но цифра без задачи ничего не значит — на пробной подберём под вас. Давайте {когда}?»'],
+    ['«Только цену»', '«От {цена} в месяц, зависит от формата. Но цифра без задачи ничего не значит — на пробной подберём под вас. Давайте {когда}?»'],
     ['«Подумаю»', '«Конечно. Просто посмотрите клуб и попробуйте тренировку — бесплатно, ничего не теряете. В будни или на выходных?»'],
     ['«Дорого»', '«Сравним не цену, а за что платите: круглосуточно, все групповые, сауна, полотенца, вода. И рассрочка на 10 платежей — около 4 330 ₽ в месяц»'],
     ['«Далеко»', '«А откуда едете? … Это N минут. Многие ходят с этой стороны, заезжают с работы. Давайте {когда} — проверите дорогу сами»'],
@@ -35,7 +36,7 @@ const BOOK: Book[] = [
   ], never: 'цена до вопросов · «вам актуально?» · «приезжайте, когда удобно»' },
 
   { code: 'base', title: 'Звонок по базе', lines: [
-    ['Контакт', '«{к}, добрый день! Это {я} из Сандов Фитнес, мы с вами раньше общались — {откуда}. Удобно пару минут?»'],
+    ['Контакт', '«{к}, добрый день! Это {я} из {клуба}, мы с вами раньше общались — {откуда}. Удобно пару минут?»'],
     ['Повод', '«Звоню с конкретным предложением: бесплатная пробная тренировка с тренером по вашей задаче. Хочу забронировать время на этой неделе»'],
     ['Сейчас', '«Скажите, вы сейчас тренируетесь?»'],
     ['Ожидания', '«А чего ждёте от занятий? Что должно измениться — тонус, вес, спина, вернуться в форму?»'],
@@ -46,13 +47,13 @@ const BOOK: Book[] = [
   ], ifSays: [
     ['«Неинтересно»', '«Уточню одно: совсем не про тренировки или сейчас не время? Если время — подберём другое, если совсем — уберу вас из списка»'],
     ['«Не звоните больше»', '«Извините за беспокойство, отмечу — больше не потревожу» (тег в тот же день)'],
-    ['«Было дорого»', '«Ориентир от 2 690 ₽ в месяц и рассрочка на 10 платежей. Но дело не в цене — приходите на бесплатную тренировку, сравните не цифры, а что получаете»'],
+    ['«Было дорого»', '«Ориентир от {цена} в месяц и рассрочка на 10 платежей. Но дело не в цене — приходите на бесплатную тренировку, сравните не цифры, а что получаете»'],
     ['«Переехал / далеко»', '«А где вы сейчас? Если это другой конец города — не буду мучить. Если рядом — найдём время»'],
     ['«Откуда мой номер?»', '«{Откуда}. Если неудобно — отмечу и больше не позвоню»'],
   ], never: 'звонить с тегом «не звонить», «Неформат», «переезд» · выдуманная акция · «вам актуально?»' },
 
   { code: 'confirm', title: 'Подтверждение встречи', lines: [
-    ['Контакт', '«{к}, добрый день! Это {я} из Сандов Фитнес. Удобно две минуты?»'],
+    ['Контакт', '«{к}, добрый день! Это {я} из {клуба}. Удобно две минуты?»'],
     ['Напоминание', '«Звоню напомнить: мы встречаемся {когда}, вас ждёт тренер»'],
     ['Дорога', '«Помощь, как добраться, нужна? {адрес}»'],
     ['Паспорт', '«Возьмите, пожалуйста, паспорт — пропускная система»'],
@@ -64,7 +65,7 @@ const BOOK: Book[] = [
   ], never: '«всё в силе?» · «вы придёте?» · «позвоните, если не сможете»' },
 
   { code: 'renewal', title: 'Продление', lines: [
-    ['Начало', '«{к}, здравствуйте! Это {я} из Сандов Фитнес. Есть пара минут?»'],
+    ['Начало', '«{к}, здравствуйте! Это {я} из {клуба}. Есть пара минут?»'],
     ['Зачем звоню', '«Звоню поблагодарить вас за то, что вы с нами, и узнать мнение о клубе — что нравится, что изменить. Передам руководству»'],
     ['Новый менеджер', 'Если раньше вёл другой менеджер: «Теперь я ваш менеджер, буду рада помочь. Как проходят тренировки?» (слово «уволился» не говорить)'],
     ['Обратная связь', '«Что особенно нравится? А что хотелось бы улучшить?» — реакция на каждый ответ'],
@@ -79,7 +80,7 @@ const BOOK: Book[] = [
   ], never: '«планируете продлевать?» · полная сумма первой · цены в переписке' },
 
   { code: 'repeat', title: 'Повторный звонок, «занят», отказ', lines: [
-    ['Контакт', '«{к}, добрый день! Это {я} из Сандов Фитнес. Договаривались созвониться сегодня. Удобно?»'],
+    ['Контакт', '«{к}, добрый день! Это {я} из {клуба}. Договаривались созвониться сегодня. Удобно?»'],
     ['Что изменилось', '«Вы были в отпуске / ждали расчёта — как сейчас?» → «Что решили?»'],
     ['Задача', 'Если задача не выяснена: «А чего ждёте от занятий?»'],
     ['День и время', '«Тогда {когда}»'],
@@ -87,15 +88,15 @@ const BOOK: Book[] = [
     ['«Занят»', '«Поняла, не буду отвлекать. Когда удобнее — утром или вечером? Записываю: завтра в 10:00. Хорошего дня!» — и одно сообщение в мессенджер'],
     ['Отказ', '«Поняла. Уточню одно: совсем не про тренировки или сейчас не время?»'],
     ['«Не время»', '«Когда удобнее — через месяц, два? Помечу и позвоню ровно тогда»'],
-    ['«Дорого»', '«Оставлю цифру: от 2 690 ₽ в месяц, рассрочка на 10 платежей. Передумаете — я на связи»'],
+    ['«Дорого»', '«Оставлю цифру: от {цена} в месяц, рассрочка на 10 платежей. Передумаете — я на связи»'],
     ['«Переехал»', '«Спасибо, что сказали. Больше не буду беспокоить — отмечу. Хороших вам тренировок на новом месте!» Ставим тег'],
     ['«Не звоните»', '«Извините за беспокойство, отмечу, чтобы больше мы вам не звонили». Тег в тот же день'],
     ['Заморозка', '«Уезжаете или восстанавливаетесь после травмы? От этого зависит, что предложить» → «Заморозка от 7 дней, 30 дней — по действующим условиям, дата окончания сдвигается»'],
   ], never: 'спорить · дожимать после второго «нет» · отказ без тега · длинный разговор без даты' },
 
   { code: 'incoming', title: 'Входящий звонок', lines: [
-    ['Контакт', '«Сандов Фитнес, добрый день! Меня зовут {я}. Слушаю вас» (трубку до третьего гудка)'],
-    ['Вопрос о цене', '«Варианты от 2 690 ₽ в месяц, зависит от формата. Чтобы не путать вас цифрами — какую задачу ставите?»'],
+    ['Контакт', '«{клуб}, добрый день! Меня зовут {я}. Слушаю вас» (трубку до третьего гудка)'],
+    ['Вопрос о цене', '«Варианты от {цена} в месяц, зависит от формата. Чтобы не путать вас цифрами — какую задачу ставите?»'],
     ['Ожидания', '«А чего ждёте от занятий? Что должно измениться — тонус, вес, спина, сила?»'],
     ['Опыт и критерий', '«Был опыт тренировок? Что важно, чтобы было комфортно?»'],
     ['Презентация', 'Три факта под его слова: зал 1 100 м², групповые, круглосуточно, сауна и полотенца, бокс'],
@@ -176,7 +177,7 @@ export async function callScript(db: Db, ctx: { userId: string }, type: 'task' |
   // Текст — из скриптов клуба (правит РОП в «Отдел продаж → Скрипты звонков»), иначе стандартный
   const clubId = (p?.club_id as string | undefined) ?? (await db.query(`select club_id from user_assignments where user_id = $1 and club_id is not null limit 1`, [ctx.userId])).rows[0]?.club_id;
   const b = clubId ? await clubBook(db, clubId, code) : BOOK.find((x) => x.code === code)!;
-  const addr = clubId ? ((await db.query(`select address from clubs where id = $1`, [clubId])).rows[0]?.address as string | null) : null;
+  const cv = clubId ? await clubVars(db, clubId) : {};
 
   const fromWhere = visited ? 'вы были у нас на гостевом визите' : 'вы оставляли заявку';
   const vars: Record<string, string> = {
@@ -184,7 +185,8 @@ export async function callScript(db: Db, ctx: { userId: string }, type: 'task' |
     '{когда}': meet ? whenOf(new Date(meet.due_at), tz) : suggestWhen(new Date(), tz),
     '{откуда}': fromWhere, '{Откуда}': fromWhere[0].toUpperCase() + fromWhere.slice(1),
     '{до}': memb ? dmy(memb.ends) : '[дата окончания]',
-    '{адрес}': addr || '[адрес клуба]',
+    '{клуба}': cv['{клуба}'] ?? 'нашего клуба', '{клуб}': cv['{клуб}'] ?? '[название клуба]', '{цена}': cv['{цена}'] ?? '[цена из прейскуранта]',
+    '{адрес}': cv['{адрес}'] ?? '[адрес клуба]',
   };
   const fill = (s: string) => Object.entries(vars).reduce((a, [k, v]) => a.replaceAll(k, v), s);
   return {
@@ -197,7 +199,26 @@ export async function callScript(db: Db, ctx: { userId: string }, type: 'task' |
 }
 
 /* ---------- скрипты клуба: правка РОПом (проверка CRM 17.11.2026, п. 4) ---------- */
-type Own = { lines?: Line[]; ifSays?: Line[]; never?: string; steps?: ScriptItem[]; neverItems?: ScriptItem[] };
+type Own = { lines?: Line[]; ifSays?: Line[]; never?: string; steps?: ScriptItem[]; neverItems?: ScriptItem[]; stages?: Stage[] };
+/** Этап скрипта (повторная проверка CRM 18.11.2026, п. 6): пишется один раз — что говорить и что проверяет Дядя Витя рядом.
+ *  Из этапов собираются и текст для менеджера («Показать скрипт»), и пункты проверки разговора. */
+type Stage = { id: string; stage: string; say: string; check: string };
+const LABEL: Record<string, string[]> = { 'Контакт': ['contact'], 'Начало': ['contact'], 'Реакция': ['react'], 'Повод': ['reason'], 'Сейчас': ['now'], 'Финал': ['final'],
+  'Цена': ['price'], 'День и время': ['time', 'next'], 'Итог': ['final'] };
+/** Склеить «что говорить» (lines) и «что проверять» (steps) в этапы: по названию этапа, непарные — отдельными этапами */
+function toStages(lines: Line[], steps: ScriptItem[]): Stage[] {
+  const used = new Set<string>();
+  const out: Stage[] = lines.map(([stage, say], i) => {
+    const st = steps.find((x) => !used.has(x.id) && ((LABEL[stage] ?? []).includes(x.id) || STAGE[x.id] === stage));
+    if (st) used.add(st.id);
+    return { id: st?.id ?? `l${i + 1}`, stage, say, check: st?.text ?? '' };
+  });
+  for (const st of steps.filter((x) => !used.has(x.id))) out.push({ id: st.id, stage: STAGE[st.id] ?? st.text.slice(0, 40), say: st.how, check: st.text });
+  return out;
+}
+function fromStages(st: Stage[]): { lines: Line[]; steps: ScriptItem[] } {
+  return { lines: st.filter((x) => x.say).map((x) => [x.stage, x.say] as Line), steps: st.filter((x) => x.check).map((x) => ({ id: x.id, text: x.check, how: x.say })) };
+}
 const CODES = ['lead', 'incoming', 'base', 'confirm', 'renewal', 'repeat'];
 
 async function ownOf(db: Db, clubId: string, code: string) {
@@ -217,6 +238,13 @@ const cleanItems = (v: unknown, prefix: string): ScriptItem[] => (Array.isArray(
   return { id, text: String(o.text ?? '').trim().slice(0, 300), how: String(o.how ?? '').trim().slice(0, 1500) };
 }).filter((x) => x.text).slice(0, 20);
 
+/** Каждое сохранение скрипта — новая версия; разбор звонка помнит версию, по которой проверяли */
+async function newVersion(db: Db, ctx: { tenantId: string; userId: string | null }, clubId: string, code: string, data: Own | null) {
+  return (await db.query(`insert into club_call_script_versions(club_id, code, tenant_id, version_no, data, created_by)
+    values ($1, $2, $3, coalesce((select max(version_no) from club_call_script_versions where club_id = $1 and code = $2), 0) + 1, $4, $5) returning version_no`,
+  [clubId, code, ctx.tenantId, data ? JSON.stringify(data) : null, ctx.userId])).rows[0].version_no as number;
+}
+
 export function callScriptRoutes(app: FastifyInstance, pool: pg.Pool) {
   // Скрипты клуба: смотрят все в отделе продаж, правят РОП, управляющий и собственник
   app.get('/api/call-scripts', async (req) => {
@@ -228,11 +256,15 @@ export function callScriptRoutes(app: FastifyInstance, pool: pg.Pool) {
       for (const code of CODES) {
         const book = BOOK.find((x) => x.code === code)!; const check = SCRIPTS.find((x) => x.code === code)!;
         const own = await ownOf(db, clubId, code);
-        items.push({ code, title: book.title, custom: !!own, updatedAt: own?.updated_at ?? null,
-          lines: own?.data.lines?.length ? own.data.lines : book.lines, ifSays: own?.data.ifSays ?? book.ifSays, never: own?.data.never ?? book.never,
-          steps: own?.data.steps?.length ? own.data.steps : check.steps, neverItems: own?.data.neverItems?.length ? own.data.neverItems : check.never });
+        const lines = own?.data.lines?.length ? own.data.lines : book.lines; const steps = own?.data.steps?.length ? own.data.steps : check.steps;
+        const version = Number((await db.query(`select max(version_no) as v from club_call_script_versions where club_id = $1 and code = $2`, [clubId, code])).rows[0]?.v ?? 0);
+        items.push({ code, title: book.title, custom: !!own, updatedAt: own?.updated_at ?? null, version,
+          lines, ifSays: own?.data.ifSays ?? book.ifSays, never: own?.data.never ?? book.never,
+          steps, neverItems: own?.data.neverItems?.length ? own.data.neverItems : check.never, stages: own?.data.stages?.length ? own.data.stages : toStages(lines, steps) });
       }
-      return { items, canEdit: can(ctx, P.planManage) || can(ctx, P.salesManage) };
+      // Пункты для всех звонков (бывший общий чек-лист): добавляются к проверке каждого скрипта
+      const common = (await standardAt(db, clubId, new Date())).items.map((i) => i.text);
+      return { items, common, canEdit: can(ctx, P.planManage) || can(ctx, P.salesManage) };
     });
   });
   app.put('/api/call-scripts', async (req) => {
@@ -242,12 +274,20 @@ export function callScriptRoutes(app: FastifyInstance, pool: pg.Pool) {
     if (!b.clubId || !CODES.includes(b.code ?? '')) throw badRequest('Выберите клуб и скрипт');
     const data: Own = { lines: cleanLines(b.lines), ifSays: cleanLines(b.ifSays), never: String(b.never ?? '').trim().slice(0, 500),
       steps: cleanItems(b.steps, 's'), neverItems: cleanItems(b.neverItems, 'n') };
+    if (Array.isArray(b.stages)) {
+      const st: Stage[] = (b.stages as Record<string, unknown>[]).map((x, i) => ({
+        id: typeof x?.id === 'string' && /^[a-z0-9_]{1,30}$/.test(x.id) ? x.id : `s${i + 1}`, stage: String(x?.stage ?? '').trim().slice(0, 80) || `Этап ${i + 1}`,
+        say: String(x?.say ?? '').trim().slice(0, 1500), check: String(x?.check ?? '').trim().slice(0, 300) })).filter((x) => x.say || x.check).slice(0, 30);
+      const ids = new Set<string>(); for (const x of st) { while (ids.has(x.id)) x.id = `${x.id}_`.slice(0, 30); ids.add(x.id); }
+      Object.assign(data, fromStages(st), { stages: st });
+    }
     if (!data.lines!.length || !data.steps!.length) throw badRequest('В скрипте должны остаться этапы разговора и пункты проверки');
     return withCtx(pool, ctx, async (db) => {
       await db.query(`insert into club_call_scripts(club_id, code, tenant_id, data, updated_by) values ($1,$2,$3,$4,$5)
         on conflict (club_id, code) do update set data = excluded.data, updated_by = excluded.updated_by, updated_at = now()`, [b.clubId, b.code, ctx.tenantId, JSON.stringify(data), ctx.userId]);
-      await audit(db, ctx, 'call_script.updated', 'club', b.clubId!, null, { code: b.code });
-      return { ok: true };
+      const v = await newVersion(db, ctx, b.clubId!, b.code!, data);
+      await audit(db, ctx, 'call_script.updated', 'club', b.clubId!, null, { code: b.code, version: v });
+      return { ok: true, version: v };
     });
   });
   app.delete('/api/call-scripts', async (req) => {
@@ -256,6 +296,7 @@ export function callScriptRoutes(app: FastifyInstance, pool: pg.Pool) {
     const { clubId, code } = req.query as { clubId?: string; code?: string };
     return withCtx(pool, ctx, async (db) => {
       await db.query(`delete from club_call_scripts where club_id = $1 and code = $2`, [clubId, code]);
+      if (clubId && CODES.includes(code ?? '')) await newVersion(db, ctx, clubId, code!, null);
       await audit(db, ctx, 'call_script.reset', 'club', clubId ?? '', null, { code });
       return { ok: true };
     });

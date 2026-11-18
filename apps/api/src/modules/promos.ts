@@ -4,6 +4,7 @@
 // Отчёт по акции: сколько продаж, выручка, во что обошлась скидка, сколько клиентов потом продлили — окупаемость кампании.
 import type { FastifyInstance } from 'fastify';
 import type pg from 'pg';
+import { notifyApprovalRequested } from './approvalNotes.ts';
 import { can, requirePerm } from '../auth.ts';
 import { audit, withCtx, type Ctx, type Db } from '../db.ts';
 import { badRequest, HttpError, notFound } from '../errors.ts';
@@ -48,6 +49,7 @@ async function requestDiscountApproval(db: Db, ctx: Actor, a: { clubId: string; 
      values ($1,$2,'discount',$3,$4,$5,$6,$7,$8,$9,$10,$11) returning id`,
     [ctx.tenantId, a.clubId, a.objectId, a.amountKop, a.percent, a.summary, auto ? 'approved' : 'pending', ctx.userId, auto, auto ? ctx.userId : null, auto ? new Date() : null])).rows[0].id as string;
   await audit(db, ctx, auto ? 'approval.auto_approved' : 'approval.requested', 'approval', id, null, { kind: 'discount', percent: a.percent, limitPercent: lim });
+  if (!auto) await notifyApprovalRequested(db, { clubId: a.clubId, kind: 'discount', amountKop: a.amountKop, percent: a.percent, summary: a.summary, requestedBy: ctx.userId });
   return { id, approved: auto };
 }
 

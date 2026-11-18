@@ -15,9 +15,11 @@ export const ROLE_MENU: Record<string, string[]> = {
   // «Выплаты» и «Статистика сотрудников» — как у собственника, по своему клубу (проверка CRM 17.11.2026).
   gm: ['problems', 'finance', 'pnl', 'load', 'cohorts', 'payouts', 'weekly', 'learn', 'reviews', 'staff', 'activity', 'sales', 'calls', 'tasks', 'processes', 'schedule', 'home',
     'retention', 'fiscal', 'tariffs', 'shop', 'contracts', 'site', 'messaging', 'stafftime', 'config', 'telephony', 'corp', 'access', 'privacy'],
+  // «Настройки клуба» у РОПа — только вкладка «Продажи» и история (повторная проверка CRM 18.11.2026, п. 4)
   rop: ['tasks', 'processes', 'weekly', 'learn', 'hot', 'calls', 'sales', 'schedule', 'leads', 'board', 'chats', 'home', 'tariffs', 'shop', 'corp', 'load', 'cohorts',
-    'staff', 'retention', 'reviews', 'stafftime'],
-  manager: ['tasks', 'processes', 'hot', 'calls', 'sales', 'schedule', 'leads', 'board', 'chats', 'home', 'tariffs', 'shop', 'corp', 'reviews', 'stafftime'],
+    'staff', 'retention', 'reviews', 'stafftime', 'config'],
+  // «Лиды» у менеджера убраны из меню: заявки — в «Мой день» на рабочем столе, новый лид — кнопкой «+ Лид» (повторная проверка CRM 18.11.2026, п. 14)
+  manager: ['tasks', 'processes', 'hot', 'calls', 'sales', 'schedule', 'board', 'chats', 'home', 'tariffs', 'shop', 'corp', 'reviews', 'stafftime'],
   // «Мои задачи» у ресепшна, финансиста и тренера: им приходят шаги процессов и задачи из советов (проверка CRM 17.11.2026)
   desk: ['desk', 'tasks', 'schedule', 'leads', 'chats', 'home', 'access', 'tariffs', 'shop', 'finance', 'fiscal', 'stafftime'],
   fin: ['problems', 'tasks', 'finance', 'pnl', 'cohorts', 'payouts', 'weekly', 'home', 'corp', 'import', 'staff', 'reviews', 'stafftime'],
