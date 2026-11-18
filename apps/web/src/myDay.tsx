@@ -1,7 +1,7 @@
 // «Мой день менеджера» (повторная проверка CRM 18.11.2026, п. 14): что делать сейчас — на одном экране сверху вниз:
 // заявки без ответа → задачи на сегодня → кому звонить. Раньше это было в пяти разделах.
 import { useEffect, useState } from 'react';
-import { api, type Club } from './api.ts';
+import { api, type Club, type Me } from './api.ts';
 import { dt, errText } from './ui.ts';
 import { LeadsSpeed } from './salesOps.tsx';
 import { DayPlan } from './hot.tsx';
@@ -9,7 +9,7 @@ import { DayPlan } from './hot.tsx';
 type T = { id: string; title: string; dueAt: string; personId: string | null; personName: string | null; overdue: boolean; clubId: string };
 const goTo = (url: string) => window.dispatchEvent(new CustomEvent('crm-go', { detail: url }));
 
-export function MyDay({ clubs, clubId, openPerson }: { clubs: Club[]; clubId: string; openPerson: (id: string) => void }) {
+export function MyDay({ me, clubs, clubId, openPerson }: { me: Me; clubs: Club[]; clubId: string; openPerson: (id: string) => void }) {
   const club = clubId !== 'all' ? clubId : clubs[0]?.id ?? '';
   const [tasks, setTasks] = useState<T[] | null>(null);
   const [err, setErr] = useState('');
@@ -38,7 +38,7 @@ export function MyDay({ clubs, clubId, openPerson }: { clubs: Club[]; clubId: st
       </div>
       <div className="card" style={{ display: 'grid', gap: 8 }}>
         <h2 style={{ margin: 0 }}>3. Кому звонить</h2>
-        <DayPlan clubId={club} openPerson={openPerson} />
+        <DayPlan me={me} clubId={club} openPerson={openPerson} />
       </div>
     </div>
   );

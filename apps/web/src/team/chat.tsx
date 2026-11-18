@@ -548,7 +548,9 @@ function ActButtons({ acts, onAct, msgId, onDone }: { acts: Act[]; onAct: (a: Ac
     <div className="tm-acts" onClick={(e) => e.stopPropagation()}>
       {note && <small className="tm-acts-note">{note}</small>}
       {sheet?.call && <Sheet title="Позвонить клиентам" onClose={() => setSheet(null)}>
-        <div className="tm-draft">{sheet.call.persons.map((p) => <button key={p.id} type="button" className="tm-btn" onClick={() => void dialPerson(p.id, setNote)}>📞 Позвонить: {p.name}</button>)}
+        <div className="tm-draft">{sheet.call.persons.map((p) => <div key={p.id} className="tm-call-row"><button type="button" className="tm-btn" onClick={() => void dialPerson(p.id, setNote)}>📞 Позвонить: {p.name}</button>
+          <button type="button" className="tm-btn" onClick={() => void writePerson(p.id, 'whatsapp', setNote)}>WhatsApp</button>
+          <button type="button" className="tm-btn" onClick={() => void writePerson(p.id, 'telegram', setNote)}>Telegram</button></div>)}
           {note && <small>{note}</small>}</div></Sheet>}
       {sheet?.write && <WriteSheet write={sheet.write} onClose={() => setSheet(null)} />}
       {acts.map((a, i) => a.task
@@ -570,6 +572,15 @@ async function dialPerson(personId: string, say: (s: string) => void) {
     if (r.mode === 'pbx') { say(`АТС звонит вам на внутренний номер ${r.ext} — возьмите трубку, и она соединит с клиентом.`); return; }
     window.location.href = `tel:${r.phone}`;
   } catch (e) { say(e instanceof ApiError ? e.message : 'Не получилось позвонить'); }
+}
+
+/** Написать клиенту в WhatsApp или Telegram по его номеру: переписка в CRM, если канал клуба подключён, иначе — приложение на телефоне */
+async function writePerson(personId: string, messenger: 'whatsapp' | 'telegram', say: (s: string) => void) {
+  try {
+    const r = await api<{ mode: 'crm'; conversationId: string } | { mode: 'link'; url: string; note: string }>('POST', `/api/persons/${personId}/write`, { messenger });
+    if (r.mode === 'crm') { goUrl(`/?tab=chats&conv=${r.conversationId}`); return; }
+    say(r.note); window.open(r.url, '_blank', 'noopener');
+  } catch (e) { say(e instanceof ApiError ? e.message : 'Не получилось открыть переписку'); }
 }
 
 /** «Написать клиентам»: помощник готовит приглашение на ближайшее занятие, тренер проверяет и отправляет */

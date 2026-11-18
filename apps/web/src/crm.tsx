@@ -1,4 +1,4 @@
-import { DialButton } from './mobile.tsx';
+import { ContactButtons, DialButton, MessengerButtons } from './mobile.tsx';
 import { useEffect, useState, type FormEvent } from 'react';
 import { api, can, type Club, type Me, navParams } from './api.ts';
 import { dt, errText, fromLocal, localInput, toast } from './ui.ts';
@@ -201,7 +201,8 @@ export function TasksPage({ me, clubId, openPerson }: { me: Me; clubId: string; 
                   <div className="small">{dt(t.dueAt)}{scope === 'all' && t.assigneeName ? ` · ${t.assigneeName}` : ''}</div></div>
                 <div className="row">
                   {t.personId && <button className="btn sm" onClick={() => openPerson(t.personId!)}>{t.personName}</button>}
-                  {t.personId && (t.kind === 'call' || t.kind === 'first_response') && !t.doneAt && <DialButton personId={t.personId} />}
+                  {t.personId && (t.kind === 'call' || t.kind === 'first_response') && !t.doneAt && <ContactButtons me={me} personId={t.personId} clubId={clubId} />}
+                  {t.personId && t.kind !== 'call' && t.kind !== 'first_response' && !t.doneAt && <MessengerButtons me={me} personId={t.personId} clubId={clubId} />}
                   {t.callId && <button className="btn sm pri" onClick={() => setCall(t.callId)}>Итог разговора</button>}
                   {work && <SituationButton type="task" id={t.id} />}
                   {work && t.personId && ['call', 'first_response', 'meeting'].includes(t.kind) && !t.doneAt && <ScriptButton type="task" id={t.id} />}
@@ -341,7 +342,7 @@ export function PersonCard({ me: meIn, id, onClose }: { me: Me; id: string; onCl
             <div className="row" style={{ marginTop: 4 }}><span className="chip acc">{card.person.segment}</span>
               <span className="small">{card.person.homeClubName ?? 'клиент другого клуба сети'} · в базе с {dt(card.person.createdAt)}</span></div>
             {can(me, 'crm.work') && <div style={{ marginTop: 10 }}><div className="row" style={{ gap: 8, flexWrap: 'wrap' }}><SituationButton type="person" id={card.person.id} small={false} /><ScriptButton type="person" id={card.person.id} small={false} /></div></div>}</div>
-          <div className="card kv">{card.contacts.map((c, i) => <span key={i} style={{ display: 'contents' }}><span>{c.type === 'phone' ? 'Телефон' : c.type === 'email' ? 'E-mail' : c.type === 'telegram' ? 'Telegram' : c.type === 'whatsapp' ? 'WhatsApp' : c.type}</span><span className="num">{c.value}{c.type === 'phone' && c.isPrimary && <> <DialButton personId={id} label="" /></>}</span></span>)}</div>
+          <div className="card kv">{card.contacts.map((c, i) => <span key={i} style={{ display: 'contents' }}><span>{c.type === 'phone' ? 'Телефон' : c.type === 'email' ? 'E-mail' : c.type === 'telegram' ? 'Telegram' : c.type === 'whatsapp' ? 'WhatsApp' : c.type}</span><span className="num">{c.value}{c.type === 'phone' && c.isPrimary && <> <DialButton personId={id} label="" /> {!viewOnly && <MessengerButtons me={me} personId={id} short />}</>}</span></span>)}</div>
           {!can(me, 'memberships.manage') && money && card.person.autopayEnabled && <div className="item small">Подписка списывается автоматически с привязанной карты{card.person.autopayChangedAt ? ` (включено ${dt(card.person.autopayChangedAt)})` : ''}</div>}
           {can(me, 'memberships.manage') && (
             <label className="item row" style={{ gap: 10 }}>

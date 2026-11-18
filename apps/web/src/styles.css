@@ -665,3 +665,7 @@ input[type="checkbox"],input[type="radio"]{accent-color:var(--accent)}
 
 /* Подтверждение действия с деньгами или доступом (повторная проверка CRM 18.11.2026) */
 .confirm-row { border: 1px solid var(--accent); background: color-mix(in srgb, var(--accent) 8%, transparent); }
+/* Кнопки «WhatsApp» и «Telegram» рядом с «Позвонить» (18.11.2026) */
+.msgr.wa{border-color:color-mix(in srgb,#25d366 55%,transparent)}
+.msgr.tg{border-color:color-mix(in srgb,#2aabee 55%,transparent)}
+.msgr span[aria-hidden]{font-size:.9em}

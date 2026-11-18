@@ -70,9 +70,11 @@ export async function sendMessage(f: Fetch, ch: ChannelRow, chatId: string, text
   }
   if (ch.kind === 'wazzup') {
     const res = await f(`${WZ}/message`, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${need(ch.secret, 'ключ API Wazzup')}` },
-      body: JSON.stringify({ channelId: need(ch.settings.channelId, 'канал Wazzup'), chatType: ch.messenger, chatId, text }) });
+      // Первое сообщение в Telegram по номеру телефона («tel:7…»): Wazzup находит клиента в Telegram по номеру (канал Telegram-аккаунта, tgapi)
+      body: JSON.stringify({ channelId: need(ch.settings.channelId, 'канал Wazzup'), chatType: ch.messenger, text,
+        ...(chatId.startsWith('tel:') ? { phone: digits(chatId) } : { chatId }) }) });
     const r = await json(res);
-    if (!res.ok || !r.messageId) throw new ProviderError(`Wazzup: ${r.description ?? r.error ?? r.raw ?? res.status}`);
+    if (!res.ok || !r.messageId) throw new ProviderError(chatId.startsWith('tel:') && res.status === 400 ? 'Клиента нет в Telegram по этому номеру, или он закрыл поиск по номеру. Напишите в WhatsApp или позвоните' : `Wazzup: ${r.description ?? r.error ?? r.raw ?? res.status}`);
     return { externalId: String(r.messageId) };
   }
   throw new ProviderError('Неизвестный тип канала');

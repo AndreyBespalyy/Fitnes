@@ -13,6 +13,7 @@ import { createLead, normalizePhone } from './crm.ts';
 import { decrypt, encrypt } from './fiscal.ts';
 import { addDays, clubToday } from './memberships.ts';
 import { clientBot } from './clientBot.ts';
+import { guardReveal } from './privacy.ts';
 import { parseWebhook, poll, ProviderError, sendMessage, testChannel, type ChannelRow, type Fetch, type Inbound } from './msgProviders.ts';
 
 type Actor = { tenantId: string; userId: string | null; ip?: string };
@@ -23,6 +24,10 @@ const KINDS: Record<string, { name: string; messengers: string[]; polling: boole
   wazzup: { name: 'WhatsApp или Telegram через Wazzup', messengers: ['whatsapp', 'telegram'], polling: false },
   test: { name: 'Тестовый канал', messengers: ['whatsapp', 'telegram'], polling: false },
 };
+/** Диалог в Telegram, начатый по номеру телефона, пока клиент не ответил: external_chat_id = «tel:79161234567». */
+export const TEL = 'tel:';
+/** Способы, которыми можно написать клиенту первым по номеру телефона. Telegram-бот так не умеет: в бот клиент пишет сам. */
+const STARTS_BY_PHONE: Record<string, string[]> = { whatsapp: ['green_api', 'wazzup', 'test'], telegram: ['wazzup', 'test'] };
 const STOP = /^\s*(стоп|stop|отписаться|отписка)\s*[.!]?\s*$/i;
 const MAX_ATTEMPTS = 5;
 
@@ -71,6 +76,12 @@ async function settingsOf(db: Db, clubId: string) {
 /** Входящее сообщение: находит или создаёт диалог и клиента (новый — это лид с источником Telegram или WhatsApp). */
 export async function handleInbound(db: Db, actor: Actor, ch: Channel, ev: Inbound) {
   let conv = (await db.query('select * from msg_conversations where channel_id = $1 and external_chat_id = $2', [ch.id, ev.chatId])).rows[0];
+  // Менеджер начал переписку в Telegram по номеру телефона («tel:7…»): первый ответ клиента приходит уже с его Telegram-идентификатором —
+  // привязываем тот же диалог к этому идентификатору, чтобы переписка не раздвоилась
+  if (!conv && ch.messenger === 'telegram' && ev.phone && ev.ownPhone !== false) {
+    const tel = `${TEL}${ev.phone.replace(/\D/g, '').replace(/^8(\d{10})$/, '7$1')}`;
+    conv = (await db.query('update msg_conversations set external_chat_id = $3 where channel_id = $1 and external_chat_id = $2 returning *', [ch.id, tel, ev.chatId])).rows[0];
+  }
   if (conv && (await db.query('select 1 from msg_messages where conversation_id = $1 and direction = $2 and external_id = $3', [conv.id, 'in', ev.externalId])).rowCount) {
     return { duplicate: true, conversationId: conv.id as string, autoreplyId: null as string | null, botReplies: [] as string[] };
   }
@@ -382,6 +393,24 @@ async function loadConv(db: Db, ctx: Ctx, id: string) {
 const CHANNEL_SELECT = `select id, club_id as "clubId", kind, messenger, name, settings, secret_enc is not null as "hasSecret", status, client_bot as "clientBot", last_error as "lastError",
   last_ok_at as "lastOkAt", webhook_token as "webhookToken", created_at as "createdAt" from msg_channels`;
 
+/** Клиент и его номер для мессенджеров: сначала отдельный номер WhatsApp, иначе основной телефон. */
+async function personForWrite(db: Db, id: string) {
+  const p = (await db.query('select id, full_name, home_club_id from persons where id = $1', [id])).rows[0];
+  if (!p) throw notFound('Клиент не найден');
+  const phone = (await db.query(`select normalized_value from person_contacts where person_id = $1 and type in ('whatsapp', 'phone') and normalized_value like '+%'
+    order by (type = 'whatsapp') desc, is_primary desc limit 1`, [id])).rows[0]?.normalized_value as string | undefined;
+  return { id: p.id as string, fullName: p.full_name as string, homeClubId: p.home_club_id as string, phone: phone ?? null };
+}
+
+/** Диалог с клиентом по его номеру в канале клуба (создаётся, если его ещё нет). */
+async function openByPhone(db: Db, ctx: Ctx, p: { id: string; fullName: string; phone: string | null }, ch: { id: string; club_id: string; messenger: string }) {
+  const d = p.phone!.replace(/\D/g, '');
+  const chatId = ch.messenger === 'whatsapp' ? d : `${TEL}${d}`;
+  return (await db.query(`insert into msg_conversations(tenant_id, club_id, channel_id, person_id, external_chat_id, title, assigned_to) values ($1,$2,$3,$4,$5,$6,$7)
+    on conflict (channel_id, external_chat_id) do update set person_id = coalesce(msg_conversations.person_id, excluded.person_id) returning id`,
+  [ctx.tenantId, ch.club_id, ch.id, p.id, chatId, p.fullName, ctx.userId])).rows[0].id as string;
+}
+
 export function messagingRoutes(app: FastifyInstance, pool: pg.Pool, opts: { fetch?: Fetch } = {}) {
   const f = opts.fetch ?? fetch;
   const base = (req: { protocol: string; headers: Record<string, unknown> }) => process.env.PUBLIC_URL?.replace(/\/$/, '') ?? `${req.protocol}://${req.headers.host}`;
@@ -692,25 +721,57 @@ export function messagingRoutes(app: FastifyInstance, pool: pg.Pool, opts: { fet
     });
   });
 
-  // Начать диалог из карточки клиента: WhatsApp по телефону клиента
+  // Начать диалог из карточки клиента в выбранном канале: WhatsApp — по телефону; Telegram — по телефону, если канал это умеет (Wazzup)
   app.post('/api/persons/:id/conversations', async (req, reply) => {
     const ctx = requirePerm(req, P.messagesWork);
     const { id } = req.params as { id: string };
     const { channelId } = (req.body ?? {}) as { channelId?: string };
     const res = await withCtx(pool, ctx, async (db) => {
-      const p = (await db.query('select id, full_name from persons where id = $1', [id])).rows[0];
-      if (!p) throw notFound('Клиент не найден');
+      const p = await personForWrite(db, id);
       const ch = (await db.query(`select * from msg_channels where id = $1 and status = 'active'`, [channelId])).rows[0];
       if (!ch) throw badRequest('Канал не найден или отключён');
-      if (ch.messenger !== 'whatsapp') throw badRequest('В Telegram клиент должен написать клубу первым: бот не может начать переписку сам');
-      const phone = (await db.query(`select normalized_value from person_contacts where person_id = $1 and type in ('phone', 'whatsapp') order by is_primary desc limit 1`, [id])).rows[0]?.normalized_value;
-      if (!phone) throw badRequest('У клиента нет телефона');
-      return (await db.query(`insert into msg_conversations(tenant_id, club_id, channel_id, person_id, external_chat_id, title, assigned_to) values ($1,$2,$3,$4,$5,$6,$7)
-        on conflict (channel_id, external_chat_id) do update set person_id = coalesce(msg_conversations.person_id, excluded.person_id) returning id`,
-      [ctx.tenantId, ch.club_id, ch.id, id, phone.replace(/\D/g, ''), p.full_name, ctx.userId])).rows[0];
+      if (!STARTS_BY_PHONE[ch.messenger]?.includes(ch.kind)) throw badRequest('В Telegram-бот клиент должен написать клубу первым: бот не может начать переписку сам');
+      if (!p.phone) throw badRequest('У клиента нет телефона');
+      return { id: await openByPhone(db, ctx, p, ch) };
     });
     reply.code(201);
     return res;
+  });
+
+  // Кнопки «WhatsApp» и «Telegram» рядом с «Позвонить» (задачи, карточка клиента, «Кому звонить», подсказки).
+  // Номер телефона клиента по умолчанию считается его номером в WhatsApp и Telegram (решение Андрея 18.11.2026).
+  // 1) уже есть переписка в этом мессенджере → открываем её; 2) в клубе подключён канал, который умеет писать первым по номеру → новый диалог в CRM;
+  // 3) канала нет → ссылка, которая открывает чат с клиентом в приложении на устройстве сотрудника (wa.me / t.me/+номер).
+  app.post('/api/persons/:id/write', async (req) => {
+    const ctx = requirePerm(req, P.messagesWork);
+    const { id } = req.params as { id: string };
+    const { messenger, clubId } = (req.body ?? {}) as { messenger?: string; clubId?: string };
+    if (messenger !== 'whatsapp' && messenger !== 'telegram') throw badRequest('Выберите WhatsApp или Telegram');
+    const name = messenger === 'whatsapp' ? 'WhatsApp' : 'Telegram';
+    const r = await withCtx(pool, ctx, async (db) => {
+      const p = await personForWrite(db, id);
+      const mine = onlyMine(ctx);
+      const conv = (await db.query(`select c.id from msg_conversations c join msg_channels ch on ch.id = c.channel_id
+        where c.person_id = $1 and ch.messenger = $2 and ch.status = 'active' and ($3::uuid is null or c.assigned_to is null or c.assigned_to = $3)
+        order by c.last_message_at desc nulls last, c.created_at desc limit 1`, [id, messenger, mine ? ctx.userId : null])).rows[0];
+      if (conv) return { mode: 'crm' as const, conversationId: conv.id as string };
+      if (!p.phone) throw badRequest(`У клиента нет телефона: добавьте номер в карточке, и по нему можно будет написать в ${name}`, 'no_phone');
+      const club = clubId && clubId !== 'all' ? clubId : p.homeClubId;
+      const ch = (await db.query(`select * from msg_channels where club_id = $1 and messenger = $2 and status = 'active' and kind = any($3::text[])
+        order by (kind = 'test'), created_at limit 1`, [club, messenger, STARTS_BY_PHONE[messenger]])).rows[0]
+        ?? (await db.query(`select * from msg_channels where club_id = $1 and messenger = $2 and status = 'active' and kind = any($3::text[])
+        order by (kind = 'test'), created_at limit 1`, [p.homeClubId, messenger, STARTS_BY_PHONE[messenger]])).rows[0];
+      if (ch) return { mode: 'crm' as const, conversationId: await openByPhone(db, ctx, p, ch) };
+      return { mode: 'link' as const, digits: p.phone.replace(/\D/g, '') };
+    });
+    if (r.mode === 'crm') return r;
+    // Ссылка раскрывает полный номер — тот же лимит и журнал, что у кнопки «Позвонить»
+    await guardReveal(pool, ctx, { personId: id });
+    await withCtx(pool, ctx, (db) => audit(db, ctx, 'person.write_link', 'person', id, null, { messenger }));
+    return {
+      mode: 'link', url: messenger === 'whatsapp' ? `https://wa.me/${r.digits}` : `https://t.me/+${r.digits}`,
+      note: `В клубе не подключён ${name} для переписки из CRM. Открываю чат с клиентом в ${name} на этом устройстве.`,
+    };
   });
 
   // Согласие на рассылки и отписка — в карточке клиента

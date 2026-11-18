@@ -1,6 +1,6 @@
 // Шаг 16. Мобильное рабочее место: установка на телефон, push-уведомления, мои устройства, работа без связи, звонок в один клик.
 import { ManagerRatings } from './rating.tsx';
-import { useEffect, useRef, useState } from 'react';
+import { lazy, Suspense, useEffect, useRef, useState } from 'react';
 import { api, can, clearFailed, onNet, netState, flushQueue, type Me, type NetState } from './api.ts';
 import { dt, errText, toast } from './ui.ts';
 import { StaffBotBlock, TelegramBlock } from './telegram.tsx';
@@ -41,6 +41,39 @@ export function DialButton({ personId, label = 'Позвонить', className =
     } catch (x) { toast(errText(x)); } finally { setBusy(false); }
   };
   return <button className={className} onClick={dial} disabled={busy} title="Звонок через АТС клуба, а без неё — с телефона. Звонок записывается в журнал">📞 {label}</button>;
+}
+
+/* ---------- написать в WhatsApp или Telegram (рядом с «Позвонить») ---------- */
+// Номер телефона клиента по умолчанию считается его номером в WhatsApp и Telegram. Если в клубе подключён канал —
+// переписка открывается прямо в CRM (окно поверх страницы), иначе — чат с клиентом в приложении на устройстве сотрудника.
+const ChatPopup = lazy(() => import('./chat.tsx').then((m) => ({ default: m.ChatPopup })));
+export function MessengerButtons({ me, personId, clubId, className = 'btn sm', short }: { me: Me; personId: string; clubId?: string; className?: string; short?: boolean }) {
+  const [busy, setBusy] = useState<string | null>(null);
+  const [conv, setConv] = useState<string | null>(null);
+  if (!can(me, 'messages.work')) return null;
+  const write = async (messenger: 'whatsapp' | 'telegram') => {
+    setBusy(messenger);
+    try {
+      const r = await api<{ mode: 'crm'; conversationId: string } | { mode: 'link'; url: string; note: string }>('POST', `/api/persons/${personId}/write`, { messenger, clubId });
+      if (r.mode === 'crm') { setConv(r.conversationId); return; }
+      toast(r.note);
+      window.open(r.url, '_blank', 'noopener');
+    } catch (x) { toast(errText(x)); } finally { setBusy(null); }
+  };
+  return (
+    <>
+      <button className={`${className} msgr wa`} onClick={() => write('whatsapp')} disabled={!!busy} title="Написать клиенту в WhatsApp по его номеру телефона">
+        <span aria-hidden>🟢</span> {short ? 'WA' : 'WhatsApp'}</button>
+      <button className={`${className} msgr tg`} onClick={() => write('telegram')} disabled={!!busy} title="Написать клиенту в Telegram по его номеру телефона">
+        <span aria-hidden>✈️</span> {short ? 'TG' : 'Telegram'}</button>
+      {conv && <Suspense fallback={null}><ChatPopup me={me} conversationId={conv} onClose={() => setConv(null)} /></Suspense>}
+    </>
+  );
+}
+
+/** «Позвонить» + «WhatsApp» + «Telegram» — одним блоком везде, где можно связаться с клиентом. */
+export function ContactButtons({ me, personId, clubId, label, className }: { me: Me; personId: string; clubId?: string; label?: string; className?: string }) {
+  return <><DialButton personId={personId} label={label} className={className} /><MessengerButtons me={me} personId={personId} clubId={clubId} className={className} /></>;
 }
 
 /* ---------- профиль: пароль, уведомления, устройства, установка ---------- */

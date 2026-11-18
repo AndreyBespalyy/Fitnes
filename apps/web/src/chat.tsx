@@ -1,6 +1,7 @@
 // Шаг 10. Переписка с клиентами: единое окно (Telegram и WhatsApp), чат в карточке клиента,
 // настройки: каналы, шаблоны, автосообщения, рабочее время и автоответ.
 import { useEffect, useRef, useState, type FormEvent } from 'react';
+import { createPortal } from 'react-dom';
 import { ToConfig } from './toConfig.tsx';
 import { api, can, type Club, type Me, navParams } from './api.ts';
 import { dt, errText, toast } from './ui.ts';
@@ -37,12 +38,19 @@ const who = (c: Conv) => c.personName ?? c.title;
 export function ChatsPage({ me, clubs, clubId, openPerson }: { me: Me; clubs: Club[]; clubId: string; openPerson: (id: string) => void }) {
   const [list, setList] = useState<Conv[]>([]);
   const [filter, setFilter] = useState(() => navParams('chats').filter ?? 'all');
-  const [open, setOpen] = useState<string | null>(null);
+  // Переход из кнопки «WhatsApp» / «Telegram» в приложении команды: /?tab=chats&conv=<диалог>
+  const [open, setOpen] = useState<string | null>(() => navParams('chats').conv ?? null);
   const [q, setQ] = useState('');
   const load = () => api<Conv[]>('GET', `/api/msg/conversations?filter=${filter}${clubId !== 'all' ? `&clubId=${clubId}` : ''}`).then(setList).catch(() => {});
   useEffect(() => { load(); const t = setInterval(load, 5000); return () => clearInterval(t); }, [filter, clubId]);
   const shown = list.filter((c) => !q || who(c).toLowerCase().includes(q.toLowerCase()) || (q.replace(/\D/g, '').length >= 4 && c.chatId.endsWith(q.replace(/\D/g, ''))));
-  const cur = list.find((c) => c.id === open) ?? null;
+  // Диалог, открытый по ссылке, может не попасть в первые 200 списка — подгружаем его отдельно
+  const [extra, setExtra] = useState<Conv | null>(null);
+  useEffect(() => {
+    if (!open || list.some((c) => c.id === open) || extra?.id === open) return;
+    api<{ conversation: Conv }>('GET', `/api/msg/conversations/${open}/messages`).then((r) => setExtra(r.conversation)).catch(() => {});
+  }, [open, list]);
+  const cur = list.find((c) => c.id === open) ?? (extra?.id === open ? extra : null);
   return (
     <div className="chat-layout">
       <div className={`card chat-list ${open ? 'hide-narrow' : ''}`}>
@@ -127,6 +135,23 @@ export function ChatPane({ me, conv, onBack, onSent, openPerson, compact }: { me
   );
 }
 
+/* ---------------- окно переписки поверх любой страницы (кнопки «WhatsApp» и «Telegram») ---------------- */
+export function ChatPopup({ me, conversationId, onClose }: { me: Me; conversationId: string; onClose: () => void }) {
+  const [conv, setConv] = useState<Conv | null>(null);
+  const [err, setErr] = useState('');
+  useEffect(() => { api<{ conversation: Conv }>('GET', `/api/msg/conversations/${conversationId}/messages`).then((r) => setConv(r.conversation)).catch((e) => setErr(errText(e))); }, [conversationId]);
+  useEffect(() => { const k = (e: KeyboardEvent) => { if (e.key === 'Escape') { e.stopPropagation(); onClose(); } }; window.addEventListener('keydown', k, true); return () => window.removeEventListener('keydown', k, true); }, []);
+  return createPortal(
+    <div className="modal-bg brief-bg" role="dialog" aria-modal="true" aria-label="Переписка с клиентом" onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+      <div className="card modal" style={{ display: 'grid', gap: 10, maxWidth: 640, width: '100%' }}>
+        <div className="row between"><h2 style={{ margin: 0 }}>{conv ? `${MESSENGER[conv.messenger]}: ${who(conv)}` : 'Переписка'}</h2><button className="btn sm" onClick={onClose} aria-label="Закрыть">×</button></div>
+        {err && <div className="err">{err}</div>}
+        {conv && conv.chatId.startsWith('tel:') && <div className="note small">Пишем в Telegram по номеру телефона клиента. Когда клиент ответит, переписка продолжится здесь же.</div>}
+        {conv ? <ChatPane me={me} conv={conv} compact /> : !err && <p className="muted">Открываю переписку…</p>}
+      </div>
+    </div>, document.body);
+}
+
 /* ---------------- переписка в карточке клиента ---------------- */
 export function PersonChats({ me, personId, homeClubId, marketingConsent, optOut, reload }: { me: Me; personId: string; homeClubId: string | null;
   marketingConsent: boolean; optOut: boolean; reload: () => void }) {
@@ -136,7 +161,8 @@ export function PersonChats({ me, personId, homeClubId, marketingConsent, optOut
   const [err, setErr] = useState('');
   const load = () => api<Conv[]>('GET', `/api/msg/conversations?personId=${personId}`).then((x) => { setConvs(x); setOpen((o) => o ?? x[0]?.id ?? null); }).catch(() => {});
   useEffect(() => { load(); api<Channel[]>('GET', `/api/msg/channels${homeClubId ? `?clubId=${homeClubId}` : ''}`).then(setChannels).catch(() => {}); }, [personId]);
-  const wa = channels.filter((c) => c.messenger === 'whatsapp' && c.status === 'active' && !convs.some((v) => v.channelId === c.id));
+  // Написать первым по номеру: WhatsApp — любой канал, Telegram — канал Wazzup (бот так не умеет)
+  const wa = channels.filter((c) => c.status === 'active' && (c.messenger === 'whatsapp' || ['wazzup', 'test'].includes(c.kind)) && !convs.some((v) => v.channelId === c.id));
   const start = async (channelId: string) => {
     try { const r = await api<{ id: string }>('POST', `/api/persons/${personId}/conversations`, { channelId }); await load(); setOpen(r.id); } catch (e) { setErr(errText(e)); }
   };
@@ -146,9 +172,9 @@ export function PersonChats({ me, personId, homeClubId, marketingConsent, optOut
     <div className="card" style={{ display: 'grid', gap: 8 }}>
       <div className="row between"><h2>Переписка</h2>
         <div className="row">{convs.length > 1 && convs.map((c) => <button key={c.id} className={`btn sm ${open === c.id ? 'pri' : ''}`} onClick={() => setOpen(c.id)}>{MESSENGER[c.messenger]} · {c.channelName}</button>)}
-          {wa.map((c) => <button key={c.id} className="btn sm" onClick={() => start(c.id)}>Написать в WhatsApp ({c.name})</button>)}</div></div>
+          {wa.map((c) => <button key={c.id} className="btn sm" onClick={() => start(c.id)}>Написать в {MESSENGER[c.messenger]} ({c.name})</button>)}</div></div>
       {err && <div className="err">{err}</div>}
-      {cur ? <ChatPane me={me} conv={cur} compact onSent={load} /> : <p className="small">Переписки пока нет.{!wa.length && ' В Telegram клиент пишет клубу первым.'}</p>}
+      {cur ? <ChatPane me={me} conv={cur} compact onSent={load} /> : <p className="small">Переписки пока нет.{!wa.length && ' Кнопки «WhatsApp» и «Telegram» рядом с телефоном откроют чат с клиентом по его номеру.'}</p>}
       <div className="row" style={{ gap: 16 }}>
         <label className="row small"><input type="checkbox" style={{ width: 16, height: 16 }} checked={marketingConsent}
           onChange={(e) => setFlag({ marketingConsent: e.target.checked }, e.target.checked ? 'Согласие на рекламные сообщения отмечено' : 'Согласие снято')} />Согласен получать рекламные сообщения</label>
