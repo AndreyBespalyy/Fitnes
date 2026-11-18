@@ -14,6 +14,7 @@ import { decrypt, encrypt } from './fiscal.ts';
 import { addDays, clubToday } from './memberships.ts';
 import { clientBot } from './clientBot.ts';
 import { guardReveal } from './privacy.ts';
+import { isTrainerClient } from './agentInvite.ts';
 import { chatSummariesOf } from './chatAi.ts';
 import { NotHereError, parseWebhook, poll, ProviderError, sendMessage, setWazzupWebhook, testChannel, type ChannelRow, type Fetch, type Inbound } from './msgProviders.ts';
 
@@ -402,6 +403,11 @@ const onlyMine = (ctx: Ctx) => !can(ctx, P.crmViewAll) && !can(ctx, P.messagesMa
 async function loadConv(db: Db, ctx: Ctx, id: string) {
   const c = (await db.query(`${CONV_SELECT} where c.id = $1`, [id])).rows[0];
   if (!c) throw notFound('Диалог не найден');
+  // Тренер переписывается только со своими клиентами (кнопки «WhatsApp» и «Telegram», просьба Андрея 18.11.2026)
+  if (!can(ctx, P.messagesWork)) {
+    if (!c.personId || !(await isTrainerClient(db, ctx.userId, c.personId))) throw notFound('Диалог не найден');
+    return c;
+  }
   if (onlyMine(ctx) && c.assignedTo && c.assignedTo !== ctx.userId) throw notFound('Диалог не найден');
   return c;
 }
@@ -698,7 +704,7 @@ export function messagingRoutes(app: FastifyInstance, pool: pg.Pool, opts: { fet
   });
 
   app.get('/api/msg/conversations/:id/messages', async (req) => {
-    const ctx = requirePerm(req, P.messagesWork);
+    const ctx = requireCtx(req); // право на диалог проверяет loadConv: переписка или свой клиент тренера
     const { id } = req.params as { id: string };
     return withCtx(pool, ctx, async (db) => {
       const c = await loadConv(db, ctx, id);
@@ -714,7 +720,7 @@ export function messagingRoutes(app: FastifyInstance, pool: pg.Pool, opts: { fet
   });
 
   app.post('/api/msg/conversations/:id/render', async (req) => {
-    const ctx = requirePerm(req, P.messagesWork);
+    const ctx = requireCtx(req); // право на диалог проверяет loadConv: переписка или свой клиент тренера
     const { id } = req.params as { id: string };
     const { templateId } = (req.body ?? {}) as { templateId?: string };
     return withCtx(pool, ctx, async (db) => {
@@ -726,7 +732,7 @@ export function messagingRoutes(app: FastifyInstance, pool: pg.Pool, opts: { fet
   });
 
   app.post('/api/msg/conversations/:id/messages', async (req, reply) => {
-    const ctx = requirePerm(req, P.messagesWork);
+    const ctx = requireCtx(req); // право на диалог проверяет loadConv: переписка или свой клиент тренера
     const { id } = req.params as { id: string };
     const { text, templateId } = (req.body ?? {}) as { text?: string; templateId?: string };
     if (!text?.trim()) throw badRequest('Введите текст сообщения');
@@ -744,7 +750,7 @@ export function messagingRoutes(app: FastifyInstance, pool: pg.Pool, opts: { fet
   });
 
   app.post('/api/msg/messages/:id/retry', async (req) => {
-    const ctx = requirePerm(req, P.messagesWork);
+    const ctx = requireCtx(req); // право на диалог проверяет loadConv: переписка или свой клиент тренера
     const { id } = req.params as { id: string };
     return withCtx(pool, ctx, async (db) => {
       const m = (await db.query('select conversation_id, status from msg_messages where id = $1', [id])).rows[0];
@@ -778,14 +784,17 @@ export function messagingRoutes(app: FastifyInstance, pool: pg.Pool, opts: { fet
   // 1) уже есть переписка в этом мессенджере → открываем её; 2) в клубе подключён канал, который умеет писать первым по номеру → новый диалог в CRM;
   // 3) канала нет → ссылка, которая открывает чат с клиентом в приложении на устройстве сотрудника (wa.me / t.me/+номер).
   app.post('/api/persons/:id/write', async (req) => {
-    const ctx = requirePerm(req, P.messagesWork);
+    const ctx = requireCtx(req);
     const { id } = req.params as { id: string };
     const { messenger, clubId } = (req.body ?? {}) as { messenger?: string; clubId?: string };
     if (messenger !== 'whatsapp' && messenger !== 'telegram') throw badRequest('Выберите WhatsApp или Telegram');
     const name = messenger === 'whatsapp' ? 'WhatsApp' : 'Telegram';
     const r = await withCtx(pool, ctx, async (db) => {
+      // Тренер пишет только своим клиентам (те, кто занимался у него за 60 дней или записан на 14 дней вперёд)
+      const trainer = !can(ctx, P.messagesWork);
+      if (trainer && !(await isTrainerClient(db, ctx.userId, id))) throw forbidden('Писать можно только своим клиентам');
       const p = await personForWrite(db, id);
-      const mine = onlyMine(ctx);
+      const mine = !trainer && onlyMine(ctx);
       const conv = (await db.query(`select c.id from msg_conversations c join msg_channels ch on ch.id = c.channel_id
         where c.person_id = $1 and ch.messenger = $2 and ch.status = 'active' and ($3::uuid is null or c.assigned_to is null or c.assigned_to = $3)
         order by c.last_message_at desc nulls last, c.created_at desc limit 1`, [id, messenger, mine ? ctx.userId : null])).rows[0];

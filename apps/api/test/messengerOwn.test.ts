@@ -145,3 +145,27 @@ test('разбор переписки ИИ: итог как у звонков, �
   assert.match(brief.text, /Итог переписки/);
   assert.equal(brief.sources.chats, 1);
 });
+
+test('тренер пишет в WhatsApp и Telegram только своим клиентам', async () => {
+  const kim = (await sql(`select id from users where login = 'a.kim'`))[0].id;
+  const type = (await sql(`select id from class_types where club_id = $1 limit 1`, [c1]))[0]?.id
+    ?? (await sql(`insert into class_types(tenant_id, club_id, name, kind, description) values ($1, $2, 'Пилатес', 'group', 'Растяжка') returning id`, [tenantId, c1]))[0].id;
+  const s = (await sql(`insert into class_sessions(tenant_id, club_id, type_id, trainer_id, starts_at, ends_at, capacity) values ($1,$2,$3,$4, now() + interval '1 day', now() + interval '1 day 1 hour', 10) returning id`,
+    [tenantId, c1, type, kim]))[0].id;
+  const mine = await freshPerson();
+  await sql(`insert into class_bookings(tenant_id, club_id, session_id, person_id, status) values ($1,$2,$3,$4,'booked')`, [tenantId, c1, s, mine.id]);
+  const other = (await sql(`select p.id from persons p join person_contacts pc on pc.person_id = p.id and pc.type = 'phone'
+    where p.home_club_id = $1 and p.id <> $2 and not exists (select 1 from class_bookings b where b.person_id = p.id) limit 1`, [c1, mine.id]))[0];
+  // Чужому клиенту — нельзя
+  assert.equal((await req('POST', `/api/persons/${other.id}/write`, 'a.kim', { messenger: 'whatsapp' })).statusCode, 403);
+  // Своему — переписка в CRM, даже если диалог ведёт менеджер
+  const w = (await req('POST', `/api/persons/${mine.id}/write`, 'a.kim', { messenger: 'telegram' })).json();
+  assert.equal(w.mode, 'crm');
+  const r = await req('GET', `/api/msg/conversations/${w.conversationId}/messages`, 'a.kim');
+  assert.equal(r.statusCode, 200);
+  assert.equal((await req('POST', `/api/msg/conversations/${w.conversationId}/messages`, 'a.kim', { text: 'Жду вас завтра на тренировке!' })).statusCode, 201);
+  // Список всей переписки тренеру по-прежнему закрыт, и чужой диалог не открыть
+  assert.equal((await req('GET', '/api/msg/conversations', 'a.kim')).statusCode, 403);
+  const foreign = (await sql(`select id from msg_conversations where person_id <> $1 and person_id is not null limit 1`, [mine.id]))[0];
+  assert.equal((await req('GET', `/api/msg/conversations/${foreign.id}/messages`, 'a.kim')).statusCode, 404);
+});
