@@ -12,7 +12,7 @@ const TR: Record<string, string> = { а: 'a', б: 'b', в: 'v', г: 'g', д: 'd'
 const translit = (s: string) => [...s.toLowerCase()].map((ch) => TR[ch] ?? ch).join('').replace(/[^a-z0-9]/g, '');
 
 /** «Мария Волкова» → m.volkova (при совпадении добавляется цифра). */
-async function makeLogin(db: Db, fullName: string) {
+export async function makeLogin(db: Db, fullName: string) {
   const parts = fullName.trim().split(/\s+/);
   const first = translit(parts[0] ?? '');
   const last = translit(parts[1] ?? parts[0] ?? '');

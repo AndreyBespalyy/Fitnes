@@ -4,16 +4,18 @@
 import type { FastifyInstance } from 'fastify';
 import type pg from 'pg';
 import { createHash, randomUUID } from 'node:crypto';
-import { requirePerm } from '../auth.ts';
+import { can, requirePerm } from '../auth.ts';
 import { audit, withCtx, type Ctx, type Db } from '../db.ts';
-import { badRequest, notFound } from '../errors.ts';
-import { verifyPassword } from '../passwords.ts';
+import { badRequest, forbidden, notFound } from '../errors.ts';
+import { hashPassword, tempPassword, verifyPassword } from '../passwords.ts';
+import { checkLimit } from './onboarding.ts';
+import { makeLogin } from './staff.ts';
 import { PERMISSIONS as P } from '../roles.ts';
 import { readTable, TableError } from '../lib/tables.ts';
 import { clubToday, daysBetween } from './memberships.ts';
 import {
   detectReport, FIELDS, findHeaderRow, headerSignature, isFooter, isSaleDocRow, linkNumber, mapColumns, productFromPresentation, methodOf, normEmail, normName, normalizePhone,
-  parseDate, parseInt10, parseMoney, REPORT_NAMES, REPORT_TYPES, REQUIRED_REPORTS, taskKindOf, type Mapping, type ReportType,
+  parseDate, parseInt10, parseMoney, REPORT_NAMES, REPORT_TYPES, REQUIRED_REPORTS, roleOfPosition, taskKindOf, type Mapping, type ReportType,
 } from './importMap.ts';
 
 const SOURCE = '1c';
@@ -36,6 +38,7 @@ type PMembership = { row: Row; key: string; client: ClientRef; productName: stri
 type PPayment = { row: Row; key: string; client: ClientRef | null; membershipKey: string | null; at: string; month: string; dir: 'in' | 'out'; amount: number; method: string };
 type PVisit = { row: Row; key: string; client: ClientRef; membershipKey: string | null; at: string };
 type PDebt = { row: Row; key: string; client: ClientRef; membershipKey: string | null; amount: number; dueOn: string };
+type PStaff = { row: Row; key: string; fullName: string; phone: string | null; position: string; role: string };
 type PTask = { row: Row; key: string; client: ClientRef | null; kind: string; title: string; dueAt: string; doneAt: string | null; result: string | null; assigneeId: string | null };
 
 /* ======================= анализ (пробный перенос) ======================= */
@@ -324,6 +327,52 @@ async function analyze(db: Db, batch: { id: string; club_id: string }) {
     }
   }
 
+  /* ---- сотрудники ---- */
+  // Создаются учётные записи с ролью в этом клубе; роль — по должности или колонке «Роль». Уволенных и тех, кто уже есть в системе, не переносим
+  const staffNew: PStaff[] = [];
+  const positions = new Map<string, { position: string; role: string | null; count: number }>();
+  if (filesOf('staff').length) {
+    const users = (await db.query(`select u.id, u.full_name, u.status, exists (select 1 from user_assignments a where a.user_id = u.id and (a.club_id = $1 or a.club_id is null)) as here
+      from users u where not u.is_bot`, [batch.club_id])).rows as { id: string; full_name: string; status: string; here: boolean }[];
+    const userByName = new Map(users.map((u) => [normName(u.full_name), u]));
+    const seen = new Set<string>();
+    for (const f of filesOf('staff')) {
+      const g = getter(f);
+      for (const r of byFile.get(f.id) ?? []) {
+        if (isFooter(r.cells)) { mark(r, 'skipped', 'Строка итогов отчёта'); continue; }
+        const fullName = g(r, 'full_name').replace(/\s+/g, ' ');
+        if (!fullName) { mark(r, 'skipped', 'Пустая строка'); continue; }
+        const n = normName(fullName);
+        const key = g(r, 'ext_id') ? linkNumber(g(r, 'ext_id')) : `n:${n}`;
+        if (seen.has(key) || seen.has(`n:${n}`)) { mark(r, 'skipped', 'Повтор строки'); continue; }
+        seen.add(key); seen.add(`n:${n}`);
+        const status = g(r, 'status').toLowerCase().replace(/ё/g, 'е');
+        const fired = g(r, 'fired_on') ? parseDate(g(r, 'fired_on')) : null;
+        if (/уволен|не работает|архив|^да$|недейств/.test(status) || (fired && fired.date <= today)) { mark(r, 'skipped', 'Уволен, не переносится'); continue; }
+        if (earlier.has(`staff:${key}`)) { mark(r, 'skipped', 'Уже перенесено раньше'); continue; }
+        const position = g(r, 'position');
+        const role = roleOfPosition(g(r, 'role')) ?? roleOfPosition(position);
+        const pk = position.toLowerCase() || '(без должности)';
+        const p = positions.get(pk) ?? { position: position || '(без должности)', role: role === 'owner' ? null : role, count: 0 };
+        p.count++; positions.set(pk, p);
+        if (role === 'owner') { mark(r, 'skipped', 'Собственник: учётная запись уже есть, не переносится'); continue; }
+        const ex = userByName.get(n);
+        if (ex && ex.here) { mark(r, 'skipped', 'Уже есть в системе', `«${ex.full_name}» уже работает в этом клубе: роль не меняем`); continue; }
+        if (!role) {
+          mark(r, 'excluded', 'Роль не определена', `Должность «${position || 'не указана'}» не сопоставлена с ролью: впишите роль в колонку «Роль» (управляющий, РОП, менеджер, ресепшн, тренер, финансист) или добавьте сотрудника вручную в «Персонале»`);
+          continue;
+        }
+        const phone = g(r, 'phone') ? normalizePhone(g(r, 'phone')) : null;
+        staffNew.push({ row: r, key, fullName, phone, position, role });
+        const warns: string[] = [];
+        if (ex) warns.push(`сотрудник с таким ФИО уже есть в другом клубе, будет создана отдельная учётная запись`);
+        if (!phone) warns.push('нет телефона');
+        if (warns.length) mark(r, 'warning', 'Есть замечания', warns.join('; '));
+        else mark(r, 'ok');
+      }
+    }
+  }
+
   /* ---- задачи и звонки ---- */
   const tasks: PTask[] = [];
   if (filesOf('tasks').length) {
@@ -335,7 +384,10 @@ async function analyze(db: Db, batch: { id: string; club_id: string }) {
       const n = normName(u.full_name); staffByName.set(n, u.id);
       const [fam, name] = n.split(' '); if (fam && name && !staffByName.has(`${fam} ${name}`)) staffByName.set(`${fam} ${name}`, u.id);
     }
-    const gmId = staff.find((u) => u.role_code === 'gm')?.id ?? null;
+    // Сотрудники из этого же переноса: задача достанется им после создания учётных записей
+    for (const x of staffNew) { const n = normName(x.fullName); if (!staffByName.has(n)) staffByName.set(n, `new:${x.key}`); const [fam, name] = n.split(' '); if (fam && name && !staffByName.has(`${fam} ${name}`)) staffByName.set(`${fam} ${name}`, `new:${x.key}`); }
+    const newGm = staffNew.find((x) => x.role === 'gm');
+    const gmId = staff.find((u) => u.role_code === 'gm')?.id ?? (newGm ? `new:${newGm.key}` : null);
     const findStaff = (raw: string) => { const n = normName(raw); if (!n) return null; const [fam, name] = n.split(' '); return staffByName.get(n) ?? staffByName.get(`${fam} ${name}`) ?? null; };
     const taskSeen = new Set<string>();
     for (const f of filesOf('tasks')) {
@@ -381,7 +433,9 @@ async function analyze(db: Db, batch: { id: string; club_id: string }) {
   }
 
   /* ---- отчёт ---- */
-  const missing = REQUIRED_REPORTS.filter((t) => !filesOf(t).length);
+  // Первый перенос клуба — все пять основных отчётов. Следующие (догрузка клиентов, сотрудники, задачи) — любые отчёты по отдельности
+  const missing = earlier.size ? [] : REQUIRED_REPORTS.filter((t) => !filesOf(t).length);
+  if (!files.length) missing.push(...REQUIRED_REPORTS.filter((t) => !missing.includes(t)));
   const unconfirmed = files.filter((f) => f.report_type && !f.mapping_confirmed).map((f) => f.original_name);
   const unknown = files.filter((f) => !f.report_type).map((f) => f.original_name);
   const counts = Object.fromEntries(REPORT_TYPES.map((t) => {
@@ -437,6 +491,8 @@ async function analyze(db: Db, batch: { id: string; club_id: string }) {
       paymentsWithoutMembership: payments.filter((p) => !p.membershipKey).length,
       tasksOpen: tasks.filter((x) => !x.doneAt).length,
       tasksHistory: tasks.filter((x) => x.doneAt).length,
+      staffNew: staffNew.length,
+      staffRoles: [...positions.values()].sort((a, b) => b.count - a.count),
       notTransferred: [
         'Заморозки из 1С переносятся отметкой в отчёте: сами заморозки оформляются в системе',
         'Авансы клиентов показаны в отчёте: лицевого счёта в системе пока нет',
@@ -445,7 +501,7 @@ async function analyze(db: Db, batch: { id: string; club_id: string }) {
     },
     issues: [...issues.values()].sort((a, b) => ['conflict', 'excluded', 'warning', 'skipped'].indexOf(a.status) - ['conflict', 'excluded', 'warning', 'skipped'].indexOf(b.status) || b.count - a.count),
   };
-  return { files, rows, marks, report, today, clients, memberships, payments, visits, debts, tasks, canonical };
+  return { files, rows, marks, report, today, clients, memberships, payments, visits, debts, tasks, staffNew, canonical };
 }
 
 async function saveMarks(db: Db, marks: Map<string, Mark>) {
@@ -459,9 +515,12 @@ async function saveMarks(db: Db, marks: Map<string, Mark>) {
 }
 
 /* ======================= перенос ======================= */
-async function apply(db: Db, ctx: Actor, batch: { id: string; club_id: string; tenant_id: string }) {
+export type StaffCredential = { fullName: string; login: string; tempPassword: string; role: string; position: string };
+
+async function apply(db: Db, ctx: Actor, batch: { id: string; club_id: string; tenant_id: string }, canStaff: boolean) {
   const a = await analyze(db, batch);
   if (!a.report.canApply) throw badRequest(`Перенос невозможен: ${a.report.blockers.join('; ')}`);
+  if (a.staffNew.length && !canStaff) throw badRequest('Создавать учётные записи сотрудников может собственник или управляющий: попросите их выполнить этот перенос');
   const t = batch.tenant_id; const club = batch.club_id;
   const ext: { entity: string; key: string; target: string; row: Row; type: ReportType }[] = [];
   const fileType = new Map(a.files.map((f) => [f.id, f.report_type!]));
@@ -576,6 +635,22 @@ async function apply(db: Db, ctx: Actor, batch: { id: string; club_id: string; t
   [t, club, batch.id], vs, ({ v, id }) => [id, personOf(v.client), v.membershipKey ? mId.get(v.membershipKey) ?? null : null, v.at]);
   for (const { v, id } of vs) reg('visit', v.key, id, v.row);
 
+  // Сотрудники: учётная запись с временным паролем (сменит при первом входе) и роль в этом клубе. Пароли показываются один раз, в базе их нет
+  const credentials: StaffCredential[] = [];
+  const staffId = new Map<string, string>();
+  for (const s of a.staffNew) {
+    await checkLimit(db, 'users');
+    const login = await makeLogin(db, s.fullName);
+    const pw = tempPassword();
+    const id = (await db.query(`insert into users(tenant_id, login, password_hash, full_name, phone, must_change_password, import_batch_id)
+      values ($1,$2,$3,$4,$5,true,$6) returning id`, [t, login, await hashPassword(pw), s.fullName, s.phone, batch.id])).rows[0].id as string;
+    await db.query('insert into user_assignments(tenant_id, user_id, role_code, club_id) values ($1,$2,$3,$4)', [t, id, s.role, club]);
+    staffId.set(s.key, id);
+    reg('staff', s.key, id, s.row);
+    credentials.push({ fullName: s.fullName, login, tempPassword: pw, role: s.role, position: s.position });
+  }
+  const assignee = (v: string | null) => (v?.startsWith('new:') ? staffId.get(v.slice(4)) ?? null : v);
+
   // Задачи и звонки: открытые — в работу ответственному, выполненные — история в карточке клиента
   const ts = a.tasks.map((x) => ({ x, id: randomUUID() }));
   await bulk(db, `insert into tasks(id, tenant_id, club_id, assignee_id, person_id, kind, title, due_at, done_at, result, created_by, created_at, import_batch_id)
@@ -583,7 +658,7 @@ async function apply(db: Db, ctx: Actor, batch: { id: string; club_id: string; t
       least(now(), x.due::timestamp at time zone c.timezone), $4
     from unnest($5::uuid[], $6::uuid[], $7::uuid[], $8::text[], $9::text[], $10::text[], $11::text[], $12::text[]) as x(id, assignee, person, kind, title, due, done, result)
     join clubs c on c.id = $2`,
-  [t, club, ctx.userId, batch.id], ts, ({ x, id }) => [id, x.assigneeId, x.client ? personOf(x.client) : null, x.kind, x.title, x.dueAt, x.doneAt, x.result]);
+  [t, club, ctx.userId, batch.id], ts, ({ x, id }) => [id, assignee(x.assigneeId), x.client ? personOf(x.client) : null, x.kind, x.title, x.dueAt, x.doneAt, x.result]);
   for (const { x, id } of ts) reg('task', x.key, id, x.row);
 
   // Сегменты перенесённых клиентов по их абонементам
@@ -615,11 +690,12 @@ async function apply(db: Db, ctx: Actor, batch: { id: string; club_id: string; t
   await saveMarks(db, a.marks);
   await db.query(`update import_rows set status = 'imported' where batch_id = $1 and status = 'warning'`, [batch.id]);
   const applied = { persons: newPersons.length, merged: a.clients.length - newPersons.length, memberships: ms.length, contracts: withContract.length,
-    payments: pays.length, visits: vs.length, debts: debts.length, products: products.size, tasks: ts.filter((x) => !x.x.doneAt).length, taskHistory: ts.filter((x) => x.x.doneAt).length };
+    payments: pays.length, visits: vs.length, debts: debts.length, products: products.size, tasks: ts.filter((x) => !x.x.doneAt).length, taskHistory: ts.filter((x) => x.x.doneAt).length,
+    staff: credentials.length };
   const report = { ...a.report, mode: 'applied', applied };
   await db.query(`update import_batches set status = 'applied', report = $2, applied_at = now(), applied_by = $3 where id = $1`, [batch.id, JSON.stringify(report), ctx.userId]);
   await audit(db, ctx, 'import.applied', 'import_batch', batch.id, null, applied);
-  return report;
+  return { ...report, staffCredentials: credentials };
 }
 
 /** Вставка большими порциями через unnest: params — общие параметры, затем массивы по колонкам. */
@@ -852,7 +928,7 @@ export function importRoutes(app: FastifyInstance, pool: pg.Pool) {
       if (!b) throw notFound('Перенос не найден');
       if (b.status === 'applied' || b.status === 'accepted') throw badRequest('Этот перенос уже выполнен');
       if (b.status !== 'checked') throw badRequest('Сначала выполните пробный перенос и проверьте отчёт');
-      return apply(db, ctx, b);
+      return apply(db, ctx, b, can(ctx, P.staffManage));
     });
   });
 
@@ -876,6 +952,44 @@ export function importRoutes(app: FastifyInstance, pool: pg.Pool) {
       }
       await audit(db, ctx, 'import.rolled_back', 'import_batch', id, { status: 'applied' }, { status: 'rolled_back' });
       return { ok: true };
+    });
+  });
+
+  // Демо-данные клуба (решение Андрея 18.11.2026): клиенты клуба, не перенесённые из 1С, и всё, что к ним привязано.
+  // Сначала предпросмотр (удаление в точке сохранения с откатом), затем удаление по паролю. Только собственник.
+  const demoPurge = async (db: Db, clubId: string, dry: boolean) => {
+    await db.query('savepoint demo');
+    try {
+      const counts = (await db.query('select demo_purge($1) as r', [clubId])).rows[0].r as Record<string, number>;
+      await db.query(dry ? 'rollback to savepoint demo' : 'release savepoint demo');
+      return counts;
+    } catch (e) {
+      await db.query('rollback to savepoint demo');
+      const err = e as { code?: string; message?: string };
+      if (err.code === 'P0001' || err.code === 'P0002') throw badRequest(err.message ?? 'Удаление невозможно');
+      if (err.code === '23503') throw badRequest('На демо-клиентов ссылаются данные, которые нельзя удалить автоматически: напишите в поддержку');
+      throw e;
+    }
+  };
+  const ownerOnly = (ctx: Ctx) => { if (!can(ctx, '*')) throw forbidden('Удалять демо-данные может только собственник'); };
+  app.get('/api/import/demo-cleanup', async (req) => {
+    const ctx = requirePerm(req, P.importManage); ownerOnly(ctx);
+    const { clubId } = req.query as { clubId?: string };
+    if (!clubId) throw badRequest('Выберите клуб');
+    return withCtx(pool, ctx, async (db) => {
+      const imported = Number((await db.query('select count(*) from persons where home_club_id = $1 and import_batch_id is not null', [clubId])).rows[0].count);
+      return { counts: await demoPurge(db, clubId, true), imported };
+    });
+  });
+  app.post('/api/import/demo-cleanup', async (req) => {
+    const ctx = requirePerm(req, P.importManage); ownerOnly(ctx);
+    const { clubId, password } = (req.body ?? {}) as { clubId?: string; password?: string };
+    if (!clubId) throw badRequest('Выберите клуб');
+    return withCtx(pool, ctx, async (db) => {
+      await checkPassword(db, ctx, password);
+      const counts = await demoPurge(db, clubId, false);
+      await audit(db, ctx, 'import.demo_purged', 'club', clubId, null, counts);
+      return { counts };
     });
   });
 
