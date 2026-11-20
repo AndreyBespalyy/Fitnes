@@ -68,16 +68,16 @@ export function MessengerButtons({ me: meIn, personId, clubId, className = 'btn 
   };
   return (
     <>
-      <button className={`${className} msgr wa`} onClick={() => write('whatsapp')} disabled={!!busy} title="Написать клиенту в WhatsApp по его номеру телефона">
-        <span aria-hidden>🟢</span> {short ? 'WA' : 'WhatsApp'}</button>
       <button className={`${className} msgr tg`} onClick={() => write('telegram')} disabled={!!busy} title="Написать клиенту в Telegram по его номеру телефона">
         <span aria-hidden>✈️</span> {short ? 'TG' : 'Telegram'}</button>
+      <button className={`${className} msgr wa`} onClick={() => write('whatsapp')} disabled={!!busy} title="Написать клиенту в WhatsApp по его номеру телефона">
+        <span aria-hidden>🟢</span> {short ? 'WA' : 'WhatsApp'}</button>
       {conv && <Suspense fallback={null}><ChatPopup me={me} conversationId={conv} onClose={() => setConv(null)} /></Suspense>}
     </>
   );
 }
 
-/** «Позвонить» + «WhatsApp» + «Telegram» — одним блоком везде, где можно связаться с клиентом. */
+/** «Позвонить» + «Telegram» + «WhatsApp» — одним блоком везде, где можно связаться с клиентом. */
 export function ContactButtons({ me, personId, clubId, label, className }: { me?: Me; personId: string; clubId?: string; label?: string; className?: string }) {
   return <><DialButton personId={personId} label={label} className={className} /><MessengerButtons me={me} personId={personId} clubId={clubId} className={className} /></>;
 }

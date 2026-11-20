@@ -11,6 +11,8 @@ import { can, requireAnyPerm, requirePerm } from '../auth.ts';
 import { audit, withCtx, type Db } from '../db.ts';
 import { badRequest, forbidden, notFound } from '../errors.ts';
 import { PERMISSIONS as P } from '../roles.ts';
+import { isTrainerClient } from './agentInvite.ts';
+import { guardReveal } from './privacy.ts';
 import { decode, saveFile, UPLOAD_LIMIT, type Upload } from './contracts.ts';
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -48,9 +50,13 @@ export async function personCardRoutes(app: FastifyInstance, pool: pg.Pool, stor
   });
 
   // №47: полный номер по нажатию «Показать номер», с записью в журнал
+  // Кнопка «глаз» у номера: тем же сотрудникам, кто может позвонить или написать клиенту (тренер — только своим клиентам)
   app.post('/api/persons/:id/phone', async (req) => {
-    const ctx = requireAnyPerm(req, ...WORKERS);
+    const ctx = requirePerm(req, P.personsView);
     const { id } = req.params as { id: string };
+    if (!WORKERS.some((p) => can(ctx, p)) && !can(ctx, P.messagesWork)
+      && !(await withCtx(pool, ctx, (db) => isTrainerClient(db, ctx.userId, id)))) throw forbidden('Полный номер недоступен для вашей роли');
+    await guardReveal(pool, ctx, { personId: id });
     return withCtx(pool, ctx, async (db) => {
       await person(db, id);
       const phones = (await db.query(`select value from person_contacts where person_id = $1 and type = 'phone' order by is_primary desc`, [id])).rows.map((r) => r.value as string);

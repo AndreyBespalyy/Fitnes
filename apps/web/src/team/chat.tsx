@@ -548,9 +548,10 @@ function ActButtons({ acts, onAct, msgId, onDone }: { acts: Act[]; onAct: (a: Ac
     <div className="tm-acts" onClick={(e) => e.stopPropagation()}>
       {note && <small className="tm-acts-note">{note}</small>}
       {sheet?.call && <Sheet title="Позвонить клиентам" onClose={() => setSheet(null)}>
-        <div className="tm-draft">{sheet.call.persons.map((p) => <div key={p.id} className="tm-call-row"><button type="button" className="tm-btn" onClick={() => void dialPerson(p.id, setNote)}>📞 Позвонить: {p.name}</button>
-          <button type="button" className="tm-btn" onClick={() => void writePerson(p.id, 'whatsapp', setNote)}>WhatsApp</button>
-          <button type="button" className="tm-btn" onClick={() => void writePerson(p.id, 'telegram', setNote)}>Telegram</button></div>)}
+        <div className="tm-draft">{sheet.call.persons.map((p) => <div key={p.id} className="tm-call-row"><b className="tm-call-name">{p.name}</b>
+          <div className="tm-call-btns"><button type="button" className="tm-btn" onClick={() => void dialPerson(p.id, setNote)}>Позвонить</button>
+            <button type="button" className="tm-btn" onClick={() => void writePerson(p.id, 'telegram', setNote)}>Telegram</button>
+            <button type="button" className="tm-btn" onClick={() => void writePerson(p.id, 'whatsapp', setNote)}>WhatsApp</button></div></div>)}
           {note && <small>{note}</small>}</div></Sheet>}
       {sheet?.write && <WriteSheet write={sheet.write} onClose={() => setSheet(null)} />}
       {acts.map((a, i) => a.task
