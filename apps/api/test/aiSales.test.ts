@@ -141,3 +141,42 @@ test('пороги светофора задаёт клуб', async () => {
   assert.equal((await req('PUT', '/api/kpi-norms', 'o.smirnov', { clubId: c1, light: { green: 95, yellow: 70 } })).statusCode, 200);
   assert.deepEqual((await req('GET', `/api/kpi-norms?clubId=${c1}`, 'm.volkova')).json().light, { green: 95, yellow: 70 });
 });
+
+test('замечания №51–52: статус клиента (ЧК / БЧК / потенциальный) и порядок обзвона', async () => {
+  const tn = (await sql(`select tenant_id from clubs where id = $1`, [c1]))[0].tenant_id;
+  const pv = (await sql(`select id, product_id from price_versions where club_id = $1 limit 1`, [c1]))[0];
+  const person = async (name: string) => (await sql(`insert into persons(tenant_id, home_club_id, full_name, segment) values ($1,$2,$3,'лид') returning id`, [tn, c1, name]))[0].id as string;
+  const score = (id: string, kind: string, s: number, seg: string) => sql(`insert into client_scores(tenant_id, club_id, person_id, kind, score, segment, model) values ($1,$2,$3,$4,$5,$6,'rules-v1')
+    on conflict (club_id, person_id, kind) do update set score = excluded.score, segment = excluded.segment`, [tn, c1, id, kind, s, seg]);
+  const member = (id: string, name: string, kop: number, from: string, to: string) => sql(`insert into memberships(tenant_id, club_id, person_id, product_id, price_version_id, kind, product_name, amount_kop, starts_on, ends_on)
+    values ($1,$2,$3,$4,$5,'term',$6,$7, current_date + ${from}, current_date + ${to})`, [tn, c1, id, pv.product_id, pv.id, name, kop]);
+  const renew = await person('Продление Скоро'); await member(renew, 'Год', 3_600_000, '-345', '20'); await score(renew, 'renewal', 0.3, 'warm');
+  const meet = await person('Встреча Завтра'); await score(meet, 'purchase', 0.2, 'warm');
+  await sql(`insert into meetings(tenant_id, club_id, person_id, scheduled_at) values ($1,$2,$3, now() + interval '20 hours')`, [tn, c1, meet]);
+  const usual = await person('Обычный Горячий'); await score(usual, 'purchase', 0.9, 'hot');
+  const churn = await person('Удержание Ходит'); await member(churn, 'Полгода', 2_400_000, '-30', '150'); await score(churn, 'churn', 0.95, 'hot');
+  await sql(`insert into visits(tenant_id, club_id, person_id, visited_at) values ($1,$2,$3, now() - interval '1 day')`, [tn, c1, churn]);
+  const silent = await person('Недозвон Вечный'); await score(silent, 'purchase', 0.99, 'hot');
+  for (let i = 1; i <= 3; i++) await sql(`insert into calls(tenant_id, club_id, person_id, started_at, source, duration_sec, asr_status) values ($1,$2,$3, now() - interval '${i} day', 'demo', 3, 'done')`, [tn, c1, silent]);
+  const former = await person('Бывший Член'); await member(former, 'Месяц', 500_000, '-40', '-10'); await score(former, 'return', 0.5, 'warm');
+
+  const rows = (await req('GET', `/api/ai/hot-list?clubId=${c1}&segment=all`, 'o.astafeva')).json().rows as { personId: string; kind: string; clientStatus: string; statusName: string; lastVisitAt: string | null; membership: { name: string; priceKop: number; endsOnText: string } | null; focus: string | null; focusRank: number }[];
+  const at = (id: string) => rows.findIndex((r) => r.personId === id);
+  const row = (id: string) => rows[at(id)];
+  // №52: продление и встреча — первыми, затем остальные, удержание ближе к концу, недозвон в самом конце
+  assert.ok(at(renew) < at(usual) && at(meet) < at(usual), `${at(renew)} ${at(meet)} ${at(usual)}`);
+  assert.ok(at(usual) < at(churn) && at(churn) < at(silent), `${at(usual)} ${at(churn)} ${at(silent)}`);
+  assert.equal(row(renew).focus, 'Продление: абонемент заканчивается через 20 дн.');
+  assert.equal(row(meet).focus, 'Подтвердить назначенную встречу');
+  assert.match(row(silent).focus!, /^Регулярный недозвон: 3 звонков/);
+  // №51: ЧК — последний визит и членство, БЧК — дата окончания, без покупок — потенциальный
+  assert.equal(row(churn).clientStatus, 'member');
+  assert.equal(row(churn).statusName, 'Член клуба');
+  assert.ok(row(churn).lastVisitAt);
+  assert.deepEqual([row(churn).membership!.name, row(churn).membership!.priceKop], ['Полгода', 2_400_000]);
+  assert.equal(row(former).clientStatus, 'former');
+  assert.equal(row(former).membership!.name, 'Месяц');
+  assert.match(row(former).membership!.endsOnText, /^\d\d\.\d\d\.\d{4}$/);
+  assert.equal(row(meet).clientStatus, 'potential');
+  assert.equal(row(meet).membership, null);
+});

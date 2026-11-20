@@ -40,25 +40,64 @@ export function startScoringWorker(pool: pg.Pool, everyMs = 15 * 60_000) {
 }
 
 /* ---------- горячий список ---------- */
+// Замечание №51 (19.11.2026): у каждого клиента сразу видно, кто он — член клуба (ЧК), бывший член клуба (БЧК) или потенциальный.
+// У ЧК — дата последнего визита, у БЧК — дата окончания членства, у обоих — вид и стоимость членства.
+// Замечание №52: порядок обзвона. Первыми — продления (абонемент кончается через 45 дней и раньше) и потенциальные с назначенной
+// встречей или договорённостью созвониться сегодня; дальше остальные; удержание — ближе к концу; регулярный недозвон — в самом конце.
+const CLUB_KINDS = `('term', 'subscription', 'visits')`;
+export const RENEW_DAYS = 45;
+export const NO_ANSWER_CALLS = 3; // столько исходящих без разговора за 14 дней = «регулярный недозвон»
 const LIST_SELECT = `select s.person_id as "personId", p.full_name as "personName", s.kind, s.score::float, s.segment, s.owner_id as "ownerId", u.full_name as "ownerName",
   s.opportunity_id as "opportunityId", s.reasons, s.offer, s.model, s.computed_at as "computedAt", s.club_id as "clubId",
   (select normalized_value from person_contacts pc where pc.person_id = s.person_id and pc.type = 'phone' order by is_primary desc limit 1) as phone,
   (select max(t.due_at) from tasks t where t.person_id = s.person_id and t.done_at is null) as "nextTaskAt",
-  greatest((select max(t.done_at) from tasks t where t.person_id = s.person_id), (select max(c.started_at) from calls c where c.person_id = s.person_id)) as "lastContactAt"
-  from client_scores s join persons p on p.id = s.person_id left join users u on u.id = s.owner_id`;
+  greatest((select max(t.done_at) from tasks t where t.person_id = s.person_id), (select max(c.started_at) from calls c where c.person_id = s.person_id)) as "lastContactAt",
+  case when cur.product_name is not null then 'member' when past.product_name is not null then 'former' else 'potential' end as "clientStatus",
+  lv.at as "lastVisitAt", coalesce(cur.product_name, past.product_name) as "membershipName", coalesce(cur.amount_kop, past.amount_kop)::float as "membershipKop",
+  coalesce(cur.ends_on, past.ends_on)::text as "membershipEndsOn", meet.at as "meetingAt", (agreed.yes is not null) as "agreedToday", nc.missed as "missedCalls",
+  case when nc.missed >= ${NO_ANSWER_CALLS} and nc.talked = 0 then 3
+       when s.kind = 'renewal' and cur.ends_on is not null and cur.ends_on <= d.today + ${RENEW_DAYS} then 0
+       when s.kind <> 'churn' and (meet.at is not null or agreed.yes is not null) then 0
+       when s.kind = 'churn' then 2 else 1 end as "focusRank",
+  (cur.ends_on - d.today) as "endsInDays"
+  from client_scores s join persons p on p.id = s.person_id left join users u on u.id = s.owner_id join clubs cl on cl.id = s.club_id
+  cross join lateral (select (now() at time zone cl.timezone)::date as today) d
+  left join lateral (select m.product_name, m.amount_kop, m.ends_on from memberships m where m.person_id = s.person_id and m.status = 'active' and m.kind in ${CLUB_KINDS}
+      and m.starts_on <= d.today and (m.ends_on is null or m.ends_on >= d.today) order by m.ends_on desc nulls first limit 1) cur on true
+  left join lateral (select m.product_name, m.amount_kop, m.ends_on from memberships m where m.person_id = s.person_id and m.status = 'active' and m.kind in ${CLUB_KINDS}
+      and m.ends_on < d.today order by m.ends_on desc limit 1) past on true
+  left join lateral (select max(v.visited_at) as at from visits v where v.person_id = s.person_id) lv on true
+  left join lateral (select min(mt.scheduled_at) as at from meetings mt where mt.person_id = s.person_id and mt.status = 'scheduled'
+      and mt.scheduled_at >= now() - interval '2 hours' and mt.scheduled_at < ((d.today + 2)::timestamp at time zone cl.timezone)) meet on true
+  left join lateral (select 1 as yes from tasks t where t.person_id = s.person_id and t.done_at is null and t.created_by is not null
+      and (t.due_at at time zone cl.timezone)::date = d.today limit 1) agreed on true
+  left join lateral (select count(*) filter (where coalesce(c.duration_sec, 0) < 10)::int as missed, count(*) filter (where c.duration_sec >= 10)::int as talked
+      from calls c where c.person_id = s.person_id and c.direction = 'out' and c.started_at > now() - interval '14 days') nc on true`;
+
+const STATUS_NAME: Record<string, string> = { member: 'Член клуба', former: 'Бывший член клуба', potential: 'Потенциальный член клуба' };
+const dmy = (d: string) => d.slice(0, 10).split('-').reverse().join('.');
+function focusOf(r: { focusRank: number; kind: string; endsInDays: number | null; meetingAt: string | null; agreedToday: boolean; missedCalls: number }) {
+  if (r.focusRank === 3) return `Регулярный недозвон: ${r.missedCalls} звонков без ответа за 14 дней`;
+  if (r.focusRank === 0 && r.kind === 'renewal' && r.endsInDays !== null) return r.endsInDays === 0 ? 'Продление: абонемент заканчивается сегодня' : `Продление: абонемент заканчивается через ${r.endsInDays} дн.`;
+  if (r.focusRank === 0 && r.meetingAt) return 'Подтвердить назначенную встречу';
+  if (r.focusRank === 0 && r.agreedToday) return 'Звонок по договорённости на сегодня';
+  return null;
+}
 
 async function hotList(db: Db, ctx: Ctx, q: { clubId?: string; kind?: string; segment?: string; mine?: boolean; userId?: string; limit?: number }) {
   const segs = q.segment === 'all' ? ['hot', 'warm', 'auto', 'low', 'excluded'] : q.segment ? [q.segment] : ['hot', 'warm'];
   const mine = onlyMine(ctx) || q.mine;
   const rows = (await db.query(
-    `${LIST_SELECT} where ($1::uuid is null or s.club_id = $1) and ($2::text is null or s.kind = $2) and s.segment = any($3)
+    `select * from (${LIST_SELECT} where ($1::uuid is null or s.club_id = $1) and ($2::text is null or s.kind = $2) and s.segment = any($3)
        and ($4::uuid is null or s.owner_id = $4 or s.owner_id is null)
        and p.merged_into_id is null
        -- стоп-лист отдела продаж: «не звонить», отказ, отложено до даты и т. п. (salesOps.ts)
-       and not exists (select 1 from person_call_blocks cb where cb.person_id = s.person_id and cb.removed_at is null and (cb.until is null or cb.until > current_date))
-     order by (s.segment = 'hot') desc, s.score desc limit $5`,
+       and not exists (select 1 from person_call_blocks cb where cb.person_id = s.person_id and cb.removed_at is null and (cb.until is null or cb.until > current_date))) x
+     order by "focusRank", (segment = 'hot') desc, score desc limit $5`,
     [q.clubId || null, q.kind && KINDS.includes(q.kind as Kind) ? q.kind : null, segs, mine ? q.userId ?? ctx.userId : null, q.limit ?? 200])).rows;
-  return rows.map((r) => ({ ...r, phone: maskPhone(r.phone), kindName: KIND_NAME[r.kind as Kind], priority: Math.round(r.score * 100) }));
+  return rows.map((r) => ({ ...r, phone: maskPhone(r.phone), kindName: KIND_NAME[r.kind as Kind], priority: Math.round(r.score * 100),
+    statusName: STATUS_NAME[r.clientStatus], focus: focusOf(r),
+    membership: r.membershipName ? { name: r.membershipName, priceKop: r.membershipKop, endsOn: r.membershipEndsOn, endsOnText: r.membershipEndsOn ? dmy(r.membershipEndsOn) : null } : null }));
 }
 
 /* ---------- план дня ---------- */
@@ -86,7 +125,7 @@ async function dayPlan(db: Db, ctx: Ctx, clubId: string) {
   const meetings = (await db.query(`select m.scheduled_at as at, p.full_name as name from meetings m join persons p on p.id = m.person_id join clubs c on c.id = m.club_id
     where m.club_id = $1 and m.created_by = $2 and m.status = 'scheduled' and (m.scheduled_at >= ($3::date)::date::timestamp at time zone c.timezone and m.scheduled_at < (($3::date)::date + 1)::timestamp at time zone c.timezone) order by m.scheduled_at`, [clubId, ctx.userId, today])).rows;
   const list = await hotList(db, ctx, { clubId, mine: true, limit: 40 });
-  const callFirst = list.filter((r) => r.segment === 'hot').slice(0, 10);
+  const callFirst = list.filter((r) => r.focusRank === 0 || r.segment === 'hot').slice(0, 10);
   const byKind = Object.fromEntries(KINDS.map((k) => [k, list.filter((r) => r.kind === k).length]));
   // Распределение дня: рабочие часы клуба, звонок ≈ 7 минут с подготовкой и итогом
   const s = (await db.query(`select work_from, work_to from club_msg_settings where club_id = $1`, [clubId])).rows[0] ?? { work_from: 9, work_to: 21 };
@@ -96,7 +135,7 @@ async function dayPlan(db: Db, ctx: Ctx, clubId: string) {
   const blocks: { from: string; to: string; title: string; detail: string }[] = [];
   const add = (hours: number, title: string, detail: string) => { if (hours <= 0 || t >= s.work_to) return; const end = Math.min(s.work_to, t + hours); blocks.push({ from: hm(t), to: hm(end), title, detail }); t = end; };
   if (tasks.overdue || tasks.reviews) add(0.5, 'Просроченные задачи и итоги звонков', `просрочено задач: ${tasks.overdue}, итогов на проверку: ${tasks.reviews}`);
-  if (callFirst.length) add(Math.max(0.5, (callFirst.length * 7) / 60), 'Звонки горячим клиентам', `${callFirst.length} клиентов из списка «Звонить первым»`);
+  if (callFirst.length) add(Math.max(0.5, (callFirst.length * 7) / 60), 'Звонки первой очереди', `${callFirst.length} клиентов из списка «Звонить первым»`);
   const renew = list.filter((r) => r.kind === 'renewal' || r.kind === 'churn').length;
   if (renew) add(Math.max(0.5, (Math.min(renew, 12) * 6) / 60), 'Продления и удержание', `${renew} клиентов: заканчивается абонемент или перестали ходить`);
   if (meetings.length) blocks.push({ from: '', to: '', title: 'Встречи в клубе', detail: meetings.map((m) => `${new Intl.DateTimeFormat('ru-RU', { hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Moscow' }).format(m.at)} ${m.name}`).join(', ') });
