@@ -10,7 +10,9 @@ import { rub } from './memberships.tsx';
 type Reason = { effect: '+' | '-'; text: string };
 type HotRow = { personId: string; personName: string; kind: string; kindName: string; score: number; priority: number; segment: string; ownerId: string | null; ownerName: string | null;
   opportunityId: string | null; reasons: Reason[]; offer: { text: string; priceKop?: number } | null; model: string; computedAt: string; clubId: string; phone: string | null;
-  nextTaskAt: string | null; lastContactAt: string | null };
+  nextTaskAt: string | null; lastContactAt: string | null;
+  clientStatus: 'member' | 'former' | 'potential'; statusName: string; lastVisitAt: string | null; focus: string | null; focusRank: number;
+  membership: { name: string; priceKop: number; endsOn: string | null; endsOnText: string | null } | null };
 type Model = { clubId: string; version: string; metrics: { samples?: number; won?: number; aucModel?: number | null; aucRules?: number | null; note?: string }; trainedAt: string };
 
 const SEG: Record<string, [string, string]> = { hot: ['звонить первым', 'bad'], warm: ['после горячих', 'warn'], auto: ['автосообщение', ''], low: ['без срочности', ''], excluded: ['исключён', ''] };
@@ -53,6 +55,8 @@ function HotItem({ me, r, openPerson, reload, showOwner, hints }: { me: Me; r: H
         <span className="small">приоритет <b className="num">{r.priority}</b></span>
       </div>
       <div className="hot-meter"><i style={{ width: `${r.priority}%` }} /></div>
+      <ClientStatus r={r} />
+      {r.focus && <div className="small"><span className={`chip ${r.focusRank === 0 ? 'warn' : ''}`}>{r.focus}</span></div>}
       {r.reasons.length > 0 && <Reasons r={r.reasons} />}
       {r.offer?.text && <div className="small"><b>Предложение:</b> {r.offer.text}</div>}
       {hints && <HintLine hints={hints} />}
@@ -60,6 +64,18 @@ function HotItem({ me, r, openPerson, reload, showOwner, hints }: { me: Me; r: H
       <div className="row">{r.segment !== 'excluded' && <Take row={r} onDone={reload} />}{r.phone && r.segment !== 'excluded' && <ContactButtons me={me} personId={r.personId} clubId={r.clubId} />}<button className="btn sm" onClick={() => openPerson(r.personId)}>Карточка</button></div>
     </div>
   );
+}
+
+// Замечание №51: кто клиент — ЧК, БЧК или потенциальный; у ЧК последний визит, у БЧК конец членства; вид и стоимость членства
+const STATUS_CHIP: Record<string, [string, string]> = { member: ['ЧК', 'ok'], former: ['БЧК', 'warn'], potential: ['Потенциальный', ''] };
+function ClientStatus({ r }: { r: HotRow }) {
+  const [short, cls] = STATUS_CHIP[r.clientStatus] ?? ['', ''];
+  const facts = [
+    r.clientStatus === 'member' ? (r.lastVisitAt ? `последний визит ${new Date(r.lastVisitAt).toLocaleDateString('ru-RU')}` : 'визитов ещё не было') : null,
+    r.clientStatus === 'former' && r.membership?.endsOnText ? `членство закончилось ${r.membership.endsOnText}` : null,
+    r.membership ? `«${r.membership.name}» · ${rub(r.membership.priceKop)}` : null,
+  ].filter(Boolean);
+  return <div className="small"><span className={`chip ${cls}`} title={r.statusName}>{short}</span> {r.statusName}{facts.length ? ` · ${facts.join(' · ')}` : ''}</div>;
 }
 
 /* ---------- план дня ---------- */
