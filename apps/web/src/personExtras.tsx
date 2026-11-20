@@ -3,6 +3,7 @@
 //  №31 — документы клиента с камеры телефона; №48 — ответственный менеджер и второй с долей.
 import { useEffect, useRef, useState } from 'react';
 import { api, can, type Me } from './api.ts';
+import { canWriteClients } from './mobile.tsx';
 import { dt, errText, toast } from './ui.ts';
 
 const WORK = ['crm.work', 'memberships.sell', 'memberships.manage', 'acs.work'];
@@ -68,11 +69,11 @@ export function PersonHead({ me, person, reload, children }: { me: Me; person: {
 /** «Показать номер»: полный номер по нажатию, в журнал пишется, кто смотрел (№47). */
 export function ShowPhone({ me, personId, onShow }: { me: Me; personId: string; onShow: (phones: string[]) => void }) {
   const [busy, setBusy] = useState(false);
-  if (!canWork(me)) return null;
-  return <button className="btn sm" disabled={busy} title="Номер откроется полностью. В журнал запишется, кто его смотрел." onClick={async () => {
+  if (!canWork(me) && !canWriteClients(me)) return null;
+  return <button className="btn sm eye-btn" disabled={busy} aria-label="Показать номер целиком" title="Показать номер целиком. В журнал запишется, кто его смотрел." onClick={async () => {
     setBusy(true);
     try { onShow((await api<{ phones: string[] }>('POST', `/api/persons/${personId}/phone`)).phones); } catch (x) { toast(errText(x)); } finally { setBusy(false); }
-  }}>Показать номер</button>;
+  }}><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7S1 12 1 12z" /><circle cx="12" cy="12" r="3" /></svg></button>;
 }
 
 type Doc = { id: string; title: string; fileId: string; mime: string; createdAt: string; byName: string | null };
