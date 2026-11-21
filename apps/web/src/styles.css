@@ -669,6 +669,8 @@ input[type="checkbox"],input[type="radio"]{accent-color:var(--accent)}
 .msgr.wa{border-color:color-mix(in srgb,#25d366 55%,transparent)}
 .msgr.tg{border-color:color-mix(in srgb,#2aabee 55%,transparent)}
 .msgr span[aria-hidden]{font-size:.9em}
+.contact-btns{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px;font-family:inherit}
+.eye-btn{display:inline-flex;align-items:center;justify-content:center;vertical-align:middle;padding:4px 8px}
 
 /* Счётчики в меню (замечание №44) */
 .nv-n{color:var(--accent);font-weight:800;font-family:var(--f-num)}

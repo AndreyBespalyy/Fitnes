@@ -359,7 +359,7 @@ export function PersonCard({ me: meIn, id, onClose }: { me: Me; id: string; onCl
           </PersonHead></div>
           {sales && !viewOnly && <OwnerBlock me={me} personId={card.person.id} clubId={card.person.homeClubId} />}
           <div className="card kv">{card.contacts.map((c, i) => <span key={i} style={{ display: 'contents' }}><span>{c.type === 'phone' ? 'Телефон' : c.type === 'email' ? 'E-mail' : c.type === 'telegram' ? 'Telegram' : c.type === 'whatsapp' ? 'WhatsApp' : c.type}</span><span className="num">{c.type === 'phone' && phones ? (phones[card.contacts.filter((x) => x.type === 'phone').indexOf(c)] ?? c.value) : c.value}
-            {c.type === 'phone' && c.isPrimary && !phones && !viewOnly && <> <ShowPhone me={me} personId={id} onShow={setPhones} /></>}{c.type === 'phone' && c.isPrimary && <> <DialButton personId={id} label="" /> {!viewOnly && <MessengerButtons me={me} personId={id} short />}</>}</span></span>)}</div>
+            {c.type === 'phone' && c.isPrimary && !phones && !viewOnly && <> <ShowPhone me={me} personId={id} onShow={setPhones} /></>}{c.type === 'phone' && c.isPrimary && <span className="contact-btns"><DialButton personId={id} label="" /> {!viewOnly && <MessengerButtons me={me} personId={id} short />}</span>}</span></span>)}</div>
           {!can(me, 'memberships.manage') && money && card.person.autopayEnabled && <div className="item small">Подписка списывается автоматически с привязанной карты{card.person.autopayChangedAt ? ` (включено ${dt(card.person.autopayChangedAt)})` : ''}</div>}
           {can(me, 'memberships.manage') && (
             <label className="item row" style={{ gap: 10 }}>
